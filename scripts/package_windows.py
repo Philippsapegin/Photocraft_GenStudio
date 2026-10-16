@@ -6,6 +6,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path, PurePosixPath
+import re
 import shutil
 import subprocess
 import sys
@@ -114,7 +115,15 @@ def build(args):
     copy_tree(ROOT / "packaging", runtime / "packaging")
     for name in ("Setup.cmd", "Setup.ps1", "Launch.ps1", "PhotoCraft.cmd"):
         shutil.copyfile(ROOT / "packaging" / name, target / name)
-    shutil.copyfile(ROOT / "README.md", target / "README.md")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    # The package contains the user guide, while developer/source links should
+    # open the matching public tag instead of pointing at absent local files.
+    def source_link(match):
+        link = match.group(1)
+        if "://" in link or link.startswith("#"):
+            return match.group(0)
+        return "](" + installer.REPOSITORY + "/blob/v" + installer.VERSION + "/" + link + ")"
+    (target / "README.md").write_text(re.sub(r"\]\(([^)]+)\)", source_link, readme), encoding="utf-8")
     shutil.copyfile(args.editor, target / "PhotoCraft.exe")
     shutil.copyfile(args.cli, target / "photocraft-cli.exe")
     lock = json.loads((ROOT / "packaging/runtime-lock.json").read_text())

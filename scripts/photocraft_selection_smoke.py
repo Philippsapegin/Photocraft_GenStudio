@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
+sys.path.insert(0,str(ROOT / "scripts"))
 from PIL import Image
 from genfill.comfy import Cancelled
 from genstudio.service import create_server
@@ -51,11 +52,12 @@ class Host(SyntheticHost):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--exe",type=Path,default=ROOT/".runtime/photocraft-source/target/release/photocraft.exe")
+    parser.add_argument("--runtime-root",type=Path,default=ROOT)
     args=parser.parse_args()
     metadata={"executable":str(args.exe),"sha256":hashlib.sha256(args.exe.read_bytes()).hexdigest()}
     folder=ROOT/".runtime/photocraft-selection-smoke";folder.mkdir(parents=True,exist_ok=True)
     profile=folder/f"profile-{time.time_ns()}";profile.mkdir()
-    settings={**defaults(),"engine":"direct","comfyStartup":"off","directStartup":"off"}
+    settings={**defaults(),"engine":"direct","comfyStartup":"off","directStartup":"off","runtimeRoot":str(args.runtime_root.resolve())}
     host=Host(settings);server=create_server(settings,port=0,host=host)
     threading.Thread(target=server.serve_forever,daemon=True).start()
     (profile/"preferences.json").write_text(json.dumps({"genStudio":settings,"interface":{"language":"en"},"dialogs":{"photoshopShortcuts":{"imported":False}}}),encoding="utf-8")

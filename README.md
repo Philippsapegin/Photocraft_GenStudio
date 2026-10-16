@@ -105,6 +105,6 @@ The shared engine host is intended to serve these future tools; its current engi
 
 ## Development and licenses
 
-See [development and reproducible packaging](docs/DEVELOPMENT.md), [architecture](docs/ARCHITECTURE.md) and [third-party notices](THIRD_PARTY.md).
+See [development and reproducible packaging](docs/DEVELOPMENT.md), [architecture](docs/ARCHITECTURE.md), [release validation](docs/VALIDATION.md) and [third-party notices](THIRD_PARTY.md).
 
 Python host, adapters and installer: **GPL-3.0-or-later**, see [LICENSE](LICENSE). Original Rust integration and translation catalogs: **MIT OR Apache-2.0**, matching PhotoCraft; see [photocraft/LICENSE-MIT](photocraft/LICENSE-MIT) and [photocraft/LICENSE-APACHE](photocraft/LICENSE-APACHE). PhotoCraft, the separate Comfy library, LanPaint, Python and bundled dependencies retain their own notices. Model weights are separate downloads under their publisher's terms.

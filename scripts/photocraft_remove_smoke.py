@@ -14,6 +14,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "scripts"))
 from genstudio.settings import defaults
 from genstudio.lifecycle import EngineHost
 from genstudio.service import create_server
