@@ -32,7 +32,9 @@ class Process:
 class LifecycleTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="AI engine with spaces ")
-        self.root = Path(self.temp.name)
+        # Windows runners may return an 8.3 short TEMP path; production model
+        # resolution deliberately canonicalizes junctions and aliases.
+        self.root = Path(self.temp.name).resolve()
         (self.root / "main.py").write_text("# test")
         (self.root / "python.exe").write_text("# test")
         from genstudio.models import FILES
