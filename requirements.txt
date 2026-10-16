@@ -1,0 +1,2 @@
+Pillow>=10.4,<13
+websocket-client>=1.8,<2

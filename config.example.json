@@ -1,0 +1,12 @@
+{
+  "comfy_url": "http://127.0.0.1:8190",
+  "diffusion_model": "qwen_image_2.1_turbo_int8_convrot.safetensors",
+  "text_encoder": "qwen3vl_8b_w4a8.safetensors",
+  "vae": "qwen_image_2.1_vae_bf16.safetensors",
+  "clip_device": "default",
+  "cache_device": "cpu",
+  "cache_dtype": "int8",
+  "lanpaint_steps": 2,
+  "job_timeout": 1800,
+  "max_pixels": 32000000
+}

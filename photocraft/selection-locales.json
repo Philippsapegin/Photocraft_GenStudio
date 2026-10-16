@@ -1,0 +1,21 @@
+{
+  "cs": ["AI výplň", "Panel AI zadání"],
+  "de": ["KI-Füllung", "KI-Eingabeleiste"],
+  "el": ["Γέμισμα AI", "Γραμμή προτροπής AI"],
+  "es": ["Relleno con IA", "Barra de instrucciones de IA"],
+  "fr": ["Remplissage IA", "Barre de consigne IA"],
+  "hu": ["MI-kitöltés", "MI-utasítássáv"],
+  "id": ["Isian AI", "Bilah perintah AI"],
+  "it": ["Riempimento IA", "Barra istruzioni IA"],
+  "ja": ["AI塗りつぶし", "AIプロンプトバー"],
+  "ko": ["AI 채우기", "AI 프롬프트 막대"],
+  "nl": ["AI-vulling", "AI-promptbalk"],
+  "pl": ["Wypełnienie AI", "Pasek polecenia AI"],
+  "pt-br": ["Preenchimento com IA", "Barra de instruções da IA"],
+  "ru": ["Заливка ИИ", "Строка запроса ИИ"],
+  "tr": ["Yapay zekâ dolgusu", "Yapay zekâ istem çubuğu"],
+  "uk": ["Заливка ШІ", "Рядок запиту ШІ"],
+  "vi": ["Tô bằng AI", "Thanh lời nhắc AI"],
+  "zh-hans": ["AI填充", "AI提示栏"],
+  "zh-hant": ["AI填色", "AI提示列"]
+}

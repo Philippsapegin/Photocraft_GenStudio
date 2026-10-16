@@ -1,0 +1,31 @@
+{
+  "python": {
+    "version": "3.13.16",
+    "filename": "python-3.13.16-embed-amd64.zip",
+    "url": "https://www.python.org/ftp/python/3.13.16/python-3.13.16-embed-amd64.zip",
+    "sha256": "97dae5274cc54867065e8d5a3226e48c35017ed332a0fdb0e27d5b5821961297"
+  },
+  "wheels": [
+    {
+      "name": "Pillow",
+      "version": "12.3.0",
+      "url": "https://files.pythonhosted.org/packages/a6/9b/7a58e61d62be561da3a356fe2384d4059a6345fc130e23ef1c36a5b81d24/pillow-12.3.0-cp313-cp313-win_amd64.whl",
+      "sha256": "1cca606cd25738df4ed873d5ad46bbdb3d83b5cbca291f6b4ff13a4df6b0bbe8",
+      "filename": "pillow-12.3.0-cp313-cp313-win_amd64.whl"
+    },
+    {
+      "name": "websocket-client",
+      "version": "1.9.2",
+      "url": "https://files.pythonhosted.org/packages/d5/d2/cc4dc1271e464942db7ee278baae2daa99ee77cb2af744025c04da585a3e/websocket_client-1.9.2-py3-none-any.whl",
+      "sha256": "e1a673830a9c7bfa47b1cd3d5e4178f4c9651d80a4eab02c9c23a1c3ec6250ce",
+      "filename": "websocket_client-1.9.2-py3-none-any.whl"
+    },
+    {
+      "name": "pip",
+      "version": "26.2.1",
+      "url": "https://files.pythonhosted.org/packages/f3/6e/1736e5b4ae2b778ef2f81c47d797de9f891d4d8acb047a24ca37a60294dd/pip-26.2.1-py3-none-any.whl",
+      "sha256": "71138adf1f4ca900cdb7d289c21b7494329f2332b6d85f0e1c42108c0384ed3e",
+      "filename": "pip-26.2.1-py3-none-any.whl"
+    }
+  ]
+}

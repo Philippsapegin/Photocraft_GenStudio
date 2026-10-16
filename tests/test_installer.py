@@ -1,0 +1,97 @@
+"""Synthetic packaging checks. No model loading, downloads, or engine start."""
+import hashlib
+import importlib.util
+import json
+from pathlib import Path
+import tempfile
+import unittest
+from unittest.mock import patch
+
+spec = importlib.util.spec_from_file_location("installer", Path(__file__).resolve().parents[1] / "packaging/installer.py")
+installer = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(installer)
+
+
+class InstallerTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="Gen Studio install with spaces ")
+        self.root = Path(self.temp.name)
+        self.bundle = self.root / "bundle"
+        self.bundle.mkdir()
+        self.destination = self.root / "installed"
+        self.models = self.root / "shared models"
+        self.models.mkdir()
+        files = {"PhotoCraft.exe": b"fake exe", "runtime/.venv/Scripts/python.exe": b"fake python",
+                 "runtime/genstudio/control.py": b"# fixture"}
+        for name, content in files.items():
+            p = self.bundle / name
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(content)
+        installer.write_json(self.bundle / "manifest.json", {"version": installer.VERSION,
+            "files": {name: hashlib.sha256(data).hexdigest() for name, data in files.items()}})
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_manifest_rejects_tampering_and_path_traversal(self):
+        self.assertEqual(installer.verify_bundle(self.bundle)["version"], installer.VERSION)
+        (self.bundle / "PhotoCraft.exe").write_bytes(b"corrupt")
+        with self.assertRaisesRegex(ValueError, "verification failed"):
+            installer.verify_bundle(self.bundle)
+        for name in ("../secret", "C:/secret", "/secret", "a\\secret", "x:stream"):
+            with self.assertRaises(ValueError):
+                installer.bundle_path(self.bundle, name)
+
+    def test_install_never_overlays_an_unrelated_folder_or_its_own_package(self):
+        for path in (self.bundle, self.root, Path(self.root.anchor), Path.home()):
+            with self.assertRaises(ValueError):
+                installer.valid_destination(str(path), self.bundle)
+        self.destination.mkdir()
+        keep = self.destination / "my document.psd"
+        keep.write_bytes(b"untouched")
+        with self.assertRaisesRegex(ValueError, "other files"):
+            installer.valid_destination(str(self.destination), self.bundle)
+        self.assertEqual(keep.read_bytes(), b"untouched")
+
+    def test_settings_use_install_paths_and_shared_models(self):
+        runtime = self.destination / "versions/alpha/runtime"
+        request = {"engine": "direct", "modelsDir": str(self.models)}
+        settings = installer.settings_for(request, runtime, "external/python.exe")
+        self.assertEqual(settings["runtimeRoot"], str(runtime))
+        self.assertEqual(settings["modelsDir"], str(self.models.resolve()))
+        self.assertEqual(settings["directPython"], "external/python.exe")
+        self.assertEqual(settings["directStartup"], "firstRequest")
+        self.assertEqual(list(self.models.iterdir()), [])
+
+    def test_first_install_and_update_preserve_preferences_and_weights(self):
+        for name in ("Launch.ps1", "PhotoCraft.cmd"):
+            (self.bundle / name).write_text("fixture")
+        request = {"installDir": str(self.destination), "modelsDir": str(self.models),
+                   "engine": "direct", "python": "existing/python.exe"}
+        sentinel = self.models / "do not copy.safetensors"
+        sentinel.write_bytes(b"synthetic sentinel")
+        # Use the real file-copy/install/metadata transaction, mocking only the
+        # external interpreter probe and optional model discovery.
+        with patch.object(installer, "check_python", return_value="existing/python.exe"), \
+             patch("genstudio.models.resolve", return_value={}):
+            installer.install(request, self.bundle, shortcuts=False)
+            prefs_path = self.destination / "Profile/preferences.json"
+            preferences = installer.read_json(prefs_path)
+            preferences["general"] = {"theme": "light"}
+            preferences["genStudio"]["directStartup"] = "off"
+            installer.write_json(prefs_path, preferences)
+            before = installer.read_json(self.destination / "genstudio-install.json")
+            installer.install(request, self.bundle, shortcuts=False)
+            after = installer.read_json(self.destination / "genstudio-install.json")
+        self.assertNotEqual(before["executable"], after["executable"])
+        self.assertTrue(Path(before["executable"]).is_file())
+        updated = installer.read_json(prefs_path)
+        self.assertEqual(updated["general"], {"theme": "light"})
+        self.assertEqual(updated["genStudio"]["directStartup"], "off")
+        self.assertTrue(prefs_path.with_suffix(".before-setup.json").is_file())
+        self.assertEqual(list(self.models.iterdir()), [sentinel])
+        self.assertFalse(list(self.destination.rglob("*.safetensors")))
+
+
+if __name__ == "__main__":
+    unittest.main()
