@@ -108,7 +108,7 @@ fn reusable_inner(app:&PhotocraftApp)->Option<LayerId> {
 }
 pub fn show_bar(app:&mut PhotocraftApp,ui:&mut egui::Ui,xf:&ViewXform,index:usize) {
     app.ai_layers.bar_info=Value::Null;
-    if app.ui.gen_studio.hide_ai_bar || app.session.active_index()!=Some(index) {return;}
+    if app.ui.gen_studio.open || app.ui.gen_studio.hide_ai_bar || app.session.active_index()!=Some(index) {return;}
     let existing=reusable(app);
     let Some(st)=app.session.active() else {return;};
     let doc=st.doc.id;
@@ -203,6 +203,11 @@ mod tests {
             }
         },app);
         PhotocraftApp::setup_context(&h.ctx,crate::theme::ThemeKind::Studio);h.run_steps(5);
+        assert_eq!(h.state().ai_layers.bar_info["prompt"],"A red bicycle");
+        h.state_mut().ui.gen_studio.open=true;h.run_steps(3);
+        assert!(h.state().ai_layers.bar_info.is_null(),"the floating selection bar must not cover Gen Studio");
+        assert!(!h.state().ui.gen_studio.hide_ai_bar,"opening Studio does not change the display preference");
+        h.state_mut().ui.gen_studio.open=false;h.run_steps(3);
         assert_eq!(h.state().ai_layers.bar_info["prompt"],"A red bicycle");
         let ctx=h.ctx.clone();
         crate::menus::invoke(h.state_mut(),&ctx,"genstudio.ai.bar.set",json!({"enabled":false})).unwrap();h.run_steps(3);

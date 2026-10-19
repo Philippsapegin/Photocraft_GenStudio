@@ -32,6 +32,10 @@ def health():
 
 
 def run(action, settings=None, event="manual"):
+    if action == "models":
+        from .models import catalog
+        from .settings import validate
+        return catalog(validate(settings)["modelsDir"])
     current = health()
     if not current and action in ("status", "stop"):
         return {"state": "stopped", "ready": False, "owned": False, "message": "Stopped"}

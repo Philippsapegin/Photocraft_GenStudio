@@ -26,3 +26,28 @@ Model files used by installation checks are tiny sentinel fixtures, never actual
 The native UI integration also has earlier synthetic coverage; its entire upstream UI suite was not rerun for this installer change. Two unrelated localization assertions in the pinned upstream suite were previously known to fail (Turkish New Document “8 bit” and Hungarian “Enable animations”).
 
 Real neural output quality, VRAM/RAM requirements, inference timing and hardware compatibility remain unverified. The optional fresh CUDA dependency-download path is supplied but was not exercised by downloading a second GPU environment during these checks; installation validation reused the existing CUDA Python. This alpha does not claim those checks have passed.
+
+
+## 0.7.0-alpha.1 workspace ? validation, 2026-10-19
+
+The release uses the tested native binary. The installed review binary was checked through the official MCP bridge with a synthetic backend; no real model generation, weight download or CUDA inference was performed.
+
+| Check | Result |
+| --- | --- |
+| Lightweight host suite | 49 tests: 44 passed, five tensor tests skipped in this environment |
+| Tiny CPU inpainting and full-generation sampling with fake model parts | All eight passed, with CUDA initialization forbidden |
+| Native engine library | 1,457 passed, 13 ignored |
+| Native UI library | 2,329 passed, 11 ignored; the two previously known translation failures were explicitly excluded |
+| Final Gen Studio UI regressions after the last layout changes | All 15 passed: asynchronous selection capture, reference drag insertion, settings visibility, stable window height, and selection-bar suppression/restoration |
+| Engine and UI clippy, all targets, warnings denied | Passed |
+| Layer checks, generated menu parity, full WASM checks and adversarial command panic hunt | Passed; WASM retains the existing unused native-bookkeeping warning |
+| Fresh-source preparer and locked metadata | Passed, including repeat application after formatting |
+| Installed editor + matching CLI + official MCP | Passed: no-document text generation, two-result batch, unsaved new documents, selection capture, ten reference slots, chip renumbering, 2k sizing, monospaced prompt, component discovery and cancellation |
+| 24 MP synthetic reference, prepared as 1024 ? 683 | 0.294 s including transport/polling; UI inspection answered in 0.019 s while loading |
+| Existing GPU Python and actual shared model paths | Dependencies and default filenames found without importing torch or reading weights |
+
+The reference-preparation path is new, so there is no earlier implementation timing for comparison. The 24 MP timing is a local synthetic measurement, not an inference or hardware benchmark. Review screenshots and the detailed MCP report are under `.runtime/photocraft-studio-smoke`.
+
+The excluded upstream translation assertions are Turkish New Document ?8 bit? and Hungarian ?Enable animations?. No new failures remain. Real output quality, generation time and GPU memory use are still unverified.
+
+Review executable SHA-256: `2eca83201e853ce593cd2a0de2019d6a87be9d3f479d0c0fbde01f061a8db2ab`.

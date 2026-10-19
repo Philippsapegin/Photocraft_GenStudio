@@ -1,6 +1,7 @@
-"""Resolve the same local Turbo checkpoints for both engines, without copying weights."""
+"""Shared model discovery and explicit component overrides; never opens weights."""
 from pathlib import Path
 
+MODEL = "qwen-image-2.1-turbo"
 FILES = {
     "diffusion_model": ("qwen_image_2.1_turbo_int8_convrot.safetensors", ("diffusion_models", "unet")),
     "text_encoder": ("qwen3vl_8b_w4a8.safetensors", ("text_encoders", "clip")),
@@ -9,32 +10,81 @@ FILES = {
 TEXT_ENCODERS = ("qwen3vl_8b_w4a8.safetensors", "qwen3vl_8b_int8_convrot.safetensors", "qwen3vl_8b_bf16.safetensors")
 
 
-def resolve(root):
+def catalog(root):
+    root = Path(root).expanduser().resolve()
+    if not root.is_dir():
+        raise ValueError("Choose an existing Models folder in Settings.")
+    result = {"model": MODEL, "modelsDir": str(root), "textEncoders": [], "vaes": []}
+    for key, output in (("text_encoder", "textEncoders"), ("vae", "vaes")):
+        name, folders = FILES[key]
+        seen = set()
+        candidates = []
+        for folder in folders:
+            base = root / folder
+            if base.is_dir():
+                candidates.extend((p, p.relative_to(base).as_posix()) for p in base.rglob("*.safetensors"))
+        candidates.extend((p, p.name) for p in root.glob("*.safetensors") if p.name in (*TEXT_ENCODERS, FILES["vae"][0]))
+        for path, comfy_name in candidates:
+            resolved = path.resolve()
+            if not path.is_file() or not path.stat().st_size:
+                continue
+            identity = str(resolved).casefold()
+            if identity in seen:
+                continue
+            seen.add(identity)
+            compatible = path.name in TEXT_ENCODERS if key == "text_encoder" else path.name == name
+            result[output].append({"value": path.relative_to(root).as_posix(), "name": comfy_name,
+                                   "compatible": compatible})
+        names = TEXT_ENCODERS if key == "text_encoder" else (name,)
+        result[output].sort(key=lambda item: (names.index(Path(item["value"]).name)
+                            if Path(item["value"]).name in names else 100, item["value"].casefold()))
+        result[output] = result[output][:2048]
+        compatible = [item for item in result[output] if item["compatible"]]
+        result["defaultTextEncoder" if key == "text_encoder" else "defaultVae"] = compatible[0]["value"] if compatible else ""
+    return result
+
+
+def resolve(root, text_encoder="", vae="", model=MODEL):
+    if model != MODEL:
+        raise ValueError("Unsupported model: " + str(model))
     root = Path(root).expanduser().resolve()
     if not root.is_dir():
         raise ValueError("Choose an existing Models folder in Gen Studio.")
+    overrides = {"text_encoder": text_encoder, "vae": vae}
     found = {}
     for key, (name, folders) in FILES.items():
-        names = TEXT_ENCODERS if key == "text_encoder" else (name,)
+        override = overrides.get(key, "")
+        if not isinstance(override, str):
+            raise ValueError("Invalid model component selection.")
+        if override and (Path(override).is_absolute() or ".." in Path(override.replace(chr(92), "/")).parts or ":" in override):
+            raise ValueError("Choose a component inside the Models folder.")
+        names = (override,) if override else TEXT_ENCODERS if key == "text_encoder" else (name,)
         candidates = []
         for candidate_name in names:
-            for folder in folders:
-                base = root / folder
-                if base.is_dir():
-                    candidates.extend((path, path.relative_to(base).as_posix()) for path in base.rglob(candidate_name) if path.is_file())
-            flat = root / candidate_name
-            if flat.is_file():
-                candidates.append((flat, candidate_name))
+            explicit = root / candidate_name
+            if override and explicit.is_file():
+                folder = next((f for f in folders if explicit.is_relative_to(root / f)), None)
+                candidates.append((explicit, explicit.relative_to(root / folder).as_posix() if folder else explicit.name))
+            else:
+                for folder in folders:
+                    base = root / folder
+                    if base.is_dir():
+                        candidates.extend((path, path.relative_to(base).as_posix()) for path in base.rglob(candidate_name) if path.is_file())
+                flat = root / candidate_name
+                if flat.is_file():
+                    candidates.append((flat, candidate_name))
             if candidates:
                 name = candidate_name
                 break
-        # Junctions/symlinks may expose the same file more than once.
         unique = {str(path.resolve()).casefold(): (path, relative) for path, relative in candidates}
         if not unique:
-            raise ValueError(f"Models folder is missing {folders[0]}/{name}. No weights were downloaded.")
+            raise ValueError(f"Models folder is missing {folders[0]}/{override or name}. No weights were downloaded.")
         if len(unique) > 1:
-            raise ValueError(f"Models folder contains multiple copies of {name}; choose a more specific folder.")
+            raise ValueError(f"Models folder contains multiple copies of {name}; choose a component in Advanced settings.")
         path, relative = next(iter(unique.values()))
+        # Existing ComfyUI installations often use model-directory junctions.
+        # The choice is lexically inside the selected source; follow those links
+        # in place instead of forcing users to duplicate their checkpoint files.
         if not path.stat().st_size:
             raise ValueError(f"Model file is empty: {path}")
         found[key] = {"path": str(path.resolve()), "name": relative}
@@ -42,7 +92,6 @@ def resolve(root):
 
 
 def extra_paths(root):
-    """ComfyUI's own YAML format; paths are serialized with JSON (a YAML subset)."""
     root = str(Path(root).expanduser().resolve())
     return {"genstudio": {"base_path": root, "is_default": True,
                           "diffusion_models": "diffusion_models\nunet\n.",

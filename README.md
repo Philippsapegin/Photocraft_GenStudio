@@ -6,7 +6,7 @@ Local AI removal and generative fill integrated into [PhotoCraft](https://github
 
 ## Install
 
-1. Download **[PhotoCraft-GenStudio-0.6.1-alpha.1-windows-x64.zip](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/download/v0.6.1-alpha.1/PhotoCraft-GenStudio-0.6.1-alpha.1-windows-x64.zip)** from the [alpha release](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/tag/v0.6.1-alpha.1). Extract the entire ZIP, then double-click **Setup.cmd**. GitHub's “Source code” ZIP is for developers and does not contain binaries.
+1. Download **[PhotoCraft-GenStudio-0.7.0-alpha.1-windows-x64.zip](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/download/v0.7.0-alpha.1/PhotoCraft-GenStudio-0.7.0-alpha.1-windows-x64.zip)** from the [alpha release](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/tag/v0.7.0-alpha.1). Extract the entire ZIP, then double-click **Setup.cmd**. GitHub's “Source code” ZIP is for developers and does not contain binaries.
 2. Choose an install folder on any drive and your **Models folder**. Existing ComfyUI users can select `ComfyUI\models`; everyone else can use a separate folder. Setup reads models in place and never downloads, copies or converts weights. An empty models folder is accepted so you can add files later.
 3. Choose **Direct Qwen** or **ComfyUI**, then click **Install**. With Direct, reuse a CUDA Python (including ComfyUI's `python_embeded\python.exe`) or let setup install a separate runtime. A separate runtime downloads several GB of **software dependencies**, not models. With ComfyUI, select its folder and Python; the optional checked box installs the bundled LanPaint extension only if missing.
 4. Open the separate **PhotoCraft Gen Studio** shortcut. All settings are in **Filter → Plug-ins → Gen Studio…**. Automatic engine startup defaults to **On first AI request**.
@@ -74,6 +74,8 @@ Results are applied immediately in the document. Failed or cancelled requests le
 ## Gen Studio settings
 
 Open **Filter → Plug-ins → Gen Studio…**, even without an open document.
+
+The **0.7 alpha generation workspace** includes a wide prompt, selection/file reference, nine additional references, numbered prompt chips, batches and 1k/2k output. Settings and Advanced components are collapsed by default, with separate Model and Engine selectors. See [workspace behavior and local validation](docs/WORKSPACE.md). The Windows download includes this workspace.
 
 - **Engine:** Direct Qwen, or Qwen through ComfyUI.
 - **Automatic start:** **Off**, **When PhotoCraft starts**, or **On first AI request**. Each engine remembers its own choice.

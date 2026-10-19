@@ -43,6 +43,7 @@ class EngineHost:
         self.process = None
         self.logs = []
         self.lock = threading.RLock()
+        self.work_lock = threading.RLock()
         self.busy = False
         self.message = "Stopped"
         self.runtime = ROOT / ".runtime/genstudio"
@@ -52,7 +53,8 @@ class EngineHost:
         config["comfy_url"] = self.settings["comfyUrl"].rstrip("/")
         from .models import resolve
         try:
-            config.update({key: value["name"] for key, value in resolve(self.settings["modelsDir"]).items()})
+            config.update({key: value["name"] for key, value in resolve(self.settings["modelsDir"],
+                self.settings["textEncoder"], self.settings["vae"], self.settings["model"]).items()})
         except (ValueError, OSError):
             pass  # An actionable error is returned on Start, without breaking the settings service.
         return config
@@ -74,7 +76,7 @@ class EngineHost:
             if self.busy:
                 raise ValueError("Wait for the current AI request before changing the engine.")
             # Policy-only changes do not restart a running engine.
-            operational = ("engine", "comfyUrl", "comfyDir", "comfyPython", "directPython", "modelsDir")
+            operational = ("model", "textEncoder", "vae", "engine", "comfyUrl", "comfyDir", "comfyPython", "directPython", "modelsDir")
             if any(settings[k] != self.settings[k] for k in operational):
                 self.stop()
             self.settings = settings
@@ -86,7 +88,9 @@ class EngineHost:
             if self.engine == "comfy":
                 return isinstance(info.get("system"), dict)
             return (info.get("service") == "genstudio-direct" and info.get("ready") is True
-                    and Path(info.get("modelsDir", "")).resolve() == Path(self.settings["modelsDir"]).resolve())
+                    and Path(info.get("modelsDir", "")).resolve() == Path(self.settings["modelsDir"]).resolve()
+                    and info.get("textEncoder", "") == self.settings["textEncoder"]
+                    and info.get("vae", "") == self.settings["vae"])
         except (OSError, ValueError, URLError):
             return False
 
@@ -101,7 +105,7 @@ class EngineHost:
                     "busy": self.busy, "message": "Ready" if ready else self.message,
                     "startup": self.policy()}
 
-    def ensure(self, event="request", progress=lambda message: None, cancel=None):
+    def ensure(self, event="request", progress=lambda message: None, cancel=None, studio=False):
         if event not in ("manual", "request", "appStart"):
             raise ValueError("Unknown start event.")
         with self.lock:
@@ -109,10 +113,10 @@ class EngineHost:
                 from genfill.comfy import Cancelled
                 raise Cancelled()
             from .models import resolve, extra_paths
-            resolve(self.settings["modelsDir"])
+            resolve(self.settings["modelsDir"], self.settings["textEncoder"], self.settings["vae"], self.settings["model"])
             if self.probe():
                 if self.engine == "comfy":
-                    _, problems = ComfyClient(self.config()).inspect()
+                    _, problems = ComfyClient(self.config()).inspect(studio=True) if studio else ComfyClient(self.config()).inspect()
                     if problems:
                         raise ValueError("\n".join(problems))
                 return self.status()
@@ -141,7 +145,8 @@ class EngineHost:
                 python = Path(self.settings["directPython"])
                 if not python.is_file():
                     raise ValueError("Direct Qwen runtime is not installed. Run scripts/Setup-Direct.ps1, then select its Python executable.")
-                command = [str(python), "-X", "utf8", str(ROOT / "scripts/run_direct.py"), "--models", self.settings["modelsDir"]]
+                command = [str(python), "-X", "utf8", str(ROOT / "scripts/run_direct.py"), "--models", self.settings["modelsDir"],
+                           "--text-encoder", self.settings["textEncoder"], "--vae", self.settings["vae"]]
                 cwd = ROOT
             if self.process is None or self.process.poll() is not None:
                 self.runtime.mkdir(parents=True, exist_ok=True)
@@ -157,7 +162,7 @@ class EngineHost:
                     raise Cancelled()
                 if self.probe():
                     if self.engine == "comfy":
-                        _, problems = ComfyClient(self.config()).inspect()
+                        _, problems = ComfyClient(self.config()).inspect(studio=True) if studio else ComfyClient(self.config()).inspect()
                         if problems:
                             raise ValueError("\n".join(problems))
                     self.message = "Ready"
@@ -196,6 +201,10 @@ class EngineHost:
         return {}, []
 
     def generate(self, image, mask, seed, prompt, cancel, progress):
+        with self.work_lock:
+            return self._generate(image, mask, seed, prompt, cancel, progress)
+
+    def _generate(self, image, mask, seed, prompt, cancel, progress):
         with self.lock:
             self.busy = True
         try:
@@ -207,3 +216,17 @@ class EngineHost:
         finally:
             with self.lock:
                 self.busy = False
+
+    def generate_studio(self, references, seed, prompt, width, height, cancel, progress):
+        with self.work_lock:
+            with self.lock:
+                self.busy = True
+            try:
+                self.ensure("request", progress, cancel, studio=True)
+                if self.engine == "comfy":
+                    return ComfyClient(self.config()).generate_studio(references, seed, prompt, width, height, cancel, progress)
+                from .direct_client import generate_studio
+                return generate_studio(references, seed, prompt, width, height, cancel, progress)
+            finally:
+                with self.lock:
+                    self.busy = False

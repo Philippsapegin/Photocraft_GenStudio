@@ -11,6 +11,40 @@ REQUIRED_NODES = (
     "LanPaint_ImageEncode", "LanPaint_SamplerCustom", "ManualSigmas",
     "KSamplerSelect", "VAEDecode", "SaveImage",
 )
+STUDIO_NODES = ("UNETLoader", "CLIPLoader", "VAELoader", "LoadImage", "JoinImageWithAlpha",
+                "TextEncodeQwenImage21", "QwenImage21Cache", "ManualSigmas", "KSamplerSelect",
+                "SamplerCustom", "LatentUpscale", "VAEDecode", "SaveImage")
+
+
+def studio_workflow(config, references, seed, prompt, width, height, object_info):
+    def node(kind, **inputs):
+        return {"class_type": kind, "inputs": inputs}
+    schema = object_info["TextEncodeQwenImage21"]["input"]
+    flat = "image_1" in {**schema.get("required", {}), **schema.get("optional", {})}
+    inputs = {"clip": ["2", 0], "vae": ["3", 0], "prompt": prompt, "negative_prompt": "", "resolution": 0}
+    workflow = {
+        "1": node("UNETLoader", unet_name=config["diffusion_model"], weight_dtype="default"),
+        "2": node("CLIPLoader", clip_name=config["text_encoder"], type="qwen_image", device=config.get("clip_device", "default")),
+        "3": node("VAELoader", vae_name=config["vae"]),
+        "4": node("QwenImage21Cache", model=["1", 0], device=config.get("cache_device", "cpu"), dtype=config.get("cache_dtype", "int8")),
+        "8": {"class_type": "TextEncodeQwenImage21", "inputs": inputs},
+        # This generic node uses /8 pixel units; Qwen 2.1 has a /16 latent grid.
+        # Resize only the empty target latent, retaining reference aspect ratios.
+        "9": node("LatentUpscale", samples=["8", 2], upscale_method="nearest-exact", width=width // 2, height=height // 2, crop="disabled"),
+        "10": node("ManualSigmas", sigmas=", ".join(str(x) for x in TURBO_SIGMAS)),
+        "11": node("KSamplerSelect", sampler_name="euler"),
+        "12": node("SamplerCustom", model=["4", 0], add_noise=True, noise_seed=seed, cfg=1.0,
+                   positive=["8", 0], negative=["8", 1], sampler=["11", 0], sigmas=["10", 0], latent_image=["9", 0]),
+        "13": node("VAEDecode", samples=["12", 0], vae=["3", 0]),
+        "14": node("SaveImage", images=["13", 0], filename_prefix="PhotoCraft_GenStudio"),
+    }
+    for index, filename in enumerate(references):
+        key = str(20 + index * 2)
+        alpha = str(21 + index * 2)
+        workflow[key] = node("LoadImage", image=filename)
+        workflow[alpha] = node("JoinImageWithAlpha", image=[key, 0], alpha=[key, 1])
+        inputs[("" if flat else "images.") + f"image_{index + 1}"] = [alpha, 0]
+    return workflow
 
 
 def edit_prompt(mode: str, prompt: str) -> str:

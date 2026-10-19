@@ -7,13 +7,15 @@ from urllib.parse import urlparse
 ROOT = Path(__file__).resolve().parents[1]
 SETTINGS_PATH = ROOT / "config.photocraft.json"
 ENGINES = ("comfy", "direct")
+MODEL = "qwen-image-2.1-turbo"
 POLICIES = ("off", "appStart", "firstRequest")
 
 
 def defaults():
     from genfill.server import load_config
     old = load_config()
-    return {"engine": "comfy", "comfyStartup": "firstRequest", "directStartup": "firstRequest",
+    return {"model": MODEL, "textEncoder": "", "vae": "",
+            "engine": "comfy", "comfyStartup": "firstRequest", "directStartup": "firstRequest",
             "comfyUrl": old["comfy_url"], "comfyDir": old.get("comfy_dir", ""),
             "comfyPython": old.get("comfy_python", ""),
             "directPython": old.get("comfy_python", str(ROOT / ".runtime/qwen-direct/Scripts/python.exe")),
@@ -42,6 +44,8 @@ def validate(value):
             raise ValueError("Invalid engine setting: " + key)
     if result["engine"] not in ENGINES:
         raise ValueError("Unknown engine.")
+    if result["model"] != MODEL:
+        raise ValueError("Unsupported model. Select Qwen Image 2.1 Turbo.")
     if any(result[key] not in POLICIES for key in ("comfyStartup", "directStartup")):
         raise ValueError("Unknown automatic start policy.")
     url = urlparse(result["comfyUrl"])

@@ -56,8 +56,9 @@ def import_core(cpu=False):
 
 
 class DirectPipeline:
-    def __init__(self, models):
+    def __init__(self, models, text_encoder="", vae=""):
         self.models = Path(models)
+        self.text_encoder, self.vae = text_encoder, vae
         self.pipe = None
 
     def check(self):
@@ -67,7 +68,7 @@ class DirectPipeline:
         if not (CORE / "comfy/sd.py").is_file():
             problems.append("Direct model library is missing. Run scripts/Setup-Direct.ps1.")
         try:
-            resolve(self.models)
+            resolve(self.models, self.text_encoder, self.vae)
         except (ValueError, OSError) as error:
             problems.append(str(error))
         # No torch imports, CUDA initialization, weights loading or downloads here.
@@ -79,7 +80,7 @@ class DirectPipeline:
         problems = self.check()
         if problems:
             raise RuntimeError("\n".join(problems))
-        files = resolve(self.models)
+        files = resolve(self.models, self.text_encoder, self.vae)
         sd, _ = import_core()
         import comfy.utils
         progress("Loading Qwen 2.1 Turbo · existing INT8 checkpoints…")
@@ -91,6 +92,51 @@ class DirectPipeline:
         vae = sd.VAE(sd=comfy.utils.load_torch_file(files["vae"]["path"], safe_load=True))
         self.pipe = model, clip, vae
         return self.pipe
+
+    def generate_studio(self, references, seed, prompt, width, height, cancel, progress):
+        """Qwen 2.1 generation: zero target latent and up to ten image slots."""
+        if cancel.is_set():
+            raise Cancelled()
+        if len(references) > 10 or width % 32 or height % 32 or not 256 <= width <= 2048 or not 256 <= height <= 2048:
+            raise ValueError("Invalid Qwen generation dimensions or reference count.")
+        model, clip, vae = self.load(progress)
+        import numpy as np
+        import torch
+        import comfy.sample
+        import comfy.samplers
+        from PIL import Image
+        from genfill.workflow import TURBO_SIGMAS
+
+        def check():
+            if cancel.is_set():
+                raise Cancelled()
+
+        def step(index, denoised, noisy, total):
+            check()
+            progress(f"Qwen 2.1 Turbo · {index + 1}/{total}")
+
+        with torch.inference_mode():
+            images, latents = [], []
+            for index, reference in enumerate(references):
+                check()
+                progress(f"Encoding image {index + 1}…")
+                pixels = torch.from_numpy(np.array(reference.convert("RGBA")).astype(np.float32) / 255.0).unsqueeze(0)
+                images.append(pixels[..., :3] * pixels[..., 3:] + 1.0 - pixels[..., 3:])
+                latents.append(vae.encode(pixels))
+            check()
+            conditioning = clip.encode_from_tokens_scheduled(clip.tokenize(
+                prompt, images=images, keep_vision=not latents, prevent_empty_text=True))
+            positive = [[embedding, {**metadata, **({"reference_latents": latents} if latents else {})}]
+                        for embedding, metadata in conditioning]
+            latent = torch.zeros((1, 64, height // 16, width // 16), dtype=torch.float32, device="cpu")
+            noise = comfy.sample.prepare_noise(latent, seed)
+            check()
+            samples = comfy.sample.sample_custom(model, noise, 1.0, comfy.samplers.sampler_object("euler"),
+                torch.tensor(TURBO_SIGMAS, dtype=torch.float32), positive, positive, latent,
+                callback=step, disable_pbar=True, seed=seed)
+            check()
+            decoded = vae.decode(samples).detach().float().cpu().numpy()[0]
+            return Image.fromarray((np.clip(decoded, 0, 1) * 255).round().astype(np.uint8)).convert("RGBA")
 
     def generate(self, image, mask, seed, prompt, cancel, progress):
         if cancel.is_set():

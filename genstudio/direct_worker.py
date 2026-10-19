@@ -15,8 +15,8 @@ from .core_pipeline import DirectPipeline
 
 
 class Worker:
-    def __init__(self, model):
-        self.pipeline = DirectPipeline(model)
+    def __init__(self, model, text_encoder="", vae=""):
+        self.pipeline = DirectPipeline(model, text_encoder, vae)
         self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="qwen-direct")
         self.jobs = {}
         self.lock = threading.RLock()
@@ -24,13 +24,19 @@ class Worker:
     def submit(self, data):
         if not isinstance(data, dict):
             raise ValueError("Expected a generation request object.")
-        image, mask = decode_png(data.get("image"), 1024 * 1024), decode_png(data.get("mask"), 1024 * 1024)
-        if image.size != mask.size:
-            raise ValueError("Image and mask sizes differ.")
+        studio = None
+        if data.get("kind") == "studio":
+            from .studio import request
+            studio = request(data)
+            image = mask = None
+        else:
+            image, mask = decode_png(data.get("image"), 1024 * 1024), decode_png(data.get("mask"), 1024 * 1024)
+            if image.size != mask.size:
+                raise ValueError("Image and mask sizes differ.")
         from genfill.image_ops import bounded_int
         seed = bounded_int(data.get("seed", 0), 0, 2**53 - 1, "Seed")
         prompt = data.get("prompt")
-        if not isinstance(prompt, str) or len(prompt) > 8000:
+        if not isinstance(prompt, str) or len(prompt.encode("utf-8")) > (12000 if studio else 8000):
             raise ValueError("Invalid prompt.")
         with self.lock:
             if any(job["state"] not in ("done", "error", "cancelled") for job in self.jobs.values()):
@@ -39,20 +45,20 @@ class Worker:
             uid = uuid.uuid4().hex
             job = {"id": uid, "state": "queued", "message": "Queued", "cancel": threading.Event()}
             self.jobs[uid] = job
-            self.pool.submit(self.run, job, image, mask, seed, prompt)
+            self.pool.submit(self.run, job, image, mask, seed, prompt, studio)
             return self.public(job)
 
     def public(self, job):
         return {key: job[key] for key in ("id", "state", "message")}
 
-    def run(self, job, image, mask, seed, prompt):
+    def run(self, job, image, mask, seed, prompt, studio=None):
         def progress(message):
             with self.lock:
                 job["message"] = message
         try:
             with self.lock:
                 job["state"] = "running"
-            output = self.pipeline.generate(image, mask, seed, prompt, job["cancel"], progress)
+            output = self.pipeline.generate_studio(studio["references"], seed, prompt, studio["width"], studio["height"], job["cancel"], progress) if studio else self.pipeline.generate(image, mask, seed, prompt, job["cancel"], progress)
             with self.lock:
                 if job["cancel"].is_set():
                     raise Cancelled()
@@ -78,12 +84,14 @@ class Handler(BaseHTTPRequestHandler):
                 problems = worker.pipeline.check()
                 return send(200, {"service": "genstudio-direct", "ready": not problems,
                                   "inpaint_protocol": 2,
+                                  "studio_protocol": 1,
+                                  "textEncoder": worker.pipeline.text_encoder, "vae": worker.pipeline.vae,
                                   "modelsDir": str(worker.pipeline.models.resolve()), "problems": problems})
             if self.command == "POST" and self.path == "/jobs":
                 if self.headers.get("Content-Type", "").split(";")[0] != "application/json":
                     raise ValueError("JSON content type required.")
                 length = int(self.headers.get("Content-Length", "0"))
-                if not 0 < length < 24 * 1024 * 1024:
+                if not 0 < length <= 96 * 1024 * 1024:
                     raise ValueError("Invalid request size.")
                 return send(202, worker.submit(json.loads(self.rfile.read(length))))
             parts = self.path.strip("/").split("/")
@@ -109,8 +117,10 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--models", required=True)
+    parser.add_argument("--text-encoder", default="")
+    parser.add_argument("--vae", default="")
     args = parser.parse_args()
-    worker = Worker(args.models)
+    worker = Worker(args.models, args.text_encoder, args.vae)
     problems = worker.pipeline.check()
     if problems:
         raise SystemExit("\n".join(problems))

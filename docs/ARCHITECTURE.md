@@ -34,6 +34,8 @@ Direct inpainting protocol 2 supplies an opaque neutral placeholder over the mis
 
 AI layer variants are stored as opaque additional-layer metadata (`gsAI`, `gVxx`, `gTxx`) plus ordinary raster pixels/masks. This preserves galleries in native/PSD round trips while allowing other editors to display the selected raster result. The history snapshots share image blobs; galleries cap stored pixels and variant count.
 
+The unreleased full-generation workspace uses `/studio/jobs`, with up to ten ordered references and a sequential batch of up to eight outputs. It starts from a zero target latent with no inpaint mask, and imports results as new documents. Native file preparation runs off the GUI thread; component discovery only inspects filenames. Model, engine, text-encoder and VAE choices are separate settings. See [the workspace preview](WORKSPACE.md).
+
 ## Lifecycle and installation
 
 The host starts/stops only its own processes and attaches to an existing engine without taking ownership. Startup policies are independent for Direct and ComfyUI. Readiness probes do not load model weights. Settings and startup work run off the GUI thread; progress feeds persistent canvas masks and optional bars.

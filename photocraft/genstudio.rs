@@ -27,6 +27,9 @@ pub enum Startup {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct Settings {
+    pub model: String,
+    pub text_encoder: String,
+    pub vae: String,
     pub engine: Engine,
     pub comfy_startup: Startup,
     pub direct_startup: Startup,
@@ -45,16 +48,16 @@ impl Default for Settings {
         // Release installs keep their runtime beside the editor. Never bake a
         // developer's filesystem paths into a distributed executable.
         #[cfg(not(target_arch = "wasm32"))]
-        let installed = std::env::current_exe().ok().and_then(|exe| {
-            exe.parent().and_then(|dir| {
-                read_installed_defaults(&dir.join("runtime/config.photocraft.json"))
-            })
-        });
+        let installed =
+            std::env::current_exe().ok().and_then(|exe| exe.parent().and_then(|dir| read_installed_defaults(&dir.join("runtime/config.photocraft.json"))));
         #[cfg(target_arch = "wasm32")]
         let installed: Option<Value> = None;
         let v = installed.unwrap_or(compiled);
         let string = |key: &str| v.get(key).and_then(Value::as_str).unwrap_or_default().to_owned();
         Self {
+            model: v.get("model").and_then(Value::as_str).unwrap_or("qwen-image-2.1-turbo").to_owned(),
+            text_encoder: string("textEncoder"),
+            vae: string("vae"),
             engine: if v.get("engine").and_then(Value::as_str) == Some("direct") { Engine::Direct } else { Engine::Comfy },
             comfy_startup: Startup::FirstRequest,
             direct_startup: Startup::FirstRequest,
@@ -76,7 +79,9 @@ fn read_installed_defaults(path: &std::path::Path) -> Option<Value> {
     let file = std::fs::File::open(path).ok()?;
     let mut text = String::new();
     file.take(64 * 1024 + 1).read_to_string(&mut text).ok()?;
-    if text.len() > 64 * 1024 { return None; }
+    if text.len() > 64 * 1024 {
+        return None;
+    }
     let value: Value = serde_json::from_str(text.trim_start_matches('\u{feff}')).ok()?;
     value.as_object()?;
     Some(value)
@@ -96,10 +101,23 @@ impl Settings {
         }
     }
     pub fn validate(&self) -> std::result::Result<(), String> {
-        for s in [&self.comfy_url, &self.comfy_dir, &self.comfy_python, &self.direct_python, &self.models_dir, &self.runtime_root] {
+        for s in [
+            &self.model,
+            &self.text_encoder,
+            &self.vae,
+            &self.comfy_url,
+            &self.comfy_dir,
+            &self.comfy_python,
+            &self.direct_python,
+            &self.models_dir,
+            &self.runtime_root,
+        ] {
             if s.len() > 4096 || s.contains('\0') {
                 return Err("Invalid Gen Studio path or address".into());
             }
+        }
+        if self.model != "qwen-image-2.1-turbo" {
+            return Err("Unsupported model".into());
         }
         if self.runtime_root.trim().is_empty() {
             return Err("Gen Studio runtime folder is required".into());
@@ -110,49 +128,102 @@ impl Settings {
 
 #[derive(Default)]
 pub struct Runtime {
+    pub catalog: Arc<Mutex<Value>>,
     pub state: Arc<Mutex<Snapshot>>,
     pub queue: crate::genstudio_queue::Queue,
-    pub selection_cache: Mutex<Option<(std::sync::Weak<photocraft_doc::Document>,photocraft_geom::Rect)>>,
+    pub selection_cache: Mutex<Option<(std::sync::Weak<photocraft_doc::Document>, photocraft_geom::Rect)>>,
 }
 
 #[derive(Default)]
 pub struct Snapshot {
     pub busy: bool,
     pub value: Value,
-    epoch:u64,
-    probing:bool,
+    epoch: u64,
+    probing: bool,
 }
 
 /// Refresh idle status without blocking controls or starting an engine.
-pub fn probe(s:&Session) {
-    #[cfg(not(target_arch="wasm32"))]
+pub fn probe(s: &Session) {
+    #[cfg(not(target_arch = "wasm32"))]
     {
-        if std::env::var_os("GENSTUDIO_NO_PROCESS").is_some_and(|v|v=="1") { return; }
-        let settings=s.prefs().gen_studio.clone();
-        let shared=s.gen_studio.state.clone();
-        let epoch={
-            let mut state=shared.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            if state.busy || state.probing { return; }
-            state.probing=true;
+        if std::env::var_os("GENSTUDIO_NO_PROCESS").is_some_and(|v| v == "1") {
+            return;
+        }
+        let settings = s.prefs().gen_studio.clone();
+        let shared = s.gen_studio.state.clone();
+        let epoch = {
+            let mut state = shared.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if state.busy || state.probing {
+                return;
+            }
+            state.probing = true;
             state.epoch
         };
-        let worker=shared.clone();
-        if std::thread::Builder::new().name("genstudio-status".into()).spawn(move || {
-            let result=control(&settings,"status","manual");
-            let mut state=worker.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            state.probing=false;
-            if state.epoch==epoch && !state.busy {
-                state.value=result.unwrap_or_else(|e|json!({"state":"error","ready":false,"message":e}));
-            }
-        }).is_err() { shared.lock().unwrap_or_else(std::sync::PoisonError::into_inner).probing=false; }
+        let worker = shared.clone();
+        if std::thread::Builder::new()
+            .name("genstudio-status".into())
+            .spawn(move || {
+                let result = control(&settings, "status", "manual");
+                let mut state = worker.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                state.probing = false;
+                if state.epoch == epoch && !state.busy {
+                    state.value = result.unwrap_or_else(|e| json!({"state":"error","ready":false,"message":e}));
+                }
+            })
+            .is_err()
+        {
+            shared.lock().unwrap_or_else(std::sync::PoisonError::into_inner).probing = false;
+        }
     }
-    #[cfg(target_arch="wasm32")]
-    let _=s;
+    #[cfg(target_arch = "wasm32")]
+    let _ = s;
 }
 
 pub fn snapshot(s: &Session) -> Value {
     let state = s.gen_studio.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    json!({"pending": state.busy, "status": state.value, "settings": s.prefs().gen_studio})
+    json!({"pending": state.busy, "status": state.value, "settings": s.prefs().gen_studio,
+        "models":s.gen_studio.catalog.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()})
+}
+
+/// Scan components in a worker, independently of engine startup and model loading.
+pub fn discover(s: &Session, settings: Settings) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        if std::env::var_os("GENSTUDIO_NO_PROCESS").is_some_and(|v| v == "1") {
+            return;
+        }
+        let key = format!("{}\n{}", settings.runtime_root, settings.models_dir);
+        let shared = s.gen_studio.catalog.clone();
+        {
+            let mut catalog = shared.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if catalog["source"].as_str() == Some(&key) {
+                return;
+            }
+            *catalog = json!({"source":key,"pending":true});
+        }
+        let worker = shared.clone();
+        let source = key.clone();
+        if std::thread::Builder::new()
+            .name("genstudio-models".into())
+            .spawn(move || {
+                let mut result = control(&settings, "models", "manual").unwrap_or_else(|e| json!({"message":e}));
+                if !result.is_object() {
+                    result = json!({"message":"Invalid models catalog"});
+                }
+                result["source"] = json!(source);
+                result["pending"] = json!(false);
+                let mut catalog = worker.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                if catalog["source"].as_str() == Some(&source) {
+                    *catalog = result;
+                }
+            })
+            .is_err()
+        {
+            *shared.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = json!({"source":key,"message":"Could not scan models folder"});
+        }
+    }
+    #[cfg(target_arch = "wasm32")]
+    let _ = (s, settings);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -216,7 +287,7 @@ fn begin(s: &mut Session, action: &'static str, event: &'static str) -> Result<V
                 return Err(EngineError::Other("Gen Studio is already processing an engine command".into()));
             }
             state.busy = true;
-            state.epoch=state.epoch.wrapping_add(1);
+            state.epoch = state.epoch.wrapping_add(1);
             let starting = matches!(action, "start" | "ensure");
             state.value = json!({"state":if starting {"starting"} else {"working"}, "message": if starting { "Starting the local AI engine. This may take a moment." } else { "Checking engine…" }});
         }
@@ -263,7 +334,7 @@ pub fn specs() -> Vec<CommandSpec> {
         make(
             "genstudio.engine.configure",
             "Configure Gen Studio Engine",
-            "{engine, comfyStartup, directStartup, comfyUrl, comfyDir, comfyPython, directPython, modelsDir, runtimeRoot}",
+            "{model, engine, textEncoder, vae, comfyStartup, directStartup, comfyUrl, comfyDir, comfyPython, directPython, modelsDir, runtimeRoot}",
             set,
         ),
     ]

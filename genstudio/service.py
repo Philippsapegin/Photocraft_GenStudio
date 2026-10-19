@@ -15,6 +15,9 @@ class Handler(JobHandler):
     def dispatch(self):
         if self.headers.get("Origin"):
             return self.reject_browser()
+        from .studio import dispatch
+        if dispatch(self):
+            return
         if self.command == "GET" and self.path == "/health":
             return self.send_json(200, {"service": "photocraft-genstudio", "version": VERSION})
         if self.command == "POST" and self.path == "/engine":
@@ -37,6 +40,9 @@ class Handler(JobHandler):
                     with self.server.manager.lock:
                         active = any(job.state not in ("done", "error", "cancelled")
                                      for job in self.server.manager.jobs.values())
+                    with self.server.studio.lock:
+                        active |= any(job.state not in ("done", "error", "cancelled")
+                                      for job in self.server.studio.jobs.values())
                     if active and (changed or action == "stop"):
                         raise ValueError("Wait for the current AI request before changing the engine.")
                     if changed:
@@ -63,6 +69,8 @@ def create_server(settings=None, port=8766, host=None):
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     server.host = host
     server.manager = JobManager(host.config(), client=host)
+    from .studio import StudioJobs
+    server.studio = StudioJobs(host)
     return server
 
 
@@ -71,6 +79,7 @@ def main():
     try:
         server.serve_forever(poll_interval=0.5)
     finally:
+        server.studio.shutdown()
         server.manager.shutdown()
         server.host.stop()
         server.server_close()

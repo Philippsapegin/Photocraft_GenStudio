@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 from prepare_fill_ux import prepare as prepare_fill_ux
 from prepare_selection_fill import prepare as prepare_selection_fill
+from prepare_studio import prepare as prepare_studio
 
 
 def replace(path, old, new):
@@ -61,6 +62,7 @@ def prepare(source):
         prepare_remove(engine, ui)
         prepare_fill_ux(source, replace)
         prepare_selection_fill(source, replace)
+        prepare_studio(source, replace)
         return
     replace(engine / "lib.rs", "pub mod plugin_cmds;", "pub mod plugin_cmds;\npub mod genstudio;")
     replace(engine / "lib.rs", "pub struct Session {", "pub struct Session {\n    pub gen_studio: genstudio::Runtime,")
@@ -79,6 +81,7 @@ def prepare(source):
     prepare_remove(engine, ui)
     prepare_fill_ux(source, replace)
     prepare_selection_fill(source, replace)
+    prepare_studio(source, replace)
 
 
 def prepare_remove(engine, ui):

@@ -11,7 +11,7 @@ import uuid
 from PIL import Image
 
 from .image_ops import png_bytes
-from .workflow import REQUIRED_NODES, build_workflow
+from .workflow import REQUIRED_NODES, STUDIO_NODES, build_workflow, studio_workflow
 from .comfy_progress import ComfyProgress
 
 
@@ -51,10 +51,10 @@ class ComfyClient:
             return value[0]
         return value[1].get("options", []) if len(value) > 1 else []
 
-    def inspect(self) -> tuple[dict, list[str]]:
+    def inspect(self, studio=False) -> tuple[dict, list[str]]:
         info = self.request("/object_info", timeout=30)
-        problems = [f"Missing node {name}. Update ComfyUI and install LanPaint."
-                    for name in REQUIRED_NODES if name not in info]
+        problems = [f"Missing node {name}. " + ("Update ComfyUI." if studio else "Update ComfyUI and install LanPaint.")
+                    for name in (STUDIO_NODES if studio else REQUIRED_NODES) if name not in info]
         for node, field, config_key in (("UNETLoader", "unet_name", "diffusion_model"),
                                         ("CLIPLoader", "clip_name", "text_encoder"),
                                         ("VAELoader", "vae_name", "vae")):
@@ -93,6 +93,25 @@ class ComfyClient:
         if cancel.is_set():
             raise Cancelled()
         workflow = build_workflow(self.config, image_name, mask_name, seed, prompt, info)
+        return self.run_workflow(workflow, cancel, progress, uid)
+
+    def generate_studio(self, references, seed, prompt, width, height, cancel, progress):
+        info, problems = self.inspect(studio=True)
+        if problems:
+            raise RuntimeError("\n".join(problems))
+        uid = uuid.uuid4().hex
+        names = []
+        for index, image in enumerate(references):
+            if cancel.is_set():
+                raise Cancelled()
+            progress(f"Sending image {index + 1} to ComfyUI…")
+            names.append(self.upload(f"genstudio-{uid}-{index}.png", png_bytes(image)))
+        workflow = studio_workflow(self.config, names, seed, prompt, width, height, info)
+        return self.run_workflow(workflow, cancel, progress, uid)
+
+    def run_workflow(self, workflow, cancel, progress, uid):
+        if cancel.is_set():
+            raise Cancelled()
         client_id = "photocraft-genstudio-" + uid
         with ComfyProgress(self.base, client_id, progress) as stream:
             result = self.request("/prompt", {"prompt": workflow, "client_id": client_id})
