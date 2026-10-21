@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 #[serde(default)]
 pub struct State {
     pub open: bool,
+    pub collapsed: bool,
     pub settings_open: bool,
     pub advanced_open: bool,
     #[serde(skip)]
@@ -22,6 +23,8 @@ pub struct State {
     pub initialized: bool,
     #[serde(skip)]
     pub window_position: Option<[f32; 2]>,
+    #[serde(skip)]
+    pub drag_offset: Option<[f32; 2]>,
     #[serde(skip)]
     pub was_pending: bool,
     #[serde(skip)]
@@ -105,6 +108,47 @@ fn text(ui: &mut egui::Ui, label: &str, value: &mut String) {
     ui.end_row();
 }
 
+fn workspace_header(ui: &mut egui::Ui, model: &str, collapsed: bool) -> (egui::Response, bool, bool) {
+    let size = egui::TextStyle::Heading.resolve(ui.style()).size;
+    let color = crate::theme::Tokens::get(ui.ctx()).text;
+    let mut title = egui::text::LayoutJob::default();
+    title.append("GenGate", 0.0, egui::TextFormat { font_id: crate::theme::semibold(size), color, ..Default::default() });
+    title.append(&format!(" | {model}"), 0.0, egui::TextFormat { font_id: egui::FontId::proportional(size), color, ..Default::default() });
+    let title = ui.fonts_mut(|f| f.layout_job(title));
+    let button = ui.spacing().interact_size.y;
+    let gap = ui.spacing().item_spacing.x;
+    let height = button.max(title.size().y);
+    let width = if collapsed { title.size().x + 2.0 * (button + gap) } else { ui.available_width() };
+    let (header, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+    let band = header.expand2(egui::vec2(8.0, 4.0));
+    let mut corners = ui.visuals().window_corner_radius;
+    if !collapsed {
+        corners.sw = 0;
+        corners.se = 0;
+    }
+    ui.painter().rect_filled(band, corners, ui.visuals().widgets.open.weak_bg_fill);
+    if !collapsed {
+        ui.painter().hline(band.x_range(), band.bottom() + 0.5, ui.visuals().window_stroke);
+    }
+    let collapse_rect = egui::Rect::from_min_size(header.left_center() - egui::vec2(0.0, button / 2.0), egui::Vec2::splat(button));
+    let collapse = ui.put(collapse_rect, egui::Button::new("").frame(false)).on_hover_text(if collapsed { "Expand GenGate" } else { "Collapse GenGate" });
+    collapse.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, if collapsed { "Expand GenGate" } else { "Collapse GenGate" }));
+    let mut icon = collapse.clone();
+    icon.rect = egui::Rect::from_center_size(collapse.rect.center(), egui::Vec2::splat(ui.spacing().icon_width));
+    egui::collapsing_header::paint_default_icon(ui, if collapsed { 0.0 } else { 1.0 }, &icon);
+    let close_rect = egui::Rect::from_min_size(header.right_center() - egui::vec2(button, button / 2.0), egui::Vec2::splat(button));
+    let close = ui.put(close_rect, egui::Button::new("\u{00d7}").frame(false)).on_hover_text("Close GenGate");
+    close.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Close GenGate"));
+    let title_rect = header.with_min_x(collapse_rect.right() + gap).with_max_x(close_rect.left() - gap);
+    let drag =
+        ui.interact(header.with_min_x(collapse_rect.right()).with_max_x(close_rect.left()), egui::Id::new("gengate-title-drag"), egui::Sense::click_and_drag());
+    ui.scope_builder(egui::UiBuilder::new().max_rect(title_rect).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
+        ui.add(egui::Label::new(title).selectable(false));
+    });
+    let toggle = collapse.clicked() || drag.double_clicked();
+    (drag, toggle, close.clicked())
+}
+
 pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if let Some(job) = app.session.jobs().into_iter().find(|job| job.state == "running" && job.message.starts_with("Starting"))
         && ((job.command.starts_with("genstudio.fill.") || job.command == "genstudio.studio.generate")
@@ -161,6 +205,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     }
     app.ui.gen_studio.was_pending = pending;
     if !app.ui.gen_studio.open {
+        app.ui.gen_studio.drag_offset = None;
         return;
     }
     if !engine_busy && activity.is_none() && app.ui.gen_studio.last_probe.is_none_or(|time| time.elapsed() > std::time::Duration::from_secs(2)) {
@@ -176,57 +221,87 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if app.ui.gen_studio.open {
         let model = photocraft_engine::genstudio::model_spec(&app.session.prefs().gen_studio.model).map_or("Choose model", |m| m.label);
         let caption = format!("GenGate | {model}");
+        // The custom header owns collapse; migrate the old invisible native body.
+        let mut expanded = egui::collapsing_header::CollapsingState::load_with_default_open(ctx, egui::Id::new("genstudio-workspace").with("collapsing"), true);
+        expanded.set_open(true);
+        expanded.store(ctx);
+        let collapsed = app.ui.gen_studio.collapsed;
+        let (pointer, down) = ctx.input(|i| (i.pointer.interact_pos(), i.pointer.primary_down()));
+        if let (Some(at), Some([x, y])) = (pointer, app.ui.gen_studio.drag_offset) {
+            // Apply the absolute grab position before drawing this frame. Reading
+            // the previous Area rect inside the body dropped every other delta.
+            app.ui.gen_studio.window_position = Some([at.x - x, at.y - y]);
+            if down {
+                ctx.request_repaint();
+            }
+        }
+        if !down {
+            app.ui.gen_studio.drag_offset = None;
+        }
         let mut window = egui::Window::new(&caption)
             .title_bar(false)
             .movable(false)
-            .id(egui::Id::new("genstudio-workspace"))
+            .id(egui::Id::new(if collapsed { "gengate-workspace-chip" } else { "genstudio-workspace" }))
             .default_pos(ctx.content_rect().center() - egui::vec2(470.0, 325.0))
             .default_size(egui::vec2(940.0, 650.0))
             .min_size(egui::vec2(680.0, 460.0))
             .max_height((ctx.content_rect().height() - 32.0).max(360.0))
+            .frame(egui::Frame::window(&ctx.global_style()).inner_margin(egui::Margin::symmetric(8, 4)))
             .resizable(true);
+        if collapsed {
+            window = window.auto_sized();
+        }
         if let Some([x, y]) = app.ui.gen_studio.window_position.take() {
             window = window.current_pos(egui::pos2(x, y));
         }
-        window.show(ctx, |ui| {
-            let (header, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 26.0), egui::Sense::hover());
-            let drag_rect = header.shrink2(egui::vec2(0.0, 0.0)).with_max_x(header.right() - 30.0);
-            let drag = ui.interact(drag_rect, egui::Id::new("gengate-title-drag"), egui::Sense::drag());
-            ui.scope_builder(egui::UiBuilder::new().max_rect(drag_rect).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
-                ui.label(egui::RichText::new(&caption).strong());
-            });
-            if ui
-                .put(egui::Rect::from_min_size(header.right_top() - egui::vec2(24.0, 0.0), egui::vec2(24.0, 24.0)), egui::Button::new("\u{00d7}").frame(false))
-                .on_hover_text("Close GenGate")
-                .clicked()
-            {
-                open = false;
+        let mut header = None;
+        let response = window.show(ctx, |ui| {
+            let title = workspace_header(ui, model, collapsed);
+            open = !title.2;
+            header = Some(title);
+            if collapsed {
+                return;
             }
-            if drag.dragged()
-                && let Some(rect) = ctx.memory(|m| m.area_rect(egui::Id::new("genstudio-workspace")))
-            {
-                let next = rect.min + ui.input(|i| i.pointer.delta());
-                app.ui.gen_studio.window_position = Some([next.x, next.y]);
-            }
-            let body_height = (ui.available_height() - 38.0).max(340.0);
-            ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), body_height), egui::Layout::top_down(egui::Align::Min), |ui| {
-                // Reserved for upcoming tools; the model belongs in the left-aligned title.
-                ui.allocate_space(egui::vec2(ui.available_width(), 24.0));
-                workspace_actions = crate::genstudio_canvas::show(app, ui);
-            });
-            ui.separator();
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 6.0;
-                if pending || activity.is_some() {
-                    ui.add(egui::Spinner::new().size(12.0));
-                }
-                let message = start_message
-                    .as_deref()
-                    .or_else(|| activity.as_ref().map(|j| j.message.as_str()).filter(|s| !s.is_empty()))
-                    .unwrap_or_else(|| idle_message(&state));
-                ui.add(egui::Label::new(egui::RichText::new(message).size(11.0).color(crate::theme::Tokens::get(ui.ctx()).text_dim)).truncate());
+            egui::Frame::NONE.inner_margin(egui::Margin::symmetric(8, 12)).show(ui, |ui| {
+                let body_height = (ui.available_height() - 38.0).max(340.0);
+                ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), body_height), egui::Layout::top_down(egui::Align::Min), |ui| {
+                    // Reserved for upcoming tools; the model belongs in the left-aligned title.
+                    ui.allocate_space(egui::vec2(ui.available_width(), 24.0));
+                    workspace_actions = crate::genstudio_canvas::show(app, ui);
+                });
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    if pending || activity.is_some() {
+                        ui.add(egui::Spinner::new().size(12.0));
+                    }
+                    let message = start_message
+                        .as_deref()
+                        .or_else(|| activity.as_ref().map(|j| j.message.as_str()).filter(|s| !s.is_empty()))
+                        .unwrap_or_else(|| idle_message(&state));
+                    ui.add(egui::Label::new(egui::RichText::new(message).size(11.0).color(crate::theme::Tokens::get(ui.ctx()).text_dim)).truncate());
+                });
             });
         });
+        if let (Some(response), Some((drag, toggle, _))) = (response, header) {
+            let rect = response.response.rect;
+            if down
+                && drag.is_pointer_button_down_on()
+                && app.ui.gen_studio.drag_offset.is_none()
+                && let Some(origin) = ctx.input(|i| i.pointer.press_origin())
+            {
+                app.ui.gen_studio.drag_offset = Some([origin.x - rect.min.x, origin.y - rect.min.y]);
+            }
+            if toggle {
+                app.ui.gen_studio.collapsed = !collapsed;
+                app.ui.gen_studio.window_position = Some([rect.min.x, rect.min.y]);
+                app.ui.gen_studio.drag_offset = None;
+                ctx.request_repaint();
+            }
+            if let Some(info) = app.studio.info.as_object_mut() {
+                info.insert("window".into(), json!({"collapsed":collapsed,"rect":[rect.min.x,rect.min.y,rect.width(),rect.height()],"titleRect":[drag.rect.min.x,drag.rect.min.y,drag.rect.width(),drag.rect.height()]}));
+            }
+        }
         app.ui.gen_studio.open = open;
     }
     for (id, params) in workspace_actions {
