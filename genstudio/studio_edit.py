@@ -5,6 +5,7 @@ from pathlib import Path
 import time
 from . import control
 from .lifecycle import http_json
+from .transport import poll
 
 
 def generate(folder, settings, body, emit, *, configure=None, request=http_json, interval=0.2):
@@ -18,21 +19,23 @@ def generate(folder, settings, body, emit, *, configure=None, request=http_json,
         raise InterruptedError("Cancelled")
     job = request(control.BASE + "/studio/jobs", body, timeout=90)
     route = control.BASE + "/studio/jobs/" + job["id"]
+    complete=False
     try:
         deadline = time.monotonic() + 8 * 1800
         while time.monotonic() < deadline:
             if cancelled():
                 raise InterruptedError("Cancelled")
-            state = request(route)
+            state = poll(route,request=request,cancelled=cancelled,pause=time.sleep,progress=lambda m:emit({"message":m}))
             emit({"message": state["message"], "progress": state.get("progress")})
             if state["state"] == "done":
-                result = request(route + "/result", timeout=120)
+                result = poll(route + "/result",request=request,cancelled=cancelled,pause=time.sleep,timeout=30)
                 images = result.get("images", [])
                 if len(images) != body.get("batch", 1):
                     raise RuntimeError("The engine returned an incomplete batch.")
                 for index, image in enumerate(images):
                     (folder / f"result-{index}.png").write_bytes(base64.b64decode(image["image"], validate=True))
                 (folder / "results.json").write_text(json.dumps({"count": len(images)}))
+                complete=True
                 emit({"done": True})
                 return
             if state["state"] in ("error", "cancelled"):
@@ -40,5 +43,6 @@ def generate(folder, settings, body, emit, *, configure=None, request=http_json,
             time.sleep(interval)
         raise RuntimeError("Generation timed out.")
     finally:
-        if cancelled():
-            request(route + "/cancel", {})
+        if not complete:
+            try:request(route + "/cancel", {},timeout=2)
+            except Exception:pass

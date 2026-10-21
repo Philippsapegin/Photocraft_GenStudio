@@ -11,6 +11,8 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from prepare_fill_ux import prepare as prepare_fill_ux
 from prepare_selection_fill import prepare as prepare_selection_fill
 from prepare_studio import prepare as prepare_studio
+import prepare_gengate
+import prepare_segmentation
 
 
 def replace(path, old, new):
@@ -23,6 +25,7 @@ def replace(path, old, new):
 
 
 def prepare(source):
+    prepare_gengate.before(source)
     engine, ui = source / "crates/engine/src", source / "crates/ui-egui/src"
     shutil.copyfile(ROOT / "photocraft/genstudio.rs", engine / "genstudio.rs")
     shutil.copyfile(ROOT / "photocraft/genstudio_ui.rs", ui / "genstudio_ui.rs")
@@ -31,12 +34,13 @@ def prepare(source):
         "comfyPython": "", "directPython": "", "modelsDir": "", "runtimeRoot": "."
     }), encoding="utf-8")
     stamp = source / ".genstudio-integration-v1"
-    # The suite owns its window under Filter > Plug-ins. Persist its state in
-    # preferences without adding an unrelated general Preferences section.
+    # The generation workspace stays under Filter > Plug-ins; its configuration
+    # lives in the editor's Preferences alongside the other settings sections.
     prefs = engine / "prefs.rs"
     existing = prefs.read_text(encoding="utf-8")
-    existing = existing.replace('pub const SECTIONS: [(&str, &str); 19]', 'pub const SECTIONS: [(&str, &str); 18]')
-    existing = existing.replace('    ("genStudio", "Gen Studio"),\n', '')
+    existing = existing.replace('pub const SECTIONS: [(&str, &str); 18]', 'pub const SECTIONS: [(&str, &str); 19]')
+    if '    ("genStudio", "Gen Studio"),' not in existing:
+        existing = existing.replace('    ("plugIns", "Plug-ins"),','    ("plugIns", "Plug-ins"),\n    ("genStudio", "Gen Studio"),')
     prefs.write_text(existing, encoding="utf-8")
     menu_source = ui / "menus.rs"
     menu_text = menu_source.read_text(encoding="utf-8").replace('        "genstudio.open" | "genstudio.models.browse" => true,\n', '')
@@ -63,6 +67,8 @@ def prepare(source):
         prepare_fill_ux(source, replace)
         prepare_selection_fill(source, replace)
         prepare_studio(source, replace)
+        prepare_segmentation.prepare(source, replace)
+        prepare_gengate.after(source)
         return
     replace(engine / "lib.rs", "pub mod plugin_cmds;", "pub mod plugin_cmds;\npub mod genstudio;")
     replace(engine / "lib.rs", "pub struct Session {", "pub struct Session {\n    pub gen_studio: genstudio::Runtime,")
@@ -82,6 +88,8 @@ def prepare(source):
     prepare_fill_ux(source, replace)
     prepare_selection_fill(source, replace)
     prepare_studio(source, replace)
+    prepare_segmentation.prepare(source, replace)
+    prepare_gengate.after(source)
 
 
 def prepare_remove(engine, ui):

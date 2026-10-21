@@ -1,4 +1,4 @@
-"""Standalone Qwen worker. Reuses local INT8 weights without a ComfyUI server."""
+"""Standalone AI worker. Reuses local checkpoints without a ComfyUI server."""
 from __future__ import annotations
 
 import argparse
@@ -12,12 +12,19 @@ import uuid
 from genfill.image_ops import decode_png, png_bytes
 from genfill.comfy import Cancelled
 from .core_pipeline import DirectPipeline
+from .models import MODEL, FLUX, specification
 
 
 class Worker:
-    def __init__(self, model, text_encoder="", vae=""):
-        self.pipeline = DirectPipeline(model, text_encoder, vae)
-        self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="qwen-direct")
+    def __init__(self, model, text_encoder="", vae="", model_id=MODEL):
+        specification(model_id)
+        self.model_id = model_id
+        if model_id == FLUX:
+            from .flux_pipeline import FluxPipeline
+            self.pipeline = FluxPipeline(model, text_encoder, vae)
+        else:
+            self.pipeline = DirectPipeline(model, text_encoder, vae)
+        self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="genstudio-direct")
         self.jobs = {}
         self.lock = threading.RLock()
 
@@ -27,7 +34,7 @@ class Worker:
         studio = None
         if data.get("kind") == "studio":
             from .studio import request
-            studio = request(data)
+            studio = request(data, self.model_id)
             image = mask = None
         else:
             image, mask = decode_png(data.get("image"), 1024 * 1024), decode_png(data.get("mask"), 1024 * 1024)
@@ -83,7 +90,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.command == "GET" and self.path == "/health":
                 problems = worker.pipeline.check()
                 return send(200, {"service": "genstudio-direct", "ready": not problems,
-                                  "inpaint_protocol": 2,
+                                  "inpaint_protocol": 2, "model": worker.model_id,
                                   "studio_protocol": 1,
                                   "textEncoder": worker.pipeline.text_encoder, "vae": worker.pipeline.vae,
                                   "modelsDir": str(worker.pipeline.models.resolve()), "problems": problems})
@@ -119,8 +126,9 @@ def main():
     parser.add_argument("--models", required=True)
     parser.add_argument("--text-encoder", default="")
     parser.add_argument("--vae", default="")
+    parser.add_argument("--model", default=MODEL, choices=(MODEL, FLUX))
     args = parser.parse_args()
-    worker = Worker(args.models, args.text_encoder, args.vae)
+    worker = Worker(args.models, args.text_encoder, args.vae, args.model)
     problems = worker.pipeline.check()
     if problems:
         raise SystemExit("\n".join(problems))

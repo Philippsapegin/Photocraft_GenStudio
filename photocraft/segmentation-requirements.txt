@@ -1,0 +1,18 @@
+# Extra dependencies for a private segmentation CUDA Python. Never upgrade ComfyUI in place.
+# GenGate supplies private, hash-pinned Ultralytics and CLIP overlays automatically.
+torch>=2.10
+torchvision
+numpy
+opencv-python
+Pillow
+matplotlib
+scipy
+pyyaml
+requests
+psutil
+polars
+ftfy
+regex
+tqdm
+ultralytics-thop
+timm

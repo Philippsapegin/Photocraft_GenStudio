@@ -8,22 +8,46 @@ FILES = {
     "vae": ("qwen_image_2.1_vae_bf16.safetensors", ("vae",)),
 }
 TEXT_ENCODERS = ("qwen3vl_8b_w4a8.safetensors", "qwen3vl_8b_int8_convrot.safetensors", "qwen3vl_8b_bf16.safetensors")
+FLUX = "flux-3-image-klein"
+MODELS = {
+    MODEL: {"label": "Qwen Image 2.1 Turbo", "references": 10, "grid": 32,
+            "files": FILES, "text_encoders": TEXT_ENCODERS},
+    FLUX: {"label": "FLUX 3 Image Klein", "references": 10, "grid": 16,
+           "files": {
+               "diffusion_model": ("flux3-image-klein-int8-convrot.safetensors", ("diffusion_models", "unet")),
+               "text_encoder": ("qwen3vl_4b_int8_convrot.safetensors", ("text_encoders", "clip")),
+               "vae": ("flux2-vae.safetensors", ("vae",)),
+               "prompt_upsampler": ("qwen3.5_9b_flux3_prompt_upsampler_w4a8.safetensors", ("text_encoders", "clip")),
+           },
+           "text_encoders": ("qwen3vl_4b_int8_convrot.safetensors", "qwen3vl_4b_bf16.safetensors")},
+}
+UPSAMPLERS = ("qwen3.5_9b_flux3_prompt_upsampler_w4a8.safetensors",
+              "qwen3.5_9b_flux3_prompt_upsampler_int8_convrot.safetensors",
+              "qwen3.5_9b_flux3_prompt_upsampler_bf16.safetensors")
 
 
-def catalog(root):
+def specification(model=MODEL):
+    if model not in MODELS:
+        raise ValueError("Unsupported model: " + str(model))
+    return MODELS[model]
+
+
+def catalog(root, model=MODEL):
+    spec = specification(model)
+    files, encoders = spec["files"], spec["text_encoders"]
     root = Path(root).expanduser().resolve()
     if not root.is_dir():
         raise ValueError("Choose an existing Models folder in Settings.")
-    result = {"model": MODEL, "modelsDir": str(root), "textEncoders": [], "vaes": []}
+    result = {"model": model, "referenceLimit": spec["references"], "modelsDir": str(root), "textEncoders": [], "vaes": []}
     for key, output in (("text_encoder", "textEncoders"), ("vae", "vaes")):
-        name, folders = FILES[key]
+        name, folders = files[key]
         seen = set()
         candidates = []
         for folder in folders:
             base = root / folder
             if base.is_dir():
                 candidates.extend((p, p.relative_to(base).as_posix()) for p in base.rglob("*.safetensors"))
-        candidates.extend((p, p.name) for p in root.glob("*.safetensors") if p.name in (*TEXT_ENCODERS, FILES["vae"][0]))
+        candidates.extend((p, p.name) for p in root.glob("*.safetensors") if p.name in (*encoders, files["vae"][0]))
         for path, comfy_name in candidates:
             resolved = path.resolve()
             if not path.is_file() or not path.stat().st_size:
@@ -32,10 +56,10 @@ def catalog(root):
             if identity in seen:
                 continue
             seen.add(identity)
-            compatible = path.name in TEXT_ENCODERS if key == "text_encoder" else path.name == name
+            compatible = path.name in encoders if key == "text_encoder" else path.name == name
             result[output].append({"value": path.relative_to(root).as_posix(), "name": comfy_name,
                                    "compatible": compatible})
-        names = TEXT_ENCODERS if key == "text_encoder" else (name,)
+        names = encoders if key == "text_encoder" else (name,)
         result[output].sort(key=lambda item: (names.index(Path(item["value"]).name)
                             if Path(item["value"]).name in names else 100, item["value"].casefold()))
         result[output] = result[output][:2048]
@@ -45,20 +69,20 @@ def catalog(root):
 
 
 def resolve(root, text_encoder="", vae="", model=MODEL):
-    if model != MODEL:
-        raise ValueError("Unsupported model: " + str(model))
+    spec = specification(model)
     root = Path(root).expanduser().resolve()
     if not root.is_dir():
-        raise ValueError("Choose an existing Models folder in Gen Studio.")
+        raise ValueError("Choose an existing Models folder in GenGate.")
     overrides = {"text_encoder": text_encoder, "vae": vae}
     found = {}
-    for key, (name, folders) in FILES.items():
+    for key, (name, folders) in spec["files"].items():
         override = overrides.get(key, "")
         if not isinstance(override, str):
             raise ValueError("Invalid model component selection.")
         if override and (Path(override).is_absolute() or ".." in Path(override.replace(chr(92), "/")).parts or ":" in override):
             raise ValueError("Choose a component inside the Models folder.")
-        names = (override,) if override else TEXT_ENCODERS if key == "text_encoder" else (name,)
+        names = ((override,) if override else spec["text_encoders"] if key == "text_encoder"
+                 else UPSAMPLERS if key == "prompt_upsampler" else (name,))
         candidates = []
         for candidate_name in names:
             explicit = root / candidate_name

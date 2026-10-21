@@ -6,14 +6,14 @@ Add-Type -AssemblyName System.Drawing
 $bundle = $PSScriptRoot
 $python = Join-Path $bundle 'runtime\.venv\Scripts\python.exe'
 if (-not (Test-Path -LiteralPath $python) -and -not $ValidateOnly) {
-    [System.Windows.Forms.MessageBox]::Show('Extract the complete Windows release ZIP, then run Setup.cmd. Source archives do not include the editor or Python.', 'PhotoCraft Gen Studio') | Out-Null
+    [System.Windows.Forms.MessageBox]::Show('Extract the complete Windows release ZIP, then run Setup.cmd. Source archives do not include the editor or Python.', 'PhotoCraft GenGate') | Out-Null
     exit 1
 }
 if ($ValidateOnly) {
     Add-Type -ReferencedAssemblies System.Windows.Forms -TypeDefinition 'public class GenStudioSetupPreviewForm : System.Windows.Forms.Form { protected override bool ShowWithoutActivation { get { return true; } } }'
     $form = New-Object GenStudioSetupPreviewForm
 } else { $form = New-Object System.Windows.Forms.Form }
-$form.Text = 'PhotoCraft Gen Studio - Alpha Setup'
+$form.Text = 'PhotoCraft GenGate - Alpha Setup'
 $form.ClientSize = New-Object System.Drawing.Size(700, 655)
 $form.StartPosition = 'CenterScreen'
 $form.FormBorderStyle = 'FixedDialog'
@@ -48,7 +48,7 @@ function BrowseFolder($field) {
 [void](Label 'Local AI tools inside PhotoCraft' 22 16)
 [void](Label 'Choose your existing models. Setup never downloads or copies model weights.' 22 43)
 [void](Label 'Install folder' 22 78)
-$installDir = Field 104 (Join-Path $env:LOCALAPPDATA 'Programs\PhotoCraft Gen Studio')
+$installDir = Field 104 (Join-Path $env:LOCALAPPDATA 'Programs\PhotoCraft GenGate')
 $browseInstall = Button 'Browse...' 600 103
 $browseInstall.Add_Click({ BrowseFolder $installDir })
 [void](Label 'Models folder (ComfyUI\models or a separate folder)' 22 143)
@@ -69,7 +69,7 @@ $browseModels.Add_Click({
 [void](Label 'Direct runtime' 350 208 325)
 $engine = New-Object System.Windows.Forms.ComboBox
 $engine.SetBounds(22,234,305,28); $engine.DropDownStyle = 'DropDownList'
-[void]$engine.Items.Add('Direct Qwen (no ComfyUI server)'); [void]$engine.Items.Add('ComfyUI')
+[void]$engine.Items.Add('Direct (no ComfyUI server)'); [void]$engine.Items.Add('ComfyUI')
 $engine.SelectedIndex = 0; $form.Controls.Add($engine)
 $runtime = New-Object System.Windows.Forms.ComboBox
 $runtime.SetBounds(350,234,330,28); $runtime.DropDownStyle = 'DropDownList'
@@ -120,7 +120,7 @@ function UpdateFields {
     $reuse = $comfy -or $runtime.SelectedIndex -eq 1
     $enginePython.Enabled = $reuse; $browsePython.Enabled = $reuse
     $comfyDir.Enabled = $comfy; $browseComfy.Enabled = $comfy; $lanpaint.Enabled = $comfy
-    if ($comfy) { $runtimeNote.Text = 'Uses your ComfyUI Python and models. Requires current Qwen 2.1 nodes and LanPaint.' }
+    if ($comfy) { $runtimeNote.Text = 'Uses your ComfyUI Python and shared models. FLUX 3 needs ComfyUI 0.41.3+; Qwen inpainting uses LanPaint.' }
     elseif ($reuse) { $runtimeNote.Text = 'Uses installed dependencies in place; does not change your existing Python.' }
     else { $runtimeNote.Text = 'A separate runtime downloads several GB of software. NVIDIA CUDA 13 driver required.' }
 }

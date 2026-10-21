@@ -50,8 +50,10 @@ class EngineHost:
 
     def config(self):
         config = load_config()
+        config["model"] = self.settings["model"]
         config["comfy_url"] = self.settings["comfyUrl"].rstrip("/")
-        from .models import resolve
+        from .models import resolve, specification
+        config.update({key: value[0] for key, value in specification(self.settings["model"])["files"].items()})
         try:
             config.update({key: value["name"] for key, value in resolve(self.settings["modelsDir"],
                 self.settings["textEncoder"], self.settings["vae"], self.settings["model"]).items()})
@@ -90,7 +92,8 @@ class EngineHost:
             return (info.get("service") == "genstudio-direct" and info.get("ready") is True
                     and Path(info.get("modelsDir", "")).resolve() == Path(self.settings["modelsDir"]).resolve()
                     and info.get("textEncoder", "") == self.settings["textEncoder"]
-                    and info.get("vae", "") == self.settings["vae"])
+                    and info.get("vae", "") == self.settings["vae"]
+                    and info.get("model", "qwen-image-2.1-turbo") == self.settings["model"])
         except (OSError, ValueError, URLError):
             return False
 
@@ -122,14 +125,14 @@ class EngineHost:
                 return self.status()
             allowed = event == "manual" or self.policy() == "firstRequest" and event == "request" or self.policy() == "appStart"
             if not allowed:
-                raise ValueError("Automatic start is off. Start the engine in Filter > Plug-ins > Gen Studio.")
+                raise ValueError("Automatic start is off. Start the engine in Filter > Plug-ins > GenGate.")
             self.message = "Starting the local AI engine. This may take a moment."
             progress(self.message)
             if self.engine == "comfy":
                 python = Path(self.settings["comfyPython"])
                 folder = Path(self.settings["comfyDir"])
                 if not python.is_file() or not (folder / "main.py").is_file():
-                    raise ValueError("Set the ComfyUI folder and Python executable in Gen Studio.")
+                    raise ValueError("Set the ComfyUI folder and Python executable in GenGate.")
                 self.runtime.mkdir(parents=True, exist_ok=True)
                 paths_file = self.runtime / "model-paths.yaml"
                 paths_file.write_text(json.dumps(extra_paths(self.settings["modelsDir"])), encoding="utf-8")
@@ -144,9 +147,9 @@ class EngineHost:
             else:
                 python = Path(self.settings["directPython"])
                 if not python.is_file():
-                    raise ValueError("Direct Qwen runtime is not installed. Run scripts/Setup-Direct.ps1, then select its Python executable.")
+                    raise ValueError("Direct AI runtime is not installed. Run scripts/Setup-Direct.ps1, then select its Python executable.")
                 command = [str(python), "-X", "utf8", str(ROOT / "scripts/run_direct.py"), "--models", self.settings["modelsDir"],
-                           "--text-encoder", self.settings["textEncoder"], "--vae", self.settings["vae"]]
+                           "--text-encoder", self.settings["textEncoder"], "--vae", self.settings["vae"], "--model", self.settings["model"]]
                 cwd = ROOT
             if self.process is None or self.process.poll() is not None:
                 self.runtime.mkdir(parents=True, exist_ok=True)
@@ -189,7 +192,7 @@ class EngineHost:
             for handle in self.logs:
                 handle.close()
             self.logs = []
-            self.message = "Stopped" if owned else "No engine process owned by Gen Studio."
+            self.message = "Stopped" if owned else "No engine process owned by GenGate."
             return {"stopped": owned, "message": self.message}
 
     def inspect(self):

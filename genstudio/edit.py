@@ -88,7 +88,10 @@ def main():
         print(json.dumps(value), flush=True)
     try:
         payload = json.load(sys.stdin)
-        if isinstance(payload, dict) and "studio" in payload:
+        if isinstance(payload, dict) and "segmentation" in payload:
+            from .segmentation import run
+            run(args.folder, payload["settings"], payload["segmentation"], emit)
+        elif isinstance(payload, dict) and "studio" in payload:
             from .studio_edit import generate
             generate(args.folder, payload["settings"], payload["studio"], emit)
         elif isinstance(payload, dict) and "settings" in payload:

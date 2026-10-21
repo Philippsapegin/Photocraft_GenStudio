@@ -12,20 +12,20 @@ REVISION = "b0f4b7b294ce482a2e071d9d762c133d38c7aa07"
 PARTS = ("comfy", "comfy_config", "folder_paths.py", "node_helpers.py", "LICENSE")
 
 
-def prepare(source=None):
-    target = ROOT / ".runtime/qwen-core"
+def prepare(source=None, *, revision=REVISION, directory="qwen-core"):
+    target = ROOT / ".runtime" / directory
     stamp = target / "genstudio-core.json"
-    if stamp.exists() and (target / "comfy/sd.py").is_file() and json.loads(stamp.read_text())["revision"] == REVISION:
+    if stamp.exists() and (target / "comfy/sd.py").is_file() and json.loads(stamp.read_text())["revision"] == revision:
         return target
     if source and (Path(source) / ".git").exists():
-        archive = subprocess.run(["git", "-C", str(source), "archive", "--format=zip", REVISION, *PARTS],
+        archive = subprocess.run(["git", "-C", str(source), "archive", "--format=zip", revision, *PARTS],
                                  check=True, stdout=subprocess.PIPE).stdout
         prefix = ""
     else:
-        url = f"https://github.com/Comfy-Org/ComfyUI/archive/{REVISION}.zip"
+        url = f"https://codeload.github.com/Comfy-Org/ComfyUI/zip/{revision}"
         with urllib.request.urlopen(url, timeout=120) as response:
             archive = response.read()
-        prefix = f"ComfyUI-{REVISION}/"
+        prefix = f"ComfyUI-{revision}/"
     with zipfile.ZipFile(BytesIO(archive)) as bundle:
         for entry in bundle.infolist():
             if not entry.filename.startswith(prefix):
@@ -38,7 +38,7 @@ def prepare(source=None):
             path = target.joinpath(*relative.parts)
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(bundle.read(entry))
-    stamp.write_text(json.dumps({"revision": REVISION, "license": "GPL-3.0",
+    stamp.write_text(json.dumps({"revision": revision, "license": "GPL-3.0",
         "source": "https://github.com/Comfy-Org/ComfyUI", "includes_weights": False}, indent=2))
     return target
 

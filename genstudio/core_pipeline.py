@@ -37,11 +37,11 @@ def inpaint_prompt(prompt):
             "Make the replaced region fully opaque and blend it naturally with its surroundings.")
 
 
-def import_core(cpu=False):
-    if not (CORE / "comfy/sd.py").is_file():
+def import_core(cpu=False, core=CORE):
+    if not (core / "comfy/sd.py").is_file():
         raise RuntimeError("Direct model library is missing. Run scripts/Setup-Direct.ps1.")
-    if str(CORE) not in sys.path:
-        sys.path.insert(0, str(CORE))
+    if str(core) not in sys.path:
+        sys.path.insert(0, str(core))
     from comfy.cli_args import args
     args.cpu = cpu
     args.disable_dynamic_vram = True

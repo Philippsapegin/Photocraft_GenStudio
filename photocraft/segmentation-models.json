@@ -1,0 +1,37 @@
+{
+  "model": "yolo-world-sam3",
+  "repository": "AB498/sam3",
+  "revision": "84bd0040bde4d9dd9312dd8beab0d15068d95ce8",
+  "officialSam": "https://huggingface.co/facebook/sam3",
+  "samSource": "Public third-party checkpoint mirror; pinned independently, not endorsed by Meta",
+  "files": [
+    {
+      "id": "yolov8s-worldv2",
+      "path": "segmentation/yolov8s-worldv2.pt",
+      "bytes": 25923032,
+      "sha256": "9b2c17ab6124a913e9b3a5c170617920d91b0f01111a8479da69f00e2cf27792",
+      "url": "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolov8s-worldv2.pt"
+    },
+    {
+      "id": "yolov8m-worldv2",
+      "path": "segmentation/yolov8m-worldv2.pt",
+      "bytes": 57233192,
+      "sha256": "b614d33aa35b8e61d988041ff6939dfb3ed627af88ccaf643e4cdb822eb41d71",
+      "url": "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolov8m-worldv2.pt"
+    },
+    {
+      "id": "yolov8l-worldv2",
+      "path": "segmentation/yolov8l-worldv2.pt",
+      "bytes": 94224632,
+      "sha256": "276b618c2f04e6e08e32f085b3c0e8baf2dbffa46af5119b888423e859a6ee01",
+      "url": "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolov8l-worldv2.pt"
+    },
+    {
+      "id": "sam3",
+      "path": "segmentation/sam3.pt",
+      "bytes": 3450062241,
+      "sha256": "9999e2341ceef5e136daa386eecb55cb414446a00ac2b55eb2dfd2f7c3cf8c9e",
+      "url": "https://huggingface.co/AB498/sam3/resolve/84bd0040bde4d9dd9312dd8beab0d15068d95ce8/sam3.pt"
+    }
+  ]
+}

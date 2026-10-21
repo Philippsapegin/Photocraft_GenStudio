@@ -53,11 +53,20 @@ class ComfyClient:
 
     def inspect(self, studio=False) -> tuple[dict, list[str]]:
         info = self.request("/object_info", timeout=30)
-        problems = [f"Missing node {name}. " + ("Update ComfyUI." if studio else "Update ComfyUI and install LanPaint.")
-                    for name in (STUDIO_NODES if studio else REQUIRED_NODES) if name not in info]
-        for node, field, config_key in (("UNETLoader", "unet_name", "diffusion_model"),
+        flux = self.config.get("model") == "flux-3-image-klein"
+        if flux:
+            from genstudio.flux_workflow import NODES
+        required = NODES if flux else STUDIO_NODES if studio else REQUIRED_NODES
+        problems = [f"Missing node {name}. " + ("Update ComfyUI to 0.41.3 or newer." if flux else "Update ComfyUI." if studio else "Update ComfyUI and install LanPaint.")
+                    for name in required if name not in info]
+        components = [("UNETLoader", "unet_name", "diffusion_model"),
                                         ("CLIPLoader", "clip_name", "text_encoder"),
-                                        ("VAELoader", "vae_name", "vae")):
+                                        ("VAELoader", "vae_name", "vae")]
+        if flux:
+            components.append(("CLIPLoader", "clip_name", "prompt_upsampler"))
+            if "CLIPLoader" in info and "flux3" not in self.choices(info, "CLIPLoader", "type"):
+                problems.append("FLUX 3 Klein requires ComfyUI 0.41.3 or newer. Update your ComfyUI, or select Direct.")
+        for node, field, config_key in components:
             if node in info and self.config[config_key] not in self.choices(info, node, field):
                 problems.append("Missing model: " + self.config[config_key])
         system = self.request("/system_stats").get("system", {})
@@ -81,6 +90,12 @@ class ComfyClient:
 
     def generate(self, image: Image.Image, mask: Image.Image, seed: int, prompt: str,
                  cancel, progress) -> Image.Image:
+        if self.config.get("model") == "flux-3-image-klein":
+            from genstudio.core_pipeline import inpaint_references
+            from genstudio.flux_pipeline import masked_prompt
+            reference, coverage = inpaint_references(image, mask)
+            return self.generate_studio([reference, coverage], seed, masked_prompt(prompt),
+                                        image.width, image.height, cancel, progress)
         info, problems = self.inspect()
         if problems:
             raise RuntimeError("\n".join(problems))
@@ -105,8 +120,14 @@ class ComfyClient:
             if cancel.is_set():
                 raise Cancelled()
             progress(f"Sending image {index + 1} to ComfyUI…")
+            if self.config.get("model") == "flux-3-image-klein":
+                image = Image.alpha_composite(Image.new("RGBA", image.size, "white"), image.convert("RGBA")).convert("RGB")
             names.append(self.upload(f"genstudio-{uid}-{index}.png", png_bytes(image)))
-        workflow = studio_workflow(self.config, names, seed, prompt, width, height, info)
+        if self.config.get("model") == "flux-3-image-klein":
+            from genstudio.flux_workflow import workflow as flux_workflow
+            workflow = flux_workflow(self.config, names, seed, prompt, width, height, info)
+        else:
+            workflow = studio_workflow(self.config, names, seed, prompt, width, height, info)
         return self.run_workflow(workflow, cancel, progress, uid)
 
     def run_workflow(self, workflow, cancel, progress, uid):

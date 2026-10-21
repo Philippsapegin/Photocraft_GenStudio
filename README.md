@@ -1,21 +1,38 @@
-# Gen Studio for PhotoCraft · Alpha
+# GenGate for PhotoCraft · Alpha
 
-Local AI removal and generative fill integrated into [PhotoCraft](https://github.com/storytold/photocraft). Paint over an object to remove it, or describe what belongs inside a selection. Results appear directly in the document, with editable masks, Undo and a gallery of variants.
+Local AI image generation, editing, object removal and segmentation integrated into [PhotoCraft](https://github.com/storytold/photocraft). Results appear directly in the document as layers, selections or editable masks, with Undo/Redo.
 
-**Windows x64 alpha · Qwen Image 2.1 Turbo INT8 · Direct or ComfyUI.** This is an independent integration based on PhotoCraft 0.8.2, not an official PhotoCraft/ArtCraft release. The current plug-in API cannot expose these native controls, so the download includes a modified editor and a local Python host.
+**0.8.0-alpha.1 · Windows x64 · Qwen Image 2.1 Turbo / FLUX 3 Image Klein · Direct or ComfyUI.** GenGate was previously called Gen Studio; existing profiles, commands and generated-layer metadata remain compatible. This is an independent integration based on PhotoCraft 0.8.2. Because its current plug-in API cannot expose these native controls, the download includes a modified editor and a local Python runtime.
 
 ## Install
 
-1. Download **[PhotoCraft-GenStudio-0.7.0-alpha.1-windows-x64.zip](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/download/v0.7.0-alpha.1/PhotoCraft-GenStudio-0.7.0-alpha.1-windows-x64.zip)** from the [alpha release](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/tag/v0.7.0-alpha.1). Extract the entire ZIP, then double-click **Setup.cmd**. GitHub's “Source code” ZIP is for developers and does not contain binaries.
-2. Choose an install folder on any drive and your **Models folder**. Existing ComfyUI users can select `ComfyUI\models`; everyone else can use a separate folder. Setup reads models in place and never downloads, copies or converts weights. An empty models folder is accepted so you can add files later.
-3. Choose **Direct Qwen** or **ComfyUI**, then click **Install**. With Direct, reuse a CUDA Python (including ComfyUI's `python_embeded\python.exe`) or let setup install a separate runtime. A separate runtime downloads several GB of **software dependencies**, not models. With ComfyUI, select its folder and Python; the optional checked box installs the bundled LanPaint extension only if missing.
-4. Open the separate **PhotoCraft Gen Studio** shortcut. All settings are in **Filter → Plug-ins → Gen Studio…**. Automatic engine startup defaults to **On first AI request**.
+1. Download **[PhotoCraft-GenGate-0.8.0-alpha.1-windows-x64.zip](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/download/v0.8.0-alpha.1/PhotoCraft-GenGate-0.8.0-alpha.1-windows-x64.zip)** from the [alpha release](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/tag/v0.8.0-alpha.1). Extract the complete ZIP and double-click **Setup.cmd**. GitHub's Source code archives contain no executable.
+2. Choose an installation folder and a **Models folder**. Reuse `ComfyUI/models` or choose a separate directory. Generative weights are read in place; setup does not duplicate or convert them.
+3. Choose **Direct** or **ComfyUI**. Direct can reuse an existing CUDA Python, including ComfyUI's embedded Python, or install a separate GPU runtime. A new runtime downloads several GB of software. Reusing a Python never upgrades its packages in place.
+4. Open the **PhotoCraft GenGate** shortcut. Open **Filter → Plug-ins → GenGate…**. All configuration is under **Edit → Preferences → GenGate Settings**. Select a model independently from its engine.
 
-No administrator access, Rust, Git or separately installed host Python is needed. Setup leaves the existing PhotoCraft installation and its shortcuts alone. The editor and its lightweight host are bundled; only a new Direct GPU environment requires dependency downloads. The alpha is unsigned; Windows may show its publisher warning. Release downloads include SHA-256 checksums.
+No administrator access, Rust, Git or separate host Python is required. The installation has its own editor, profile and shortcuts. The alpha is unsigned; releases include SHA-256 checksums.
 
-**Requirements:** Windows 10/11 x64 and an NVIDIA CUDA-capable GPU for the packaged Direct engine. Its new runtime uses CUDA 13.0 and needs a compatible recent NVIDIA driver. Existing GPU Python environments are reused without installing into them. The development machine has an RTX 3060 12 GB and 64 GB RAM; these are **not measured minimum requirements**. Model memory, generation speed and final image quality have not been benchmarked for this alpha. Keep Windows' page file enabled; insufficient commit memory can prevent model loading.
+**Requirements:** Windows 10/11 x64 and an NVIDIA CUDA GPU for Direct generation and segmentation. A newly installed runtime uses CUDA 13.0 and needs a compatible driver. Klein Direct requires Python 3.12+. Development uses an RTX 3060 12 GB and 64 GB RAM; these are not measured minimum requirements. Keep the Windows page file enabled.
 
-To update, save and close the Gen Studio editor, run the newer setup into the same install folder, and choose the engine/model source again. It installs a new version directory and preserves unrelated editor preferences and the previous executable. Your profile and recovery data live under `Profile` in the install folder. To remove this portable installation, close it, stop an engine it owns through Gen Studio, then delete its install folder and its two **PhotoCraft Gen Studio** shortcuts. External models and ComfyUI stay where you put them.
+To update, save and close this editor and run setup into the same install folder. Version directories preserve the previous executable; the editor profile lives under `Profile`. To uninstall, close the editor, stop any generation engine it owns, then remove this installation folder and its GenGate shortcuts. Shared models and external ComfyUI remain where you put them.
+
+## Generation workspace
+
+Open GenGate with or without an open document. Its left-aligned title identifies the current model: **GenGate | FLUX 3 Image Klein**. The row below it is reserved for future tools.
+
+- Enter a prompt and click **Generate**. Every image becomes a new layer with its creation prompt stored in the project. With no open document, GenGate creates a document containing only the generated image.
+- The main reference accepts a file click, drag and drop, or **Use selection**. The selection button remains available when a reference or an earlier result is already present. An empty reference is filled with the generated image when generation completes.
+- Add up to nine extra references below the main canvas. Filled slots can be dragged into the prompt to insert model-specific reference chips. Changing models converts chips while keeping their image assignments.
+- The compact controls provide batch size, text-only 1k/2k resolution and aspect ratio, and an **Aa / {Aa}** font toggle. Reference-based generation uses the reference's proportions. Canvas and prompt resize with the window.
+
+## Settings
+
+**Edit → Preferences → GenGate Settings** contains independent Model and Engine selectors, a shared Models folder, engine startup policy, progress-bar and floating-prompt-bar toggles. **Advanced**, collapsed by default, contains text encoder, VAE, Python and connection settings. Compatible encoders and VAEs are discovered automatically. Apply/OK save changes; Cancel discards them.
+
+Automatic start is selectable per generation engine: **Off**, **When PhotoCraft starts**, or **On first AI request**. Starting shows a nonblocking banner and spinner. An idle available worker displays **Engine ready**; model weights load on the first request. GenGate stops only generation processes it started and never terminates an attached external ComfyUI.
+
+**Direct** uses isolated checkpoint-compatible model libraries in a worker process, without a ComfyUI server or graph. **ComfyUI** needs the selected model's nodes; Klein requires 0.41.3+. Qwen inpainting uses LanPaint, installed only when selected in setup. Advanced can attach to an existing local ComfyUI URL. The host and generation worker use ports `8766` and `8767`; one shared generation-host configuration is supported at a time.
 
 ## Models
 
@@ -42,6 +59,25 @@ Models/
 ```
 
 Nested subfolders, `unet` / `clip` aliases and a flat directory also work. Duplicate files of the same chosen format are rejected with an explanation. Point both engines at the same folder; neither engine needs its own copy. The model and file details are published by [Comfy Org](https://huggingface.co/Comfy-Org/Qwen-Image-2.1/tree/72a49122613a4f9afbcc443426d6c765c0c383cf).
+
+## FLUX 3 Image Klein
+
+Choose **Model → FLUX 3 Image Klein** in GenGate Settings. Both Direct and ComfyUI are supported.
+
+The distilled checkpoint uses **16 steps / INT8 ConvRot**. The model accepts **10 references**, just like Qwen 2.1. Dragged prompt chips use the official zero-based tokens `<ref_image_0>` through `<ref_image_9>`; switching models converts chips while retaining their image assignments. Removing a reference renumbers chips. BFL documents the syntax in [Bounding boxes with FLUX 3 Image](https://docs.bfl.ai/flux_3/flux3_image_bounding_boxes).
+
+Required files, in the same shared Models folder. These direct links use a pinned public mirror; the downloader verifies the byte sizes and SHA-256 values against BFL originals:
+
+| Folder | File | Size |
+| --- | --- | --- |
+| `diffusion_models` | [flux3-image-klein-int8-convrot.safetensors](https://huggingface.co/ml-resources/flux-3-image-klein-comfy/resolve/3ba0f7064cbb1666a71e2820d3cc5c2273bb6cd0/diffusion_models/flux3-image-klein-int8-convrot.safetensors?download=true) | 5.83 GB |
+| `text_encoders` | [qwen3vl_4b_int8_convrot.safetensors](https://huggingface.co/ml-resources/flux-3-image-klein-comfy/resolve/3ba0f7064cbb1666a71e2820d3cc5c2273bb6cd0/text_encoders/qwen3vl_4b_int8_convrot.safetensors?download=true) | 4.86 GB |
+| `vae` | [flux2-vae.safetensors](https://huggingface.co/ml-resources/flux-3-image-klein-comfy/resolve/3ba0f7064cbb1666a71e2820d3cc5c2273bb6cd0/vae/flux2-vae.safetensors?download=true) | 0.34 GB |
+| `text_encoders` | [qwen3.5_9b_flux3_prompt_upsampler_w4a8.safetensors](https://huggingface.co/ml-resources/flux-3-image-klein-comfy/resolve/3ba0f7064cbb1666a71e2820d3cc5c2273bb6cd0/text_encoders/qwen3.5_9b_flux3_prompt_upsampler_w4a8.safetensors?download=true) | 6.72 GB |
+
+The prompt upsampler expands the user's instruction using the references before rendering, as [BFL recommends](https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy). Direct releases it before loading the image pipeline. Discovery can also reuse the official INT8 or BF16 upsampler if W4A8 is absent. The UI keeps the existing 1k/2k options for both models.
+
+Explicit download (also available in the installed runtime): `.venv\Scripts\python.exe scripts/download_flux3.py --models "D:\path\to\models"`. This queues the four files (17.75 GB), resumes `.part` downloads and checks their SHA-256 values against the official publication before exposing them to model discovery. Existing final files are verified and reused; differing files are preserved. Generative model weights are downloaded explicitly. Download provenance is pinned in [flux3-models.json](photocraft/flux3-models.json).
 
 ## Tools
 
@@ -71,42 +107,39 @@ Several AI strokes or fills can wait in a shared queue. Pending and running mask
 
 Results are applied immediately in the document. Failed or cancelled requests leave it unchanged. Native compositing retains document bit depth, color profile and the original edit mask. Model input is a context crop limited to 768 pixels on its longest side; large areas therefore have limited AI detail in this alpha.
 
-## Gen Studio settings
+## AI segmentation
 
-Open **Filter → Plug-ins → Gen Studio…**, even without an open document.
+Enable **AI segmentation** in **Preferences → GenGate Settings → Segmentation**. This feature always uses **Direct**, independently of the selected generative model, engine and automatic-start policy.
 
-The **0.7 alpha generation workspace** includes a wide prompt, selection/file reference, nine additional references, numbered prompt chips, batches and 1k/2k output. Settings and Advanced components are collapsed by default, with separate Model and Engine selectors. See [workspace behavior and local validation](docs/WORKSPACE.md). The Windows download includes this workspace.
+- **Select → Subject** detects the foreground subject with YOLO-World and builds its mask with SAM3.
+- **Select → Sky** segments the sky using a SAM3 text prompt.
+- **Remove Background**, in layer Properties, adds a nondestructive layer mask from the detected subject. Pixel data is retained.
+- **Object Selection Tool → Ai Select** searches only within a dragged rectangle and creates a selection. Single clicks and sub-2-pixel drags do nothing while enabled. Sample All Layers and add/subtract/intersect modifiers remain available. Turning AI segmentation off restores the native algorithms.
 
-- **Engine:** Direct Qwen, or Qwen through ComfyUI.
-- **Automatic start:** **Off**, **When PhotoCraft starts**, or **On first AI request**. Each engine remembers its own choice.
-- **Models folder:** shared model source, with Browse.
-- **Show progress bars under masks** and **Show floating AI prompt bar**.
-- **Apply**, **Start**, **Stop**, **Refresh**, plus advanced Python, runtime and connection paths.
+Defaults are **YOLO-World v2 S + SAM3**. YOLO-World M and L can be selected as larger detector alternatives. Enabling segmentation prepares the selected detector and SAM3 automatically in `Models/segmentation` (defaults: about **3.48 GB**). Downloads resume and verify SHA-256; existing common model paths are reused. Other detector sizes download only when selected. The GPU process exits after each request to release its memory. Cancel leaves the document unchanged.
 
-Starting the engine shows a nonblocking banner and spinner. A running, idle engine displays **Engine ready**. “Ready” means the worker is listening; weights load on the first generation. Gen Studio stops only an engine it started itself and never terminates an attached external ComfyUI.
+| Component | Source | Default size |
+| --- | --- | --- |
+| YOLO-World v2 S | [Official Ultralytics weights](https://github.com/ultralytics/assets/releases/download/v8.4.0/yolov8s-worldv2.pt) | 25.9 MB |
+| SAM3 | [Meta model card and terms](https://huggingface.co/facebook/sam3), [pinned public checkpoint mirror](https://huggingface.co/AB498/sam3/tree/84bd0040bde4d9dd9312dd8beab0d15068d95ce8) | 3.45 GB |
 
-**Direct** uses a pinned checkpoint-compatible Comfy model library in a separate worker; it starts no ComfyUI server, frontend or node graph. **ComfyUI** requires a current installation with Qwen 2.1 nodes and LanPaint. A managed instance normally uses `127.0.0.1:8190`; to attach to an existing instance, set its local URL in Advanced settings and make sure it already exposes the selected models and nodes. Restart an external ComfyUI yourself after adding LanPaint. The host and Direct worker use local ports `8766` and `8767`; only one Gen Studio host configuration is supported at a time.
+The default SAM3 downloader uses a public third-party mirror, pinned independently; it is not endorsed by Meta. You can instead obtain `sam3.pt` from Meta after access approval and put it in the shared Models folder. Provenance and hashes are in [segmentation-models.json](photocraft/segmentation-models.json). Weights retain their publisher's license.
 
-## Alpha status
+Leave **CUDA Python** empty to reuse the configured Direct or ComfyUI Python; this starts no ComfyUI process. GenGate keeps its pinned Ultralytics/CLIP software in a private overlay. New GPU runtimes include its dependencies. If a reused environment lacks dependencies, select a separate Python with [segmentation-requirements.txt](photocraft/segmentation-requirements.txt), rather than upgrading a working ComfyUI environment.
 
-The native controls, queue, masks, variants, persistence, lifecycle and HTTP pipeline have automated synthetic coverage. Direct inpainting protocol 2 passes an explicit image/mask pair and a latent sampling mask, addressing the previous selection-fill path that could return unchanged pixels.
+## Alpha status and roadmap
 
-**Real model generation was deliberately excluded from release validation.** This release does not claim verified inpainting quality, GPU memory requirements or inference performance. Expect rough edges and report problems with the chosen engine, model filenames and a sanitized error log. Logs are in the installed version's `runtime/.runtime/genstudio` folder. Never include a private image or prompt without intending to publish it.
+Native controls, masks, queues, reference handling, persistent prompts, lifecycle and transport have automated synthetic coverage. **Real generation and segmentation inference are excluded from validation at the user's request.** Image quality, memory requirements and model performance remain unverified. Report the selected model/engine and a sanitized error log; avoid publishing private images or prompts unintentionally.
 
-## Roadmap
+Planned work:
 
-These are **planned**, not features of this alpha:
-
-- AI Select Subject.
-- AI Background Remove.
-- FLUX3 support.
-- Custom providers: connect your own inference backend or API.
+- Validate segmentation and inpainting quality and memory use on real models.
+- Additional segmentation models and FLUX 3 controls.
+- Custom inference providers and APIs.
 - SDXL-based models.
-
-The shared engine host is intended to serve these future tools; its current engines are local Direct Qwen and ComfyUI.
 
 ## Development and licenses
 
-See [development and reproducible packaging](docs/DEVELOPMENT.md), [architecture](docs/ARCHITECTURE.md), [release validation](docs/VALIDATION.md) and [third-party notices](THIRD_PARTY.md).
+See [development and packaging](docs/DEVELOPMENT.md), [architecture](docs/ARCHITECTURE.md), [validation](docs/VALIDATION.md) and [third-party notices](THIRD_PARTY.md).
 
-Python host, adapters and installer: **GPL-3.0-or-later**, see [LICENSE](LICENSE). Original Rust integration and translation catalogs: **MIT OR Apache-2.0**, matching PhotoCraft; see [photocraft/LICENSE-MIT](photocraft/LICENSE-MIT) and [photocraft/LICENSE-APACHE](photocraft/LICENSE-APACHE). PhotoCraft, the separate Comfy library, LanPaint, Python and bundled dependencies retain their own notices. Model weights are separate downloads under their publisher's terms.
+Python host, adapters and installer: **GPL-3.0-or-later**, see [LICENSE](LICENSE). Original Rust integration: **MIT OR Apache-2.0**, matching PhotoCraft; see [MIT](photocraft/LICENSE-MIT) and [Apache-2.0](photocraft/LICENSE-APACHE). Ultralytics is AGPL-3.0 and runs in a separate Python process. Upstream software, model weights and trademarks retain their own terms.

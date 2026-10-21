@@ -50,6 +50,23 @@ def http(url,body=None,timeout=10):
 
 
 class StudioTests(unittest.TestCase):
+    def test_cancel_drains_bounded_body_before_reply_and_rejects_truncation(self):
+        from io import BytesIO
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from genstudio.studio import dispatch
+        event=threading.Event()
+        job=SimpleNamespace(cancel=event,public=lambda:{"state":"queued"})
+        for length,body,success in [(2,b"{}",True),(4096,b"x"*4096,True),(3,b"{}",False),(65537,b"",False)]:
+            event.clear();replies=[]
+            handler=SimpleNamespace(path="/studio/jobs/job/cancel",command="POST",headers={"Content-Length":str(length)},
+                rfile=BytesIO(body),connection=Mock(),send_json=lambda code,value:replies.append((code,value)),
+                server=SimpleNamespace(studio=SimpleNamespace(lock=threading.RLock(),jobs={"job":job})))
+            self.assertTrue(dispatch(handler))
+            self.assertEqual(event.is_set(),success)
+            self.assertEqual(replies[0][0],200 if success else 400)
+            if success:self.assertEqual(handler.rfile.tell(),len(body),"no unread request bytes may remain when the reply is sent")
+
     def test_cancelled_and_queued_studio_jobs_block_engine_changes_without_leaking_results(self):
         with server() as (service,host,base):
             started=threading.Event()
@@ -78,11 +95,16 @@ class StudioTests(unittest.TestCase):
         with server() as (service,host,base),tempfile.TemporaryDirectory() as directory:
             events=[];body={"prompt":"An empty garden, use image 1 for the palette", "width":256,"height":320,"batch":2,"seed":15,
                 "references":[base64.b64encode(png_bytes(Image.new("RGBA",(44,88),(200,20,10,80)))).decode()]}
+            stalled=[]
             def request_local(url,body=None,timeout=10):
+                if body is None and not stalled:
+                    stalled.append(url)
+                    raise TimeoutError("worker loading")
                 return http(url.replace("http://127.0.0.1:8766",base),body,timeout)
             configured=[]
             transport(directory,defaults(),body,events.append,configure=lambda *args:configured.append(args),request=request_local,interval=.01)
             self.assertEqual(len(configured),1)
+            self.assertEqual(len(stalled),1)
             self.assertEqual([c[1] for c in host.calls],[15,16])
             self.assertTrue(all(c[0]==1 and c[3:]==(256,320) for c in host.calls))
             self.assertEqual(events[-1],{"done":True})

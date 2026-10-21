@@ -18,7 +18,7 @@ _address = urlsplit(BASE)
 if (_address.scheme != "http" or _address.hostname != "127.0.0.1" or
         _address.path or _address.query or _address.fragment or _address.username or
         not _address.port):
-    raise ValueError("Gen Studio service must use a local 127.0.0.1 HTTP address.")
+    raise ValueError("GenGate service must use a local 127.0.0.1 HTTP address.")
 
 
 def health():
@@ -35,13 +35,14 @@ def run(action, settings=None, event="manual"):
     if action == "models":
         from .models import catalog
         from .settings import validate
-        return catalog(validate(settings)["modelsDir"])
+        selected = validate(settings)
+        return catalog(selected["modelsDir"], selected["model"])
     current = health()
     if not current and action in ("status", "stop"):
         return {"state": "stopped", "ready": False, "owned": False, "message": "Stopped"}
     if not current:
         if BASE != "http://127.0.0.1:8766":
-            raise RuntimeError("The isolated Gen Studio service is unavailable.")
+            raise RuntimeError("The isolated GenGate service is unavailable.")
         folder = ROOT / ".runtime/genstudio"
         folder.mkdir(parents=True, exist_ok=True)
         with open(folder / "host.log", "ab", buffering=0) as out, open(folder / "host-errors.log", "ab", buffering=0) as err:
@@ -52,11 +53,14 @@ def run(action, settings=None, event="manual"):
                 # Another editor may have won the bind race.
                 if health():
                     break
-                raise RuntimeError("Gen Studio host failed to start. See .runtime/genstudio/host-errors.log.")
+                raise RuntimeError("GenGate host failed to start. See .runtime/genstudio/host-errors.log.")
             time.sleep(0.15)
         if not health():
-            raise RuntimeError("Gen Studio host startup timed out.")
-    return http_json(BASE + "/engine", {"action": action, "settings": settings, "event": event}, timeout=330)
+            raise RuntimeError("GenGate host startup timed out.")
+    # Segmentation is editor-owned and uses a separate Direct process. Keep its
+    # preferences out of the generation-service protocol (including older hosts).
+    engine_settings = {key: value for key, value in settings.items() if key != "segmentation"} if settings is not None else None
+    return http_json(BASE + "/engine", {"action": action, "settings": engine_settings, "event": event}, timeout=330)
 
 
 def main():

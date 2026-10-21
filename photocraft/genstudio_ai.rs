@@ -145,7 +145,7 @@ fn input(doc:&Document,mask:&FillMask)->Result<(Image,Image)> {
     let coverage=Image::from_u8(rect.width(),rect.height(),ChannelLayout::Gray,mask.coverage.iter().map(|p|(p*255.0).round() as u8).collect()).map_err(error)?;
     Ok((image,coverage))
 }
-fn native(doc:&Document,image:&Image,rect:Rect)->Result<Surface> {
+pub(crate) fn native(doc:&Document,image:&Image,rect:Rect)->Result<Surface> {
     if image.dimensions()!=(rect.width(),rect.height()) { return Err(error("the engine returned the wrong rectangle dimensions")); }
     let rgba=crate::genstudio_edit::rgba(image);
     let values:Vec<f32>=rgba.data().iter().map(|p|f32::from(*p)/255.0).collect();

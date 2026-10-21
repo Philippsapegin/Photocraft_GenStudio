@@ -6,5 +6,5 @@ $s.TargetPath = $v.target
 $s.Arguments = $v.arguments
 $s.WorkingDirectory = $v.working
 $s.IconLocation = $v.icon + ',0'
-$s.Description = 'PhotoCraft with Gen Studio'
+$s.Description = 'PhotoCraft with GenGate'
 $s.Save()

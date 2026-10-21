@@ -6,7 +6,7 @@ use photocraft_codecs::{ChannelLayout, DecodeOptions, EncodeOptions, Format, Ima
 use serde_json::{Value, json};
 
 fn error(e: impl std::fmt::Display) -> EngineError {
-    EngineError::Other(format!("Gen Studio: {e}"))
+    EngineError::Other(format!("GenGate: {e}"))
 }
 pub fn png(image: &Image) -> Result<Vec<u8>> {
     photocraft_codecs::encode(image, Format::Png, &EncodeOptions::default()).map_err(error)
@@ -168,28 +168,217 @@ fn validate(p: &Value) -> Result<()> {
     Ok(())
 }
 
+const PROMPT_BLOCK: [u8; 4] = *b"gsST";
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct Generation {
+    pub version: u8,
+    pub prompt: String,
+    pub compiled_prompt: String,
+    pub model: String,
+    pub width: u32,
+    pub height: u32,
+}
+pub fn layer_generation(layer: &photocraft_doc::Layer) -> Result<Option<Generation>> {
+    let Some((_, bytes)) = layer.psd_blocks.iter().find(|(key, _)| *key == PROMPT_BLOCK) else { return Ok(None) };
+    if bytes.len() > 32 << 10 {
+        return Err(error("Generation metadata is too large"));
+    }
+    let mut bytes = bytes.as_slice();
+    for _ in 0..3 {
+        if let Some(tail) = bytes.strip_suffix(&[0]) {
+            bytes = tail;
+        } else {
+            break;
+        }
+    }
+    let value: Generation = serde_json::from_slice(bytes).map_err(error)?;
+    if value.version != 1
+        || value.prompt.len() > 12000
+        || value.compiled_prompt.len() > 12000
+        || value.width > 2048
+        || value.height > 2048
+        || value.width == 0
+        || value.height == 0
+    {
+        return Err(error("Invalid generation metadata"));
+    }
+    Ok(Some(value))
+}
+struct Prepared {
+    layers: Vec<photocraft_doc::Layer>,
+    template: photocraft_doc::Document,
+}
+fn prepare_results(images: Vec<Vec<u8>>, template: photocraft_doc::Document, metadata: &Generation) -> Result<Prepared> {
+    use photocraft_color::PixelFormat;
+    use photocraft_doc::{Layer, LayerContent};
+    use std::sync::Arc;
+    let mut layers = Vec::new();
+    let block = Arc::new(serde_json::to_vec(metadata).map_err(error)?);
+    for bytes in images {
+        let image = photocraft_codecs::decode_with(
+            &bytes,
+            &DecodeOptions { limits: Limits { max_width: 2048, max_height: 2048, max_pixels: 2048 * 2048, max_alloc: 64 << 20 }, ..Default::default() },
+        )
+        .map_err(error)?;
+        if image.dimensions() != (metadata.width, metadata.height) {
+            return Err(error("The engine returned the wrong image dimensions"));
+        }
+        let rect = photocraft_geom::Rect::new(0, 0, metadata.width as i32, metadata.height as i32);
+        let surface = crate::genstudio_ai::native(&template, &image, rect)?;
+        let fmt = template.pixel_format();
+        let mut layer = Layer::raster("GenGate", PixelFormat::new(fmt.mode, fmt.sample, true));
+        layer.content = LayerContent::Raster(surface);
+        layer.psd_blocks.push((PROMPT_BLOCK, block.clone()));
+        layers.push(layer);
+    }
+    if layers.is_empty() || layers.len() > 8 {
+        return Err(error("The engine returned an invalid batch"));
+    }
+    Ok(Prepared { layers, template })
+}
 fn generate(s: &mut Session, p: &Value) -> Result<Value> {
     validate(p)?;
     let settings = s.prefs().gen_studio.clone();
     settings.validate().map_err(error)?;
+    let source_prompt = p
+        .get("sourcePrompt")
+        .unwrap_or(&p["prompt"])
+        .as_str()
+        .filter(|v| v.len() <= 12000 && !v.contains('\0'))
+        .ok_or_else(|| error("Invalid source prompt"))?
+        .to_owned();
+    let metadata = Generation {
+        version: 1,
+        prompt: source_prompt,
+        compiled_prompt: p["prompt"].as_str().unwrap_or_default().to_owned(),
+        model: settings.model.clone(),
+        width: p["width"].as_u64().unwrap_or(1024) as u32,
+        height: p["height"].as_u64().unwrap_or(1024) as u32,
+    };
+    let target = s.active().map(|st| st.doc.id);
+    let template = s.active().map(|st| (*st.doc).clone()).unwrap_or_else(|| {
+        photocraft_doc::Document::new(
+            "GenGate",
+            photocraft_geom::Size::new(metadata.width, metadata.height),
+            photocraft_color::ColorMode::Rgb,
+            photocraft_color::SampleType::U8,
+        )
+    });
     let payload = p.clone();
-    crate::jobs::run(s, "Gen Studio", false, move |ctx| crate::genstudio_edit::studio(&settings, &payload, ctx), |s, images| import_results(s, &images))
+    crate::jobs::run(
+        s,
+        "GenGate",
+        false,
+        move |ctx| {
+            let images = crate::genstudio_edit::studio(&settings, &payload, ctx)?;
+            ctx.check()?;
+            prepare_results(images, template, &metadata)
+        },
+        move |s, prepared| import_results(s, target, prepared),
+    )
 }
-
-fn import_results(s: &mut Session, images: &[Vec<u8>]) -> Result<Value> {
-    let mut documents = Vec::new();
-    for (index, image) in images.iter().enumerate() {
-        documents.push(crate::file_cmds::open_bytes_as(s, &format!("Qwen generation {}.png", index + 1), image, None, None)?);
-        // These pixels have no backing file. Closing them must offer Save.
-        if let Some(document) = s.active_mut() {
-            document.saved_revision = document.revision.saturating_sub(1);
+fn import_results(s: &mut Session, target: Option<photocraft_doc::DocId>, prepared: Prepared) -> Result<Value> {
+    let Prepared { layers, template } = prepared;
+    let count = layers.len();
+    let index = target.and_then(|id| s.documents().iter().position(|st| st.doc.id == id));
+    let previous = s.active().map(|st| st.doc.id);
+    let (index, ids, created) = if let Some(index) = index {
+        let current = s.documents().get(index).ok_or(crate::EngineError::NoDocument)?;
+        if current.doc.mode != template.mode || current.doc.depth != template.depth || current.doc.icc_profile != template.icc_profile {
+            return Err(error("The document colour format changed during generation"));
         }
-    }
-    Ok(json!({"documents":documents,"count":images.len()}))
+        s.set_active(index);
+        let applied = s.edit("GenGate", move |doc, active| {
+            let mut ids = Vec::new();
+            for mut layer in layers {
+                layer.name = doc.next_layer_name("GenGate");
+                let id = doc.insert_above(*active, layer);
+                *active = Some(id);
+                ids.push(id.0);
+            }
+            Ok(ids)
+        });
+        if let Some(previous) = previous
+            && let Some(i) = s.documents().iter().position(|st| st.doc.id == previous)
+        {
+            s.set_active(i);
+        }
+        (index, applied?, false)
+    } else {
+        let metadata = layers.first().map(layer_generation).transpose()?.flatten().ok_or_else(|| error("Generation metadata is missing"))?;
+        let mut doc = photocraft_doc::Document::new("GenGate", photocraft_geom::Size::new(metadata.width, metadata.height), template.mode, template.depth);
+        doc.icc_profile = template.icc_profile;
+        let ids = layers.iter().map(|layer| layer.id.0).collect::<Vec<_>>();
+        for mut layer in layers {
+            layer.name = doc.next_layer_name("GenGate");
+            doc.layers.push(layer);
+        }
+        let index = s.add_document(doc, None);
+        if let Some(st) = s.active_mut() {
+            st.saved_revision = st.revision.saturating_sub(1);
+        }
+        (index, ids, true)
+    };
+    let id = s.documents().get(index).ok_or(crate::EngineError::NoDocument)?.doc.id.0;
+    Ok(json!({"document":index,"documentId":id,"layers":ids,"count":count,"createdDocument":created}))
+}
+fn generated_layer<'a>(s: &'a Session, p: &Value) -> Result<(&'a photocraft_doc::Document, &'a photocraft_doc::Layer, Generation)> {
+    let st = if let Some(id) = p.get("documentId") { s.documents().iter().find(|st| id.as_u64() == Some(st.doc.id.0)) } else { s.active() }
+        .ok_or(crate::EngineError::NoDocument)?;
+    let id = p.get("layer").and_then(Value::as_u64).map(photocraft_doc::LayerId).or(st.active_layer).ok_or_else(|| error("Choose a generated layer"))?;
+    let layer = st.doc.layer(id).ok_or(crate::EngineError::NoLayer(id))?;
+    let metadata = layer_generation(layer)?.ok_or_else(|| error("Choose a GenGate layer"))?;
+    Ok((&st.doc, layer, metadata))
+}
+fn layer_info(s: &mut Session, p: &Value) -> Result<Value> {
+    let (_, layer, metadata) = generated_layer(s, p)?;
+    Ok(json!({"layer":layer.id.0,"generation":metadata}))
+}
+fn result_reference(s: &mut Session, p: &Value) -> Result<Value> {
+    let (doc, layer, metadata) = generated_layer(s, p)?;
+    let mut source = doc.clone();
+    source.layers = vec![layer.clone()];
+    let rect = photocraft_geom::Rect::new(0, 0, metadata.width as i32, metadata.height as i32);
+    crate::jobs::run(
+        s,
+        "Prepare generated reference",
+        false,
+        move |ctx| {
+            ctx.check()?;
+            let pixels: Vec<f32> = photocraft_compose::render(&source, rect).px.into_iter().flatten().collect();
+            let transform =
+                Transform::new(&crate::color_cmds::composite_profile(&source), Builtin::Srgb.profile(), Intent::RelativeColorimetric, true).map_err(error)?;
+            let mut rgba = vec![0.0; pixels.len()];
+            transform.convert_f32(&pixels, 4, &mut rgba, 4, true);
+            let image = Image::from_normalized(rect.width(), rect.height(), ChannelLayout::Rgba, SampleType::U8, &rgba).map_err(error)?;
+            encoded(&resized(&image, 1024)?)
+        },
+        |_, image| Ok(json!({"image":image,"name":"Generated image","source":"generated"})),
+    )
 }
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
+        CommandSpec {
+            id: "genstudio.studio.layer.inspect",
+            label: "Generation prompt",
+            menu: &[],
+            shortcut: None,
+            params: "{documentId?,layer?}",
+            enabled: crate::commands::always,
+            run: layer_info,
+            journal: false,
+        },
+        CommandSpec {
+            id: "genstudio.studio.result.reference",
+            label: "Generated reference",
+            menu: &[],
+            shortcut: None,
+            params: "{documentId,layer}",
+            enabled: crate::commands::always,
+            run: result_reference,
+            journal: false,
+        },
         CommandSpec {
             id: "genstudio.reference.capture",
             label: "Capture reference",
@@ -202,7 +391,7 @@ pub fn specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             id: "genstudio.studio.generate",
-            label: "Gen Studio",
+            label: "GenGate",
             menu: &[],
             shortcut: None,
             params: "{prompt,references:[PNG base64]=[],width:1024,height:1024,batch:1..8}",
@@ -237,12 +426,66 @@ mod tests {
         assert!(prepare_reference(b"not an image").is_err());
     }
     #[test]
-    fn generated_documents_are_unsaved_and_keep_each_batch_result() {
+    fn generated_layers_keep_prompts_undo_and_round_trip() {
         let mut s = Session::new();
+        let meta = Generation {
+            version: 1,
+            prompt: "A quiet forest".into(),
+            compiled_prompt: "A quiet forest".into(),
+            model: "qwen-image-2.1-turbo".into(),
+            width: 8,
+            height: 8,
+        };
         let image = Image::from_u8(8, 8, ChannelLayout::Rgba, [20, 80, 120, 255].repeat(64)).unwrap();
-        let result = import_results(&mut s, &[png(&image).unwrap(), png(&image).unwrap()]).unwrap();
-        assert_eq!(result["count"], 2);
-        assert_eq!(s.documents().len(), 2);
-        assert!(s.documents().iter().all(|doc| doc.path.is_none() && doc.is_dirty()));
+        let template =
+            photocraft_doc::Document::new("GenGate", photocraft_geom::Size::new(8, 8), photocraft_color::ColorMode::Rgb, photocraft_color::SampleType::U8);
+        let ready = prepare_results(vec![png(&image).unwrap()], template, &meta).unwrap();
+        let result = import_results(&mut s, None, ready).unwrap();
+        assert_eq!(s.documents().len(), 1);
+        assert_eq!(s.active().unwrap().doc.layers.len(), 1);
+        assert!(s.active().unwrap().is_dirty());
+        let id = s.active().unwrap().doc.id;
+        let template = (*s.active().unwrap().doc).clone();
+        let ready = prepare_results(vec![png(&image).unwrap(), png(&image).unwrap()], template, &meta).unwrap();
+        import_results(&mut s, Some(id), ready).unwrap();
+        assert_eq!(s.documents().len(), 1);
+        assert_eq!(s.active().unwrap().doc.layers.len(), 3);
+        assert_eq!(layer_info(&mut s, &json!({})).unwrap()["generation"]["prompt"], meta.prompt);
+        s.execute("edit.undo", json!({})).unwrap();
+        assert_eq!(s.active().unwrap().doc.layers.len(), 1);
+        s.execute("edit.redo", json!({})).unwrap();
+        assert_eq!(s.active().unwrap().doc.layers.len(), 3);
+        let doc = &s.active().unwrap().doc;
+        let bytes = photocraft_format::save_to_bytes(doc, &Default::default()).unwrap();
+        let loaded = photocraft_format::load_from_bytes(&bytes).unwrap();
+        assert_eq!(layer_generation(loaded.layers.last().unwrap()).unwrap().unwrap().prompt, meta.prompt);
+        let exported = photocraft_io::export(doc, "psd", &Default::default()).unwrap();
+        let psd = photocraft_io::import("generated.psd", &exported.bytes).unwrap().document;
+        assert_eq!(layer_generation(psd.layers.last().unwrap()).unwrap().unwrap().prompt, meta.prompt);
+        assert_eq!(result["createdDocument"], true);
+    }
+    #[test]
+    fn completion_targets_the_original_document_after_a_tab_switch() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({"width":16,"height":16})).unwrap();
+        let target = s.active().unwrap().doc.id;
+        let template = (*s.active().unwrap().doc).clone();
+        let meta = Generation {
+            version: 1,
+            prompt: "Original tab".into(),
+            compiled_prompt: "Original tab".into(),
+            model: "qwen-image-2.1-turbo".into(),
+            width: 8,
+            height: 8,
+        };
+        let image = Image::from_u8(8, 8, ChannelLayout::Rgba, [20, 80, 120, 255].repeat(64)).unwrap();
+        let prepared = prepare_results(vec![png(&image).unwrap()], template, &meta).unwrap();
+        s.execute("file.new", json!({"width":16,"height":16})).unwrap();
+        let other = s.active().unwrap().doc.id;
+        import_results(&mut s, Some(target), prepared).unwrap();
+        assert_eq!(s.active().unwrap().doc.id, other);
+        let original = s.documents().iter().find(|st| st.doc.id == target).unwrap();
+        assert_eq!(original.doc.layers.len(), 2);
+        assert_eq!(layer_generation(original.doc.layers.last().unwrap()).unwrap().unwrap().prompt, "Original tab");
     }
 }

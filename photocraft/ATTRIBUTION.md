@@ -7,4 +7,4 @@
 
 Model files remain in the user-selected source directory and are not redistributed by this project. Their license is provided by [Qwen](https://huggingface.co/Qwen/Qwen-Image-2.1-Turbo).
 
-The original Gen Studio menu catalogs `menu-locales.json`, `progress-locales.json` and `selection-locales.json` are by Gen Studio contributors, licensed MIT OR Apache-2.0 with the Rust integration. The preparer adds their entries to PhotoCraft's catalogs and records them in its `ATTRIBUTION.md`, retaining existing translation licenses.
+The original GenGate menu catalogs `menu-locales.json`, `progress-locales.json` and `selection-locales.json` are by GenGate contributors, licensed MIT OR Apache-2.0 with the Rust integration. The preparer adds their entries to PhotoCraft's catalogs and records them in its `ATTRIBUTION.md`, retaining existing translation licenses.

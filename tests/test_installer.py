@@ -73,21 +73,29 @@ class InstallerTests(unittest.TestCase):
         # Use the real file-copy/install/metadata transaction, mocking only the
         # external interpreter probe and optional model discovery.
         with patch.object(installer, "check_python", return_value="existing/python.exe"), \
-             patch("genstudio.models.resolve", return_value={}):
+             patch("genstudio.models.resolve", return_value={}) as discover:
             installer.install(request, self.bundle, shortcuts=False)
             prefs_path = self.destination / "Profile/preferences.json"
             preferences = installer.read_json(prefs_path)
             preferences["general"] = {"theme": "light"}
             preferences["genStudio"]["directStartup"] = "off"
+            preferences["genStudio"].update(model="flux-3-image-klein",textEncoder="text_encoders/custom.safetensors",vae="vae/custom.safetensors",
+                segmentation={"enabled":True,"detector":"yolov8m-worldv2","segmenter":"sam3","python":"private/python.exe"})
             installer.write_json(prefs_path, preferences)
             before = installer.read_json(self.destination / "genstudio-install.json")
             installer.install(request, self.bundle, shortcuts=False)
             after = installer.read_json(self.destination / "genstudio-install.json")
+            discover.assert_called_with(str(self.models.resolve()),"text_encoders/custom.safetensors","vae/custom.safetensors","flux-3-image-klein")
         self.assertNotEqual(before["executable"], after["executable"])
         self.assertTrue(Path(before["executable"]).is_file())
         updated = installer.read_json(prefs_path)
         self.assertEqual(updated["general"], {"theme": "light"})
         self.assertEqual(updated["genStudio"]["directStartup"], "off")
+        self.assertEqual(updated["genStudio"]["model"], "flux-3-image-klein")
+        self.assertEqual(updated["genStudio"]["textEncoder"], "text_encoders/custom.safetensors")
+        self.assertEqual(updated["genStudio"]["vae"], "vae/custom.safetensors")
+        self.assertTrue(updated["genStudio"]["segmentation"]["enabled"])
+        self.assertEqual(updated["genStudio"]["segmentation"]["detector"], "yolov8m-worldv2")
         self.assertTrue(prefs_path.with_suffix(".before-setup.json").is_file())
         self.assertEqual(list(self.models.iterdir()), [sentinel])
         self.assertFalse(list(self.destination.rglob("*.safetensors")))

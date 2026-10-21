@@ -14,7 +14,8 @@ POLICIES = ("off", "appStart", "firstRequest")
 def defaults():
     from genfill.server import load_config
     old = load_config()
-    return {"model": MODEL, "textEncoder": "", "vae": "",
+    from .segmentation_models import DEFAULTS
+    return {"segmentation": dict(DEFAULTS), "model": MODEL, "textEncoder": "", "vae": "",
             "engine": "comfy", "comfyStartup": "firstRequest", "directStartup": "firstRequest",
             "comfyUrl": old["comfy_url"], "comfyDir": old.get("comfy_dir", ""),
             "comfyPython": old.get("comfy_python", ""),
@@ -39,13 +40,17 @@ def validate(value):
     if unknown:
         raise ValueError("Unknown engine setting: " + ", ".join(sorted(unknown)))
     result.update(value)
+    from .segmentation_models import validate as validate_segmentation
+    result["segmentation"] = validate_segmentation(result["segmentation"])
     for key, item in result.items():
+        if key == "segmentation":
+            continue
         if not isinstance(item, str) or len(item) > 4096 or "\x00" in item:
             raise ValueError("Invalid engine setting: " + key)
     if result["engine"] not in ENGINES:
         raise ValueError("Unknown engine.")
-    if result["model"] != MODEL:
-        raise ValueError("Unsupported model. Select Qwen Image 2.1 Turbo.")
+    from .models import specification
+    specification(result["model"])
     if any(result[key] not in POLICIES for key in ("comfyStartup", "directStartup")):
         raise ValueError("Unknown automatic start policy.")
     url = urlparse(result["comfyUrl"])

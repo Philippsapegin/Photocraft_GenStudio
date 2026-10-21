@@ -22,3 +22,13 @@ pydantic~=2.0
 pydantic-settings~=2.0
 blake3
 aiohttp>=3.11.8
+
+# Independent segmentation support (the model SDK itself lives in a private overlay).
+opencv-python
+matplotlib
+requests
+polars
+ftfy
+regex
+ultralytics-thop
+timm

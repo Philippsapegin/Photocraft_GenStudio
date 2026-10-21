@@ -14,19 +14,22 @@ from genfill.progress import sampling_fraction
 from genfill.server import Job, TERMINAL
 
 
-def request(value):
+def request(value, model="qwen-image-2.1-turbo"):
+    from .models import specification
+    spec = specification(model)
     if not isinstance(value, dict):
         raise ValueError("Expected a generation request.")
     prompt = value.get("prompt", "")
     if not isinstance(prompt, str) or not prompt.strip() or len(prompt.encode("utf-8")) > 12000 or "\0" in prompt:
         raise ValueError("Enter a prompt (up to 12000 UTF-8 bytes).")
     refs = value.get("references", [])
-    if not isinstance(refs, list) or len(refs) > 10:
-        raise ValueError("Qwen 2.1 supports up to 10 reference images.")
+    if not isinstance(refs, list) or len(refs) > spec["references"]:
+        raise ValueError(f"{spec['label']} supports up to {spec['references']} reference images.")
     width = bounded_int(value.get("width", 1024), 256, 2048, "Width")
     height = bounded_int(value.get("height", 1024), 256, 2048, "Height")
-    if width % 32 or height % 32:
-        raise ValueError("Generation dimensions must be multiples of 32.")
+    grid = spec["grid"]
+    if width % grid or height % grid:
+        raise ValueError(f"Generation dimensions must be multiples of {grid}.")
     count = bounded_int(value.get("batch", 1), 1, 8, "Batch size")
     seed = bounded_int(value.get("seed", secrets.randbelow(2**32)), 0, 2**53 - 9, "Seed")
     images = []
@@ -34,9 +37,9 @@ def request(value):
     for encoded in refs:
         image = decode_png(encoded, 16 << 20).convert("RGBA")
         image.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
-        # Qwen's reference grid is in multiples of 32; do not distort its ratio
+        # Follow the selected model's reference grid; do not distort its ratio
         # by resizing every image to the output canvas dimensions.
-        w, h = (max(32, round(side / 32) * 32) for side in image.size)
+        w, h = (max(grid, round(side / grid) * grid) for side in image.size)
         images.append(image.resize((w, h), Image.Resampling.LANCZOS))
     return {"prompt": prompt, "references": images, "width": width, "height": height, "batch": count, "seed": seed}
 
@@ -49,8 +52,14 @@ class StudioJobs:
         self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="genstudio-full")
 
     def submit(self, body):
-        data = request(body)
-        with self.lock:
+        model = self.host.settings["model"]
+        data = request(body, model)
+        # Publish the queued job under the same lock used by /engine changes.
+        # Validation may decode large images, so do it before taking that lock,
+        # then reject a concurrent model change rather than using the wrong one.
+        with self.host.lock, self.lock:
+            if self.host.settings["model"] != model:
+                raise ValueError("The selected model changed. Submit the generation again.")
             active = [job for job in self.jobs.values() if job.state not in TERMINAL]
             if len(active) >= 4:
                 raise ValueError("The generation queue is full. Wait for a result.")
@@ -116,6 +125,16 @@ def dispatch(handler):
             handler.send_json(202, job.public())
         else:
             parts = handler.path.strip("/").split("/")
+            if len(parts) == 4 and parts[3] == "cancel" and handler.command == "POST":
+                # Consume the small request body before closing HTTP/1.0.
+                # Otherwise Windows can reset the connection and discard the
+                # reply, even though cancellation itself already succeeded.
+                length = int(handler.headers.get("Content-Length", "0"))
+                if not 0 <= length <= 64 << 10:
+                    raise ValueError("The cancel request exceeds the size limit.")
+                handler.connection.settimeout(5)
+                if len(handler.rfile.read(length)) != length:
+                    raise ValueError("Incomplete cancel request.")
             with manager.lock:
                 job = manager.jobs.get(parts[2]) if len(parts) in (3, 4) else None
                 if job is None:

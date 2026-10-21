@@ -12,7 +12,7 @@ import subprocess
 import sys
 import uuid
 
-VERSION = "0.7.0-alpha.1"
+VERSION = "0.8.0-alpha.1"
 REPOSITORY = "https://github.com/Philippsapegin/Photocraft_GenStudio"
 
 
@@ -74,11 +74,11 @@ def valid_destination(value, bundle):
         raise ValueError("Choose an absolute installation folder.")
     path = Path(value).resolve()
     if path == Path(path.anchor) or path == Path.home().resolve():
-        raise ValueError("Choose a new subfolder for PhotoCraft Gen Studio.")
+        raise ValueError("Choose a new subfolder for PhotoCraft GenGate.")
     if path == bundle.resolve() or path.is_relative_to(bundle.resolve()) or bundle.resolve().is_relative_to(path):
         raise ValueError("Choose a folder outside the extracted installer.")
     if path.exists() and any(path.iterdir()) and not (path / "genstudio-install.json").is_file():
-        raise ValueError("This folder already contains other files. Choose an empty folder or a previous Gen Studio installation.")
+        raise ValueError("This folder already contains other files. Choose an empty folder or a previous GenGate installation.")
     return path
 
 
@@ -200,9 +200,24 @@ def install(request, bundle, *, shortcuts=True):
     settings = settings_for(request, runtime, python)
     # An existing profile keeps its startup choice; first installs use first request.
     old_settings = preferences.get("genStudio", {})
+    if not isinstance(old_settings, dict):
+        old_settings = {}
     for key in ("comfyStartup", "directStartup"):
         if old_settings.get(key) in ("off", "appStart", "firstRequest"):
             settings[key] = old_settings[key]
+    if old_settings.get("model") in ("qwen-image-2.1-turbo", "flux-3-image-klein"):
+        settings["model"] = old_settings["model"]
+    if os.path.normcase(str(Path(old_settings.get("modelsDir") or ".").resolve())) == os.path.normcase(settings["modelsDir"]):
+        for key in ("textEncoder", "vae"):
+            value=old_settings.get(key)
+            if isinstance(value,str) and len(value)<=4096 and "\0" not in value:
+                settings[key]=value
+    if isinstance(old_settings.get("segmentation"),dict):
+        from genstudio.segmentation_models import validate as validate_segmentation
+        try:
+            settings["segmentation"]=validate_segmentation(old_settings["segmentation"])
+        except ValueError:
+            pass
     write_json(runtime / "config.photocraft.json", settings)
     if engine == "comfy" and not lanpaint.exists():
         report("Installing the bundled, pinned LanPaint extension into the selected ComfyUI...")
@@ -217,27 +232,27 @@ def install(request, bundle, *, shortcuts=True):
                "executable": str(version_dir / "PhotoCraft.exe"), "profile": str(profile),
                "source": REPOSITORY, "sha256": manifest["files"]["PhotoCraft.exe"]})
     if shortcuts:
-        report("Creating a separate PhotoCraft Gen Studio shortcut...")
+        report("Creating a separate PhotoCraft GenGate shortcut...")
         powershell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
         args = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + str(destination / "Launch.ps1") + '"'
-        menu = Path(os.environ["APPDATA"]) / "Microsoft/Windows/Start Menu/Programs/PhotoCraft Gen Studio.lnk"
+        menu = Path(os.environ["APPDATA"]) / "Microsoft/Windows/Start Menu/Programs/PhotoCraft GenGate.lnk"
         shortcut(menu, powershell, args, destination, version_dir / "PhotoCraft.exe")
         if request.get("desktopShortcut", True):
             # The real Desktop can be redirected to OneDrive.
             script = "[Environment]::GetFolderPath('Desktop')"
             desktop = subprocess.check_output(["powershell.exe", "-NoProfile", "-Command", script],
                         text=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).strip()
-            shortcut(Path(desktop) / "PhotoCraft Gen Studio.lnk", powershell, args, destination, version_dir / "PhotoCraft.exe")
+            shortcut(Path(desktop) / "PhotoCraft GenGate.lnk", powershell, args, destination, version_dir / "PhotoCraft.exe")
     # File checks only: no model imports, no CUDA, no engine start.
     report("Checking the model folder without loading weights...")
     sys.path.insert(0, str(runtime))
     from genstudio.models import resolve
     try:
-        resolve(settings["modelsDir"])
+        resolve(settings["modelsDir"],settings.get("textEncoder",""),settings.get("vae",""),settings.get("model","qwen-image-2.1-turbo"))
         report("Model files found. No weights were loaded.")
     except ValueError as error:
         report("Setup completed; models still need attention: " + str(error))
-    report("Installed. Open PhotoCraft Gen Studio, then Filter > Plug-ins > Gen Studio.")
+    report("Installed. Open PhotoCraft GenGate, then Filter > Plug-ins > GenGate.")
     return destination
 
 

@@ -94,7 +94,7 @@ def build(args):
     source_defaults = json.loads((upstream / "crates/engine/src/genstudio-defaults.json").read_text())
     if source_defaults.get("runtimeRoot") not in ("", "."):
         raise ValueError("Do not distribute a build containing developer machine paths.")
-    target = ROOT / "dist" / ("PhotoCraft-GenStudio-" + installer.VERSION + "-windows-x64")
+    target = ROOT / "dist" / ("PhotoCraft-GenGate-" + installer.VERSION + "-windows-x64")
     # A new package is staged next to earlier packages, never recursively removed.
     if target.exists():
         raise ValueError("Package staging directory already exists; move it aside before rebuilding: " + str(target))
@@ -105,13 +105,19 @@ def build(args):
         copy_tree(ROOT / directory, runtime / directory)
     for name in ("config.example.json", "requirements.txt", "LICENSE"):
         shutil.copyfile(ROOT / name, runtime / name)
-    for name in ("run_direct.py", "prepare_qwen_core.py", "Setup-Direct.ps1"):
+    for name in ("run_direct.py", "run_segmentation.py", "download_segmentation.py", "prepare_qwen_core.py", "prepare_flux_core.py", "download_flux3.py", "Setup-Direct.ps1"):
         destination = runtime / "scripts" / name
         destination.parent.mkdir(exist_ok=True)
         shutil.copyfile(ROOT / "scripts" / name, destination)
     destination = runtime / "photocraft"
     destination.mkdir()
     shutil.copyfile(ROOT / "photocraft/direct-requirements.txt", destination / "direct-requirements.txt")
+    shutil.copyfile(ROOT / "photocraft/flux-requirements.txt", destination / "flux-requirements.txt")
+    shutil.copyfile(ROOT / "photocraft/flux3-models.json", destination / "flux3-models.json")
+    for name in ("segmentation-models.json", "segmentation-requirements.txt"):
+        shutil.copyfile(ROOT / "photocraft" / name, destination / name)
+    from genstudio.segmentation_models import ensure_modules
+    copy_tree(ensure_modules(), runtime / ".runtime/segmentation/deps")
     copy_tree(ROOT / "packaging", runtime / "packaging")
     for name in ("Setup.cmd", "Setup.ps1", "Launch.ps1", "PhotoCraft.cmd"):
         shutil.copyfile(ROOT / "packaging" / name, target / name)
@@ -146,6 +152,15 @@ def build(args):
     if json.loads((core / "genstudio-core.json").read_text())["revision"] != CORE_REV:
         raise ValueError("Expected the pinned Direct model library.")
     copy_tree(core, runtime / ".runtime/qwen-core")
+    from prepare_flux_core import REVISION as FLUX_REV
+    from prepare_qwen_core import prepare as prepare_core
+    flux_core = prepare_core(revision=FLUX_REV, directory="flux-core")
+    copy_tree(flux_core, runtime / ".runtime/flux-core", exclude=("deps",))
+    # Bundle the two small accelerator dependencies in a private overlay. This
+    # never upgrades an attached ComfyUI/Qwen Python and ships no torch or weights.
+    subprocess.run([str(python_dir / "python.exe"), "-m", "pip", "install", "--disable-pip-version-check",
+        "--only-binary=:all:", "--no-deps", "--target", str(runtime / ".runtime/flux-core/deps"),
+        "-r", str(runtime / "photocraft/flux-requirements.txt")], check=True)
     # LanPaint is source code, including its license. Install it into ComfyUI only
     # if the user explicitly selects the setup checkbox and it does not exist.
     copy_tree(lanpaint_source(args.lanpaint), runtime / "third_party/LanPaint",
@@ -166,7 +181,7 @@ def build(args):
         destination = licenses / "PhotoCraft" / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(path, destination)
-    shutil.copyfile(ROOT / "LICENSE", licenses / "GenStudio-GPL-3.0.txt")
+    shutil.copyfile(ROOT / "LICENSE", licenses / "GenGate-GPL-3.0.txt")
     shutil.copyfile(ROOT / "THIRD_PARTY.md", licenses / "THIRD_PARTY.md")
     shutil.copyfile(python_dir / "LICENSE.txt", licenses / "Python-LICENSE.txt")
     # The embedded wheel dist-info directories retain all Python dependency

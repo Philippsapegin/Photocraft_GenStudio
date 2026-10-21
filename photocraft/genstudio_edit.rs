@@ -40,7 +40,7 @@ fn generate_request(settings: &Settings, image: &Image, mask: &Image, ctx: &JobC
     let root = Path::new(&settings.runtime_root);
     let python = root.join(".venv").join(if cfg!(windows) { "Scripts/python.exe" } else { "bin/python" });
     if !python.is_file() || !root.join("genstudio/edit.py").is_file() {
-        return Err(err("Gen Studio runtime is missing; check its Advanced settings"));
+        return Err(err("GenGate runtime is missing; check its Advanced settings"));
     }
     let folder = tempfile::Builder::new().prefix("photocraft-qwen-").tempdir().map_err(err)?;
     for (name, data) in [("input.png", image), ("mask.png", mask)] {
@@ -54,7 +54,7 @@ fn generate_request(settings: &Settings, image: &Image, mask: &Image, ctx: &JobC
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn transport(settings: &Settings, folder: &std::path::Path, payload: &serde_json::Value, ctx: &JobCtx) -> Result<()> {
+pub(crate) fn transport(settings: &Settings, folder: &std::path::Path, payload: &serde_json::Value, ctx: &JobCtx) -> Result<()> {
     use std::{
         fs,
         io::{BufRead, BufReader, Write},
@@ -194,7 +194,7 @@ impl Drop for Child {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn read_png(path: &std::path::Path, size: (u32, u32)) -> Result<Image> {
+pub(crate) fn read_png(path: &std::path::Path, size: (u32, u32)) -> Result<Image> {
     use std::io::Read;
     const MAX: u64 = 128 << 20;
     let file = std::fs::File::open(path).map_err(err)?;

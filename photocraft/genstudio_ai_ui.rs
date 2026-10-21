@@ -20,6 +20,12 @@ fn rect(rect:egui::Rect)->Value { json!([rect.min.x,rect.min.y,rect.width(),rect
 fn failure(app:&mut PhotocraftApp,error:String) { crate::notices::error(app,error); }
 
 pub fn properties(app:&mut PhotocraftApp,ui:&mut egui::Ui,layer:&Layer)->bool {
+    if let Ok(Some(generation))=photocraft_engine::genstudio_generate::layer_generation(layer) {
+        ui.label("Generation prompt");
+        let mut text=generation.prompt.as_str();
+        egui::ScrollArea::vertical().max_height(160.0).show(ui,|ui|{ui.add(egui::TextEdit::multiline(&mut text).desired_width(ui.available_width()));});
+        return true;
+    }
     if !genstudio_ai::is_layer(layer) { return false; }
     let Some(doc)=app.session.active().map(|st|st.doc.id) else { return false };
     let mut cache=std::mem::take(&mut app.ai_layers);
@@ -205,7 +211,7 @@ mod tests {
         PhotocraftApp::setup_context(&h.ctx,crate::theme::ThemeKind::Studio);h.run_steps(5);
         assert_eq!(h.state().ai_layers.bar_info["prompt"],"A red bicycle");
         h.state_mut().ui.gen_studio.open=true;h.run_steps(3);
-        assert!(h.state().ai_layers.bar_info.is_null(),"the floating selection bar must not cover Gen Studio");
+        assert!(h.state().ai_layers.bar_info.is_null(),"the floating selection bar must not cover GenGate");
         assert!(!h.state().ui.gen_studio.hide_ai_bar,"opening Studio does not change the display preference");
         h.state_mut().ui.gen_studio.open=false;h.run_steps(3);
         assert_eq!(h.state().ai_layers.bar_info["prompt"],"A red bicycle");

@@ -1,4 +1,4 @@
-//! Filter > Plug-ins > Gen Studio. Native widgets, shared with the editor's theme.
+//! Filter > Plug-ins > GenGate. Native widgets, shared with the editor's theme.
 use crate::PhotocraftApp;
 use photocraft_engine::genstudio::{Engine, Settings, Startup};
 use serde_json::{Value, json};
@@ -10,8 +10,6 @@ pub struct State {
     pub settings_open: bool,
     pub advanced_open: bool,
     #[serde(skip)]
-    pub settings_were_open: bool,
-    #[serde(skip)]
     pub advanced_were_open: bool,
     pub workspace: crate::genstudio_canvas::Workspace,
     pub draft: Option<Settings>,
@@ -22,6 +20,8 @@ pub struct State {
     pub last_probe: Option<std::time::Instant>,
     #[serde(skip)]
     pub initialized: bool,
+    #[serde(skip)]
+    pub window_position: Option<[f32; 2]>,
     #[serde(skip)]
     pub was_pending: bool,
     #[serde(skip)]
@@ -59,29 +59,44 @@ pub fn menu(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<
         });
     }
     if id == "genstudio.models.browse" {
-        let initial_dir = app.ui.gen_studio.draft.as_ref().map(|v| v.models_dir.clone());
-        return Some(app.ask_file(crate::file_dialog::FileDialogRequest::Folder { initial_dir }, |app, answer| {
+        let dialog = app
+            .ui
+            .dialogs
+            .iter()
+            .rev()
+            .find(|d| crate::prefs_ui::is_preferences(&d.fields))
+            .map(|d| d.id)
+            .unwrap_or_else(|| crate::prefs_ui::open_preferences(app, "genStudio"));
+        let initial_dir = app.ui.dialogs.iter().find(|d| d.id == dialog).and_then(|d| d.fields["values"]["genStudio"]["modelsDir"].as_str()).map(str::to_owned);
+        return Some(app.ask_file(crate::file_dialog::FileDialogRequest::Folder { initial_dir }, move |app, answer| {
             let crate::file_dialog::FileDialogAnswer::FolderTo(path) = answer else { return Err("Expected a models folder".into()) };
-            let mut draft = app.ui.gen_studio.draft.take().unwrap_or_else(|| app.session.prefs().gen_studio.clone());
-            draft.models_dir = path;
-            draft.text_encoder.clear();
-            draft.vae.clear();
-            app.ui.gen_studio.draft = Some(draft);
+            let d = app.ui.dialog_mut(dialog).ok_or("Preferences was closed")?;
+            let value = d.fields.get_mut("values").and_then(|v| v.get_mut("genStudio")).and_then(Value::as_object_mut).ok_or("Preferences draft is missing")?;
+            value.insert("modelsDir".into(), json!(path));
+            value.insert("textEncoder".into(), json!(""));
+            value.insert("vae".into(), json!(""));
             Ok(json!({"modelsFolderSelected":true}))
         }));
     }
-    if id != "genstudio.open" {
+    if id != "genstudio.open" && id != "genstudio.settings.open" {
         return None;
     }
     if params.get("open").is_some_and(|value| !value.is_boolean()) {
-        return Some(Err("Gen Studio open must be a boolean".into()));
+        return Some(Err("GenGate open must be a boolean".into()));
     }
-    app.ui.gen_studio.open = params.get("open").and_then(Value::as_bool).unwrap_or(true);
-    if app.ui.gen_studio.open {
-        app.ui.gen_studio.draft = Some(app.session.prefs().gen_studio.clone());
+    let open = params.get("open").and_then(Value::as_bool).unwrap_or(true);
+    if id == "genstudio.settings.open" {
+        if open {
+            let dialog = crate::prefs_ui::open_preferences(app, "genStudio");
+            return Some(Ok(json!({"dialog":dialog,"section":"genStudio"})));
+        }
+        return Some(Ok(json!({"open":false})));
+    }
+    app.ui.gen_studio.open = open;
+    if open {
         crate::genstudio_canvas::opened(app);
     }
-    Some(Ok(json!({"window":"genStudio","open":app.ui.gen_studio.open})))
+    Some(Ok(json!({"window":if id == "genstudio.open" {"genStudio"} else {"genStudioSettings"},"open":open})))
 }
 
 fn text(ui: &mut egui::Ui, label: &str, value: &mut String) {
@@ -99,7 +114,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         && app.ui.gen_studio.remove_start_notice != Some(job.id.0)
     {
         app.ui.gen_studio.remove_start_notice = Some(job.id.0);
-        crate::notices::post(app, "Gen Studio", vec!["Starting the local AI engine. This may take a moment.".into()], false, None);
+        crate::notices::post(app, "GenGate", vec!["Starting the local AI engine. This may take a moment.".into()], false, None);
     }
     if !app.ui.gen_studio.initialized {
         app.ui.gen_studio.initialized = true;
@@ -135,7 +150,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             .map(|_| "Starting the AI engine…".to_owned())
     };
     if pending && !app.ui.gen_studio.was_pending && state["status"]["message"].as_str().is_some_and(|s| s.starts_with("Starting")) {
-        crate::notices::post(app, "Gen Studio", vec!["Starting the local AI engine. This may take a moment.".into()], false, None);
+        crate::notices::post(app, "GenGate", vec!["Starting the local AI engine. This may take a moment.".into()], false, None);
     }
     if pending {
         ctx.request_repaint_after(std::time::Duration::from_millis(100));
@@ -153,51 +168,52 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         photocraft_engine::genstudio::probe(&app.session);
     }
     ctx.request_repaint_after(std::time::Duration::from_millis(250));
-    let mut draft = app.ui.gen_studio.draft.clone().unwrap_or_else(|| app.session.prefs().gen_studio.clone());
-    if app.ui.gen_studio.settings_open {
-        photocraft_engine::genstudio::discover(&app.session, draft.clone());
-    }
     let mut open = true;
-    let mut action = None;
     let mut workspace_actions = Vec::new();
-    if !app.ui.gen_studio.settings_open {
-        app.ui.gen_studio.settings_were_open = false;
-        app.ui.gen_studio.advanced_were_open = false;
-    }
     if !app.ui.gen_studio.advanced_open {
         app.ui.gen_studio.advanced_were_open = false;
     }
-    egui::Window::new("Gen Studio")
-        .id(egui::Id::new("genstudio-settings"))
-        .open(&mut open)
-        .default_pos(ctx.content_rect().center() - egui::vec2(470.0, 325.0))
-        .default_size(egui::vec2(940.0, 650.0))
-        .min_size(egui::vec2(680.0, 460.0))
-        .max_height((ctx.content_rect().height() - 32.0).max(360.0))
-        .resizable(true)
-        .show(ctx, |ui| {
-            egui::ScrollArea::vertical().id_salt("genstudio-content").auto_shrink([false, false]).max_height((ui.available_height() - 48.0).max(340.0)).show(
-                ui,
-                |ui| {
-                    ui.label(egui::RichText::new("Qwen Image 2.1 Turbo").color(crate::theme::Tokens::get(ui.ctx()).text_dim));
-                    ui.add_space(8.0);
-                    workspace_actions = crate::genstudio_canvas::show(app, ui);
-                    ui.add_space(10.0);
-                    let response = egui::CollapsingHeader::new("Settings")
-                        .id_salt("genstudio-settings-section")
-                        .open(Some(app.ui.gen_studio.settings_open))
-                        .show(ui, |ui| {
-                            action = settings(app, ui, &mut draft, &state, engine_busy);
-                        });
-                    if response.header_response.clicked() {
-                        app.ui.gen_studio.settings_open = !app.ui.gen_studio.settings_open;
-                    }
-                    if app.ui.gen_studio.settings_open && response.fully_open() && !app.ui.gen_studio.settings_were_open {
-                        response.header_response.scroll_to_me(Some(egui::Align::TOP));
-                        app.ui.gen_studio.settings_were_open = true;
-                    }
-                },
-            );
+    if app.ui.gen_studio.open {
+        let model = photocraft_engine::genstudio::model_spec(&app.session.prefs().gen_studio.model).map_or("Choose model", |m| m.label);
+        let caption = format!("GenGate | {model}");
+        let mut window = egui::Window::new(&caption)
+            .title_bar(false)
+            .movable(false)
+            .id(egui::Id::new("genstudio-workspace"))
+            .default_pos(ctx.content_rect().center() - egui::vec2(470.0, 325.0))
+            .default_size(egui::vec2(940.0, 650.0))
+            .min_size(egui::vec2(680.0, 460.0))
+            .max_height((ctx.content_rect().height() - 32.0).max(360.0))
+            .resizable(true);
+        if let Some([x, y]) = app.ui.gen_studio.window_position.take() {
+            window = window.current_pos(egui::pos2(x, y));
+        }
+        window.show(ctx, |ui| {
+            let (header, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 26.0), egui::Sense::hover());
+            let drag_rect = header.shrink2(egui::vec2(0.0, 0.0)).with_max_x(header.right() - 30.0);
+            let drag = ui.interact(drag_rect, egui::Id::new("gengate-title-drag"), egui::Sense::drag());
+            ui.scope_builder(egui::UiBuilder::new().max_rect(drag_rect).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
+                ui.label(egui::RichText::new(&caption).strong());
+            });
+            if ui
+                .put(egui::Rect::from_min_size(header.right_top() - egui::vec2(24.0, 0.0), egui::vec2(24.0, 24.0)), egui::Button::new("\u{00d7}").frame(false))
+                .on_hover_text("Close GenGate")
+                .clicked()
+            {
+                open = false;
+            }
+            if drag.dragged()
+                && let Some(rect) = ctx.memory(|m| m.area_rect(egui::Id::new("genstudio-workspace")))
+            {
+                let next = rect.min + ui.input(|i| i.pointer.delta());
+                app.ui.gen_studio.window_position = Some([next.x, next.y]);
+            }
+            let body_height = (ui.available_height() - 38.0).max(340.0);
+            ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), body_height), egui::Layout::top_down(egui::Align::Min), |ui| {
+                // Reserved for upcoming tools; the model belongs in the left-aligned title.
+                ui.allocate_space(egui::vec2(ui.available_width(), 24.0));
+                workspace_actions = crate::genstudio_canvas::show(app, ui);
+            });
             ui.separator();
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
@@ -211,13 +227,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 ui.add(egui::Label::new(egui::RichText::new(message).size(11.0).color(crate::theme::Tokens::get(ui.ctx()).text_dim)).truncate());
             });
         });
-    app.ui.gen_studio.draft = Some(draft.clone());
-    app.ui.gen_studio.open = open;
-    if let Some(id) = action {
-        let params = if id == "genstudio.engine.configure" { serde_json::to_value(&draft).unwrap_or(Value::Null) } else { json!({}) };
-        if let Err(e) = crate::menus::invoke(app, ctx, id, params) {
-            crate::notices::error(app, e);
-        }
+        app.ui.gen_studio.open = open;
     }
     for (id, params) in workspace_actions {
         if let Err(e) = crate::menus::invoke(app, ctx, id, params) {
@@ -247,14 +257,24 @@ fn component(ui: &mut egui::Ui, label: &str, value: &mut String, catalog: &Value
         });
     ui.end_row();
 }
-fn settings(app: &mut PhotocraftApp, ui: &mut egui::Ui, draft: &mut Settings, state: &Value, busy: bool) -> Option<&'static str> {
+fn settings(app: &mut PhotocraftApp, ui: &mut egui::Ui, draft: &mut Settings, state: &Value, busy: bool, view: &mut Value) -> Option<&'static str> {
     let mut action = None;
     ui.add_enabled_ui(!busy, |ui| {
         egui::Grid::new("genstudio-model-engine").num_columns(2).spacing([16.0, 8.0]).show(ui, |ui| {
             ui.label("Model");
-            egui::ComboBox::from_id_salt("genstudio-model").width(410.0).selected_text("Qwen Image 2.1 Turbo").show_ui(ui, |ui| {
-                ui.selectable_value(&mut draft.model, "qwen-image-2.1-turbo".into(), "Qwen Image 2.1 Turbo");
-            });
+            let previous = draft.model.clone();
+            egui::ComboBox::from_id_salt("genstudio-model")
+                .width(410.0)
+                .selected_text(photocraft_engine::genstudio::model_spec(&draft.model).map_or("Choose model", |m| m.label))
+                .show_ui(ui, |ui| {
+                    for model in photocraft_engine::genstudio::MODELS {
+                        ui.selectable_value(&mut draft.model, model.id.into(), model.label);
+                    }
+                });
+            if draft.model != previous {
+                draft.text_encoder.clear();
+                draft.vae.clear();
+            }
             ui.end_row();
             ui.label("Engine");
             egui::ComboBox::from_id_salt("genstudio-engine")
@@ -330,28 +350,127 @@ fn settings(app: &mut PhotocraftApp, ui: &mut egui::Ui, draft: &mut Settings, st
             app.ui.gen_studio.advanced_were_open = true;
         }
     });
-    let mut progress = !app.ui.gen_studio.hide_fill_progress;
+    let mut progress = view["progress"].as_bool().unwrap_or(!app.ui.gen_studio.hide_fill_progress);
     if crate::widgets::checkbox(ui, &mut progress, "Show progress bars under masks").changed() {
-        app.ui.gen_studio.hide_fill_progress = !progress;
+        view["progress"] = json!(progress);
     }
-    let mut bar = !app.ui.gen_studio.hide_ai_bar;
+    let mut bar = view["bar"].as_bool().unwrap_or(!app.ui.gen_studio.hide_ai_bar);
     if crate::widgets::checkbox(ui, &mut bar, "Show floating AI prompt bar").changed() {
-        app.ui.gen_studio.hide_ai_bar = !bar;
+        view["bar"] = json!(bar);
     }
     let changed = *draft != app.session.prefs().gen_studio;
     ui.horizontal(|ui| {
-        for (label, id, enabled) in [
-            ("Apply", "genstudio.engine.configure", changed),
-            ("Start", "genstudio.engine.start", !changed),
-            ("Stop", "genstudio.engine.stop", !changed),
-            ("Refresh", "genstudio.engine.refresh", !changed),
-        ] {
+        for (label, id, enabled) in
+            [("Start", "genstudio.engine.start", !changed), ("Stop", "genstudio.engine.stop", !changed), ("Refresh", "genstudio.engine.refresh", !changed)]
+        {
             if ui.add_enabled(!busy && enabled, egui::Button::new(label)).clicked() {
                 action = Some(id);
             }
         }
     });
     action
+}
+
+pub fn preferences(app: &mut PhotocraftApp, ui: &mut egui::Ui, obj: &mut serde_json::Map<String, Value>, view: &mut Value) {
+    let mut draft = serde_json::from_value::<Settings>(Value::Object(obj.clone())).unwrap_or_else(|_| app.session.prefs().gen_studio.clone());
+    photocraft_engine::genstudio::discover(&app.session, draft.clone());
+    let state = photocraft_engine::genstudio::snapshot(&app.session);
+    let busy = state["pending"] == true
+        || photocraft_engine::genstudio_queue::has_pending(&app.session)
+        || app.session.jobs().iter().any(|j| j.state == "running" && (j.command.starts_with("genstudio.fill.") || j.command == "genstudio.studio.generate"));
+    if !view.is_object() {
+        *view = preferences_view(app);
+    }
+    let action = settings(app, ui, &mut draft, &state, busy, view);
+    ui.add_space(12.0);
+    ui.separator();
+    ui.strong("Segmentation");
+    ui.small("Independent Direct processing for Select Subject, Sky and Remove Background.");
+    ui.checkbox(&mut draft.segmentation.enabled, "Enable AI segmentation");
+    ui.add_enabled_ui(draft.segmentation.enabled, |ui| {
+        egui::Grid::new("gengate-segmentation-settings").num_columns(2).spacing([16.0, 8.0]).show(ui, |ui| {
+            ui.label("Detector");
+            egui::ComboBox::from_id_salt("gengate-detector")
+                .width(300.0)
+                .selected_text(format!(
+                    "YOLO-World v2 {}",
+                    if draft.segmentation.detector == "yolov8m-worldv2" {
+                        "M"
+                    } else if draft.segmentation.detector == "yolov8l-worldv2" {
+                        "L"
+                    } else {
+                        "S"
+                    }
+                ))
+                .show_ui(ui, |ui| {
+                    for (id, label) in [("yolov8s-worldv2", "YOLO-World v2 S"), ("yolov8m-worldv2", "YOLO-World v2 M"), ("yolov8l-worldv2", "YOLO-World v2 L")]
+                    {
+                        ui.selectable_value(&mut draft.segmentation.detector, id.into(), label);
+                    }
+                });
+            ui.end_row();
+            ui.label("Segmenter");
+            egui::ComboBox::from_id_salt("gengate-segmenter").width(300.0).selected_text("SAM3").show_ui(ui, |ui| {
+                ui.selectable_value(&mut draft.segmentation.segmenter, "sam3".into(), "SAM3");
+            });
+            ui.end_row();
+            text(ui, "CUDA Python (optional)", &mut draft.segmentation.python);
+        });
+        ui.small("Defaults download automatically when enabled (about 3.5 GB). Existing files are reused.");
+        ui.small("Leave Python empty to reuse your Direct / ComfyUI Python. ComfyUI itself is never started.");
+    });
+    if let Ok(Value::Object(values)) = serde_json::to_value(draft) {
+        *obj = values;
+    }
+    ui.add_space(8.0);
+    ui.small(idle_message(&state));
+    if let Some(id) = action
+        && let Err(e) = crate::menus::invoke(app, ui.ctx(), id, json!({}))
+    {
+        crate::notices::error(app, e);
+    }
+}
+pub fn preferences_view(app: &PhotocraftApp) -> Value {
+    json!({"progress":!app.ui.gen_studio.hide_fill_progress,"bar":!app.ui.gen_studio.hide_ai_bar})
+}
+pub fn confirm_preferences(app: &mut PhotocraftApp, f: &serde_json::Map<String, Value>) -> Result<Value, String> {
+    let values = f.get("values").cloned().unwrap_or(Value::Null);
+    let studio = values.get("genStudio").map(|v| serde_json::from_value::<Settings>(v.clone()).map_err(|e| e.to_string())).transpose()?;
+    if let Some(studio) = &studio {
+        studio.validate()?;
+    }
+    let changed = studio.as_ref().is_some_and(|v| {
+        let mut previous = app.session.prefs().gen_studio.clone();
+        previous.segmentation = v.segmentation.clone();
+        *v != previous
+    });
+    let prepare_segmentation = studio.as_ref().is_some_and(|v| {
+        v.segmentation.enabled && (v.segmentation != app.session.prefs().gen_studio.segmentation || v.models_dir != app.session.prefs().gen_studio.models_dir)
+    });
+    let state = photocraft_engine::genstudio::snapshot(&app.session);
+    if changed
+        && (state["pending"] == true
+            || app.session.jobs().iter().any(|j| j.state == "running" && j.command.starts_with("genstudio."))
+            || photocraft_engine::genstudio_queue::has_pending(&app.session))
+    {
+        return Err("Wait for AI requests to finish before changing the engine".into());
+    }
+    let result = app.run("prefs.set", json!({"path":"","value":values}))?;
+    if let Some(view) = f.get("__genstudioView") {
+        if let Some(v) = view["progress"].as_bool() {
+            app.ui.gen_studio.hide_fill_progress = !v;
+        }
+        if let Some(v) = view["bar"].as_bool() {
+            app.ui.gen_studio.hide_ai_bar = !v;
+        }
+    }
+    if changed && let Some(studio) = studio {
+        app.run("genstudio.engine.configure", serde_json::to_value(studio).map_err(|e| e.to_string())?)?;
+    }
+    if prepare_segmentation {
+        app.run("gengate.segmentation.prepare", json!({}))?;
+    }
+    Ok(result)
 }
 
 fn idle_message(state: &Value) -> &str {
@@ -394,14 +513,91 @@ mod tests {
         assert!(!harness.state().ui.gen_studio.advanced_open);
         assert_eq!(harness.state().ui.notices.len(), 1, "startup notice is nonblocking and not repeated every frame");
         harness.run_steps(40);
-        let window = harness.ctx.memory(|m| m.area_rect(egui::Id::new("genstudio-settings"))).unwrap();
+        let window = harness.ctx.memory(|m| m.area_rect(egui::Id::new("genstudio-workspace"))).unwrap();
         assert!(window.height() < 720.0, "the footer must not grow the window every frame: {window:?}");
-        harness.state_mut().ui.gen_studio.settings_open = true;
-        harness.state_mut().ui.gen_studio.advanced_open = true;
-        harness.run_steps(20);
-        let encoder = harness.get_by_label("Text encoder").rect();
-        let footer = harness.get_by_label("Starting the AI engine…").rect();
-        assert!(window.contains_rect(encoder) && encoder.max.y < footer.min.y, "opening settings must bring the components into view");
+        assert!(!harness.state().ui.gen_studio.settings_open);
+    }
+
+    #[test]
+    fn resizing_studio_expands_canvas_and_prompt_without_footer_drift() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.ui.gen_studio.initialized = true;
+        app.ui.gen_studio.open = true;
+        let mut ready = false;
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1600.0, 1100.0)).build_ui_state(
+            move |ui, app: &mut PhotocraftApp| {
+                if !ready {
+                    PhotocraftApp::setup_context(ui.ctx(), crate::theme::ThemeKind::Studio);
+                    ready = true;
+                    return;
+                }
+                show(app, ui.ctx());
+            },
+            app,
+        );
+        h.run_steps(10);
+        let before = h.state().studio.info.clone();
+        let window = h.ctx.memory(|m| m.area_rect(egui::Id::new("genstudio-workspace"))).unwrap();
+        let at = window.right_bottom() - egui::vec2(2.0, 2.0);
+        h.hover_at(at);
+        h.run_steps(1);
+        h.drag_at(at);
+        h.run_steps(1);
+        let to = at + egui::vec2(230.0, 170.0);
+        h.event(egui::Event::PointerMoved(to));
+        h.run_steps(3);
+        h.drop_at(to);
+        h.run_steps(10);
+        let after = &h.state().studio.info;
+        assert!(after["slots"][0]["rect"][2].as_f64().unwrap() > before["slots"][0]["rect"][2].as_f64().unwrap() + 50.0, "{before} -> {after}");
+        assert!(after["promptRect"][3].as_f64().unwrap() > before["promptRect"][3].as_f64().unwrap() + 80.0, "{before} -> {after}");
+        let size = h.ctx.memory(|m| m.area_rect(egui::Id::new("genstudio-workspace"))).unwrap().size();
+        h.run_steps(50);
+        let settled = h.ctx.memory(|m| m.area_rect(egui::Id::new("genstudio-workspace"))).unwrap().size();
+        assert!((size - settled).length() < 2.0, "window must stay at the requested size");
+    }
+
+    #[test]
+    fn preferences_contains_studio_and_apply_cancel_are_transactional() {
+        use egui_kittest::kittest::Queryable;
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.ui.gen_studio.initialized = true;
+        let id = crate::prefs_ui::open_preferences(&mut app, "genStudio");
+        let mut ready = false;
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 900.0)).build_ui_state(
+            move |ui, app: &mut PhotocraftApp| {
+                if !ready {
+                    PhotocraftApp::setup_context(ui.ctx(), crate::theme::ThemeKind::Studio);
+                    ready = true;
+                    return;
+                }
+                crate::dialogs::show(app, ui.ctx());
+            },
+            app,
+        );
+        h.run_steps(6);
+        assert!(h.get_by_label("Model").rect().is_positive());
+        assert!(h.get_by_label("Engine").rect().is_positive());
+        assert!(h.query_by_label("Text encoder").is_none(), "Advanced starts collapsed");
+        assert!(!h.state().ui.gen_studio.open);
+        let before = h.state().session.prefs().gen_studio.clone();
+        {
+            let draft = h.state_mut().ui.dialog_mut(id).unwrap();
+            draft.fields["values"]["genStudio"]["modelsDir"] = json!("D:/A different models folder");
+            draft.fields.insert("__genstudioView".into(), json!({"progress":false,"bar":false}));
+        }
+        assert_eq!(h.state().session.prefs().gen_studio, before);
+        assert!(!h.state().ui.gen_studio.hide_ai_bar);
+        let fields = h.state().ui.dialogs.iter().find(|d| d.id == id).unwrap().fields.clone();
+        assert!(crate::prefs_ui::preferences_changed(h.state(), &fields));
+        // Display-only Apply does not configure or launch a worker.
+        h.state_mut().ui.dialog_mut(id).unwrap().fields["values"]["genStudio"] = serde_json::to_value(before).unwrap();
+        crate::prefs_ui::apply(h.state_mut(), id).unwrap();
+        assert!(h.state().ui.gen_studio.hide_ai_bar && h.state().ui.gen_studio.hide_fill_progress);
+        let fields = &h.state().ui.dialogs.iter().find(|d| d.id == id).unwrap().fields;
+        assert!(!crate::prefs_ui::preferences_changed(h.state(), fields));
+        h.state_mut().ui.dialogs.clear();
+        assert!(h.state().ui.gen_studio.hide_ai_bar);
     }
 
     #[test]
@@ -496,6 +692,12 @@ mod tests {
         assert!(app.ui.gen_studio.open);
         let item = crate::menus::menu_items(&app).into_iter().find(|i| i.id == "genstudio.open").unwrap();
         assert_eq!(item.path, ["Filter", "Plug-ins"]);
+        crate::menus::invoke(&mut app, &ctx, "genstudio.open", json!({"open":false})).unwrap();
+        crate::menus::invoke(&mut app, &ctx, "genstudio.settings.open", json!({})).unwrap();
+        assert!(!app.ui.gen_studio.open);
+        assert!(app.ui.dialogs.iter().any(|d| d.fields["section"] == "genStudio"));
+        let item = crate::menus::menu_items(&app).into_iter().find(|i| i.id == "genstudio.settings.open").unwrap();
+        assert!(item.path.is_empty());
         assert_eq!(app.run("genstudio.engine.status", json!({})).unwrap()["pending"], false);
     }
     #[test]
@@ -510,7 +712,10 @@ mod tests {
         app.poll_file_dialog(&ctx, None);
         app.poll_file_dialog(&ctx, None);
         assert!(matches!(asked.borrow().first(), Some(FileDialogRequest::Folder { .. })));
-        assert_eq!(app.ui.gen_studio.draft.unwrap().models_dir, "D:/Shared Models");
+        assert_eq!(
+            app.ui.dialogs.iter().find(|d| crate::prefs_ui::is_preferences(&d.fields)).unwrap().fields["values"]["genStudio"]["modelsDir"],
+            "D:/Shared Models"
+        );
         assert_eq!(app.session.prefs().gen_studio, before);
         assert!(!photocraft_engine::genstudio::snapshot(&app.session)["pending"].as_bool().unwrap());
     }

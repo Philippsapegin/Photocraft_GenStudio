@@ -37,7 +37,10 @@ def prepare(source,replace):
         path.write_text("".join(lines),encoding="utf-8")
         if not seen:replace(path,anchor,anchor+"\n"+addition)
     module(engine/"lib.rs","pub mod genstudio;","pub mod genstudio_generate;")
-    replace(engine/"commands.rs","v.extend(crate::genstudio::specs());","v.extend(crate::genstudio::specs());\n    v.extend(crate::genstudio_generate::specs());")
+    replace(engine/"prefs.rs", '        section!("edit.preferences.plugIns", "Plug-ins\u2026"),', '        section!("edit.preferences.plugIns", "Plug-ins\u2026"),\n        section!("edit.preferences.genStudio", "Gen Studio\u2026"),')
+    replace(ui/"menu_catalog.rs", '    (&["Edit", "Preferences"], "Plug-ins\u2026", None, "edit.preferences.plugIns"),', '    (&["Edit", "Preferences"], "Plug-ins\u2026", None, "edit.preferences.plugIns"),\n    (&["Edit", "Preferences"], "Gen Studio\u2026", None, "edit.preferences.genStudio"),')
+    if 'v.extend(crate::genstudio_generate::specs());' not in (engine/"commands.rs").read_text(encoding="utf-8"):
+        replace(engine/"commands.rs","v.extend(crate::genstudio::specs());","v.extend(crate::genstudio::specs());\n    v.extend(crate::genstudio_generate::specs());")
     module(ui/"lib.rs","pub mod genstudio_ui;","pub mod genstudio_canvas;")
     replace(ui/"lib.rs","pub(crate) ai_layers: crate::genstudio_ai_ui::Cache,","pub(crate) ai_layers: crate::genstudio_ai_ui::Cache,\n    pub(crate) studio: crate::genstudio_canvas::Cache,")
     replace(ui/"lib.rs","ai_layers: Default::default(),","ai_layers: Default::default(),\n            studio: Default::default(),")
@@ -79,3 +82,54 @@ def prepare(source,replace):
         tail=tail.replace(target,target+"\n"+insert,1)
         text=head+tail
         menu.write_text(text,encoding="utf-8")
+
+    text=menu.read_text(encoding="utf-8")
+    if '"genstudio.settings.open"' not in text:
+        text=text.replace(anchor,anchor+'\n    ("genstudio.settings.open", "Gen Studio Settings", &[], None),')
+        pos=text.index('pub fn is_enabled')
+        text=text[:pos]+text[pos:].replace('    match id {','    match id {\n        "genstudio.settings.open" => true,',1)
+        menu.write_text(text,encoding="utf-8")
+    for catalog in (ui/"i18n").glob("*.tsv"):
+        text=catalog.read_text(encoding="utf-8")
+        plain={cells[1]:cells[2] for line in text.splitlines() if len(cells:=line.split("\t"))==3 and not cells[0]}
+        line="\tGen Studio Settings\tGen Studio "+plain.get("Settings","Settings")
+        if "\tGen Studio Settings\t" in text:
+            text="\n".join(line if row.startswith("\tGen Studio Settings\t") else row for row in text.split("\n"))
+        else:text+="\n"+line+"\n"
+        catalog.write_text(text,encoding="utf-8")
+
+    text=menu.read_text(encoding="utf-8").replace('"Gen Studio Settings", &["Filter", "Plug-ins"]','"Gen Studio Settings", &[]')
+    menu.write_text(text,encoding="utf-8")
+    path=ui/"prefs_ui.rs"
+    text=path.read_text(encoding="utf-8")
+    text=text.replace('prefs_body(ui, f, system);','prefs_body(app, ui, f, system);')
+    text=text.replace('fn prefs_body(ui: &mut egui::Ui,','fn prefs_body(app: &mut PhotocraftApp, ui: &mut egui::Ui,')
+    if '__genstudioView' not in text:
+        text=text.replace('is_preferences(fields) && fields.get("values").and_then(Value::as_object).is_some_and(|values| *values != preference_values(app.session.prefs()))','is_preferences(fields) && (fields.get("values").and_then(Value::as_object).is_some_and(|values| *values != preference_values(app.session.prefs())) || fields.get("__genstudioView").is_some_and(|v| *v != crate::genstudio_ui::preferences_view(app)))')
+        text=text.replace('    let mut values = f.get("values").cloned().unwrap_or(Value::Null);','    let mut studio_view=f.get("__genstudioView").cloned().unwrap_or_else(||crate::genstudio_ui::preferences_view(app));\n    let mut values = f.get("values").cloned().unwrap_or(Value::Null);',1)
+        text=text.replace('                    section_fields(ui, &section, obj, &order, lang, system, filter);','                    if section == "genStudio" {crate::genstudio_ui::preferences(app,ui,obj,&mut studio_view);} else {section_fields(ui, &section, obj, &order, lang, system, filter);}')
+        text=text.replace('    f.insert("values".into(), values);','    f.insert("__genstudioView".into(),studio_view);\n    f.insert("values".into(), values);',1)
+        text=text.replace('''            let values = f.get("values").cloned().unwrap_or(Value::Null);
+            app.run("prefs.set", json!({"path": "", "value": values}))''','''            crate::genstudio_ui::confirm_preferences(app,f)''',1)
+    path.write_text(text,encoding="utf-8")
+    text=path.read_text(encoding="utf-8")
+    if '// genstudio: reset view defaults.' not in text:
+        text=text.replace('                    values[&section] = def;', '                    // genstudio: reset view defaults.\n                    if section == "genStudio" {studio_view=serde_json::json!({"progress":true,"bar":true});}\n                    values[&section] = def;')
+        path.write_text(text,encoding="utf-8")
+    for catalog in (ui/"i18n").glob("*.tsv"):
+        text=catalog.read_text(encoding="utf-8")
+        if "\tGen Studio\t" not in text:text+="\n\tGen Studio\tGen Studio\n"
+        catalog.write_text(text,encoding="utf-8")
+
+    for catalog in (ui/"i18n").glob("*.tsv"):
+        text=catalog.read_text(encoding="utf-8")
+        # This suite intentionally uses English labels in every editor locale.
+        # Include the serialized preference names in the catalog as well: native
+        # Preferences search and its coverage check inspect those names.
+        for label in ("Generation prompt","Generated reference","Model","Engine",
+                      "Text encoder","Vae","Comfy startup","Direct startup",
+                      "Comfy url","Comfy dir","Comfy python","Direct python",
+                      "Models dir","Runtime root","Comfy","Direct","Off",
+                      "App start","First request"):
+            if "\t"+label+"\t" not in text:text+="\n\t"+label+"\t"+label+"\n"
+        catalog.write_text(text,encoding="utf-8")

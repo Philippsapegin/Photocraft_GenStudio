@@ -1,0 +1,33 @@
+{
+  "official_repository": "black-forest-labs/flux-3-image-klein-comfy",
+  "official_revision": "feef60b0aaf63a4773ace96636ebbcf43b881312",
+  "repository": "ml-resources/flux-3-image-klein-comfy",
+  "revision": "3ba0f7064cbb1666a71e2820d3cc5c2273bb6cd0",
+  "files": [
+    {
+      "path": "diffusion_models/flux3-image-klein-int8-convrot.safetensors",
+      "bytes": 5827874779,
+      "sha256": "847d8933548afd93df4af2cac2498e70891bf28d9dae06d695f536992e168fe2"
+    },
+    {
+      "path": "text_encoders/qwen3vl_4b_int8_convrot.safetensors",
+      "bytes": 4858559240,
+      "sha256": "32de113cbf8282b02cbff0794b637b9d6676da09314a1db5a30bcea9bf4ee01c"
+    },
+    {
+      "path": "vae/flux2-vae.safetensors",
+      "bytes": 336211292,
+      "sha256": "868fe7b343cc8f3a19dbcfcafbc3d5f888802be3f89bd81b65b3621a066ce8f3"
+    },
+    {
+      "path": "text_encoders/qwen3.5_9b_flux3_prompt_upsampler_w4a8.safetensors",
+      "bytes": 6724090780,
+      "sha256": "e5d85a7421d197bf5a12474511936ecabce19a833252f16e9310a983194a4458"
+    }
+  ],
+  "model": "flux-3-image-klein",
+  "reference_limit": 10,
+  "reference_syntax": "<ref_image_0>",
+  "quantization": "int8-convrot",
+  "prompt_upsampler_quantization": "w4a8"
+}

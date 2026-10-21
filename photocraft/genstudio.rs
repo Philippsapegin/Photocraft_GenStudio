@@ -1,8 +1,31 @@
-//! Local Gen Studio engine commands. Inference runs outside the editor process.
+//! Local GenGate engine commands. Inference runs outside the editor process.
 use crate::{EngineError, Result, Session, commands::CommandSpec};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
+
+#[derive(Clone, Copy)]
+pub struct ModelSpec {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub reference_limit: usize,
+    pub zero_based: bool,
+}
+impl ModelSpec {
+    pub fn chip(self, ordinal: usize) -> String {
+        if self.zero_based { format!("<ref_image_{}>", ordinal.saturating_sub(1)) } else { format!("[Image {ordinal}]") }
+    }
+    pub fn reference(self, ordinal: usize) -> String {
+        if self.zero_based { self.chip(ordinal) } else { format!("image {ordinal}") }
+    }
+}
+pub const MODELS: [ModelSpec; 2] = [
+    ModelSpec { id: "qwen-image-2.1-turbo", label: "Qwen Image 2.1 Turbo", reference_limit: 10, zero_based: false },
+    ModelSpec { id: "flux-3-image-klein", label: "FLUX 3 Image Klein", reference_limit: 10, zero_based: true },
+];
+pub fn model_spec(id: &str) -> Option<ModelSpec> {
+    MODELS.into_iter().find(|m| m.id == id)
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Engine {
@@ -27,6 +50,7 @@ pub enum Startup {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct Settings {
+    pub segmentation: crate::gengate_segmentation::Settings,
     pub model: String,
     pub text_encoder: String,
     pub vae: String,
@@ -55,6 +79,7 @@ impl Default for Settings {
         let v = installed.unwrap_or(compiled);
         let string = |key: &str| v.get(key).and_then(Value::as_str).unwrap_or_default().to_owned();
         Self {
+            segmentation: Default::default(),
             model: v.get("model").and_then(Value::as_str).unwrap_or("qwen-image-2.1-turbo").to_owned(),
             text_encoder: string("textEncoder"),
             vae: string("vae"),
@@ -101,6 +126,7 @@ impl Settings {
         }
     }
     pub fn validate(&self) -> std::result::Result<(), String> {
+        self.segmentation.validate()?;
         for s in [
             &self.model,
             &self.text_encoder,
@@ -113,14 +139,14 @@ impl Settings {
             &self.runtime_root,
         ] {
             if s.len() > 4096 || s.contains('\0') {
-                return Err("Invalid Gen Studio path or address".into());
+                return Err("Invalid GenGate path or address".into());
             }
         }
-        if self.model != "qwen-image-2.1-turbo" {
+        if model_spec(&self.model).is_none() {
             return Err("Unsupported model".into());
         }
         if self.runtime_root.trim().is_empty() {
-            return Err("Gen Studio runtime folder is required".into());
+            return Err("GenGate runtime folder is required".into());
         }
         Ok(())
     }
@@ -192,7 +218,7 @@ pub fn discover(s: &Session, settings: Settings) {
         if std::env::var_os("GENSTUDIO_NO_PROCESS").is_some_and(|v| v == "1") {
             return;
         }
-        let key = format!("{}\n{}", settings.runtime_root, settings.models_dir);
+        let key = format!("{}\n{}\n{}", settings.runtime_root, settings.models_dir, settings.model);
         let shared = s.gen_studio.catalog.clone();
         {
             let mut catalog = shared.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -239,7 +265,7 @@ fn control(settings: &Settings, action: &str, event: &str) -> std::result::Resul
     let root = Path::new(&settings.runtime_root);
     let python = root.join(".venv").join(if cfg!(windows) { "Scripts/python.exe" } else { "bin/python" });
     if !python.is_file() || !root.join("genstudio/control.py").is_file() {
-        return Err("Gen Studio runtime is missing. Check the runtime folder in Advanced settings.".into());
+        return Err("GenGate runtime is missing. Check the runtime folder in Advanced settings.".into());
     }
     let mut cmd = Command::new(python);
     cmd.args(["-X", "utf8", "-m", "genstudio.control"])
@@ -260,7 +286,7 @@ fn control(settings: &Settings, action: &str, event: &str) -> std::result::Resul
         input.write_all(&data).map_err(|e| e.to_string())?;
     }
     let output = child.wait_with_output().map_err(|e| e.to_string())?;
-    serde_json::from_slice(&output.stdout).map_err(|_| format!("Gen Studio control failed: {}", String::from_utf8_lossy(&output.stderr)))
+    serde_json::from_slice(&output.stdout).map_err(|_| format!("GenGate control failed: {}", String::from_utf8_lossy(&output.stderr)))
 }
 
 fn begin(s: &mut Session, action: &'static str, event: &'static str) -> Result<Value> {
@@ -276,7 +302,7 @@ fn begin(s: &mut Session, action: &'static str, event: &'static str) -> Result<V
     #[cfg(target_arch = "wasm32")]
     {
         let _ = (action, event);
-        Err(EngineError::Other("Local Gen Studio engines require the desktop app".into()))
+        Err(EngineError::Other("Local GenGate engines require the desktop app".into()))
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -284,7 +310,7 @@ fn begin(s: &mut Session, action: &'static str, event: &'static str) -> Result<V
         {
             let mut state = shared.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             if state.busy {
-                return Err(EngineError::Other("Gen Studio is already processing an engine command".into()));
+                return Err(EngineError::Other("GenGate is already processing an engine command".into()));
             }
             state.busy = true;
             state.epoch = state.epoch.wrapping_add(1);
@@ -326,14 +352,14 @@ fn ensure(s: &mut Session, p: &Value) -> Result<Value> {
 pub fn specs() -> Vec<CommandSpec> {
     let make = |id, label, params, run| CommandSpec { id, label, menu: &[], shortcut: None, params, enabled: crate::commands::always, run, journal: false };
     vec![
-        make("genstudio.engine.status", "Gen Studio Engine Status", "{}", |s, _| Ok(snapshot(s))),
-        make("genstudio.engine.refresh", "Refresh Gen Studio Engine", "{}", |s, _| begin(s, "status", "manual")),
-        make("genstudio.engine.start", "Start Gen Studio Engine", "{}", |s, _| begin(s, "start", "manual")),
-        make("genstudio.engine.stop", "Stop Gen Studio Engine", "{}", |s, _| begin(s, "stop", "manual")),
-        make("genstudio.engine.ensure", "Ensure Gen Studio Engine", "{\"event\":\"request|appStart\"}", ensure),
+        make("genstudio.engine.status", "GenGate Engine Status", "{}", |s, _| Ok(snapshot(s))),
+        make("genstudio.engine.refresh", "Refresh GenGate Engine", "{}", |s, _| begin(s, "status", "manual")),
+        make("genstudio.engine.start", "Start GenGate Engine", "{}", |s, _| begin(s, "start", "manual")),
+        make("genstudio.engine.stop", "Stop GenGate Engine", "{}", |s, _| begin(s, "stop", "manual")),
+        make("genstudio.engine.ensure", "Ensure GenGate Engine", "{\"event\":\"request|appStart\"}", ensure),
         make(
             "genstudio.engine.configure",
-            "Configure Gen Studio Engine",
+            "Configure GenGate Engine",
             "{model, engine, textEncoder, vae, comfyStartup, directStartup, comfyUrl, comfyDir, comfyPython, directPython, modelsDir, runtimeRoot}",
             set,
         ),
@@ -354,8 +380,8 @@ mod tests {
             std::fs::write(&file, invalid).unwrap();
             assert!(read_installed_defaults(&file).is_none());
         }
-        std::fs::write(&file, "\u{feff}{\"runtimeRoot\":\"D:/Apps/Gen Studio/runtime\"}").unwrap();
-        assert_eq!(read_installed_defaults(&file).unwrap()["runtimeRoot"], "D:/Apps/Gen Studio/runtime");
+        std::fs::write(&file, "\u{feff}{\"runtimeRoot\":\"D:/Apps/GenGate/runtime\"}").unwrap();
+        assert_eq!(read_installed_defaults(&file).unwrap()["runtimeRoot"], "D:/Apps/GenGate/runtime");
         std::fs::remove_file(file).unwrap();
         std::fs::remove_dir(dir).unwrap();
     }

@@ -6,5 +6,5 @@ try {
     Start-Process -FilePath $install.executable -WorkingDirectory (Split-Path $install.executable -Parent)
 } catch {
     Add-Type -AssemblyName System.Windows.Forms
-    [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, 'PhotoCraft Gen Studio') | Out-Null
+    [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, 'PhotoCraft GenGate') | Out-Null
 }
