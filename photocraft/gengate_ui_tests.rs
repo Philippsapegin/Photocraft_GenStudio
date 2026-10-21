@@ -4,6 +4,31 @@ use photocraft_engine::Session;
 use serde_json::json;
 
 #[test]
+fn component_picker_starts_in_models_and_edits_only_the_preset_draft() {
+    use crate::file_dialog::{self, FileDialogAnswer, FileDialogRequest};
+    for component in ["modelFile", "textEncoder", "promptUpsampler", "vae", "constantLora"] {
+        let (service, asked) = file_dialog::fake(vec![Some(FileDialogAnswer::Paths(vec!["D:/Custom Pieces/component.safetensors".into()]))]);
+        let mut app = PhotocraftApp::new(Session::new(), crate::Services { file_dialog: Some(service), ..Default::default() });
+        app.session.edit_prefs(|p| {
+            p.gen_studio.model = "flux-3-image-klein".into();
+            p.gen_studio.models_dir = "D:/Shared Models".into();
+        });
+        let before = app.session.prefs().gen_studio.clone();
+        let ctx = egui::Context::default();
+        let dialog = crate::prefs_ui::open_preferences(&mut app, "genStudio");
+        crate::menus::invoke(&mut app, &ctx, "genstudio.component.browse", json!({"component":component})).unwrap();
+        app.poll_file_dialog(&ctx, None);
+        app.poll_file_dialog(&ctx, None);
+        assert!(matches!(asked.borrow().first(), Some(FileDialogRequest::Open { multiple:false, initial_dir:Some(folder), .. }) if folder=="D:/Shared Models"));
+        let values = &app.ui.dialogs.iter().find(|d| d.id == dialog).unwrap().fields["values"]["genStudio"];
+        assert_eq!(values["presets"]["flux-3-image-klein"][component], "D:/Custom Pieces/component.safetensors");
+        assert!(values["presets"].get("qwen-image-2.1-turbo").is_none());
+        assert_eq!(app.session.prefs().gen_studio, before, "Browse must not apply settings or start an engine");
+        assert_eq!(photocraft_engine::genstudio::snapshot(&app.session)["pending"], false);
+    }
+}
+
+#[test]
 fn ai_select_ignores_clicks_and_narrow_drags_without_touching_selection() {
     let mut app = PhotocraftApp::new(Session::new(), crate::Services::default());
     app.session.execute("file.new", json!({"width":30,"height":20})).unwrap();

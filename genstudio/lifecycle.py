@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 
 from genfill.comfy import ComfyClient
 from genfill.server import load_config
-from .settings import ROOT, validate
+from .settings import ROOT, validate, active_components, component_defaults
 
 DIRECT_URL = "http://127.0.0.1:8767"
 
@@ -52,13 +52,21 @@ class EngineHost:
         config = load_config()
         config["model"] = self.settings["model"]
         config["comfy_url"] = self.settings["comfyUrl"].rstrip("/")
-        from .models import resolve, specification
+        from .models import resolve_components, resolve_lora, specification
+        components = active_components(self.settings)
+        config["constant_lora"] = components["constantLora"]
+        config["constant_lora_strength"] = components["constantLoraStrength"]
         config.update({key: value[0] for key, value in specification(self.settings["model"])["files"].items()})
         try:
-            config.update({key: value["name"] for key, value in resolve(self.settings["modelsDir"],
-                self.settings["textEncoder"], self.settings["vae"], self.settings["model"]).items()})
+            config.update({key: value["name"] for key, value in resolve_components(self.settings["modelsDir"], components, self.settings["model"]).items()})
         except (ValueError, OSError):
             pass  # An actionable error is returned on Start, without breaking the settings service.
+        try:
+            lora = resolve_lora(self.settings["modelsDir"], components)
+            if lora:
+                config["constant_lora"] = lora["name"]
+        except (ValueError, OSError):
+            pass  # Only masked edits require this optional file.
         return config
 
     @property
@@ -78,8 +86,8 @@ class EngineHost:
             if self.busy:
                 raise ValueError("Wait for the current AI request before changing the engine.")
             # Policy-only changes do not restart a running engine.
-            operational = ("model", "textEncoder", "vae", "engine", "comfyUrl", "comfyDir", "comfyPython", "directPython", "modelsDir")
-            if any(settings[k] != self.settings[k] for k in operational):
+            operational = ("model", "engine", "comfyUrl", "comfyDir", "comfyPython", "directPython", "modelsDir")
+            if any(settings[k] != self.settings[k] for k in operational) or active_components(settings) != active_components(self.settings):
                 self.stop()
             self.settings = settings
 
@@ -89,10 +97,13 @@ class EngineHost:
             info = self.request(url + ("/system_stats" if self.engine == "comfy" else "/health"))
             if self.engine == "comfy":
                 return isinstance(info.get("system"), dict)
+            components = active_components(self.settings)
+            # Older workers can still serve default, adapter-free presets.
+            old_components = {**component_defaults(),
+                              "textEncoder": info.get("textEncoder", ""), "vae": info.get("vae", "")}
             return (info.get("service") == "genstudio-direct" and info.get("ready") is True
                     and Path(info.get("modelsDir", "")).resolve() == Path(self.settings["modelsDir"]).resolve()
-                    and info.get("textEncoder", "") == self.settings["textEncoder"]
-                    and info.get("vae", "") == self.settings["vae"]
+                    and info.get("components", old_components) == components
                     and info.get("model", "qwen-image-2.1-turbo") == self.settings["model"])
         except (OSError, ValueError, URLError):
             return False
@@ -115,8 +126,11 @@ class EngineHost:
             if cancel and cancel.is_set():
                 from genfill.comfy import Cancelled
                 raise Cancelled()
-            from .models import resolve, extra_paths
-            resolve(self.settings["modelsDir"], self.settings["textEncoder"], self.settings["vae"], self.settings["model"])
+            from .models import resolve_components, resolve_lora, extra_paths
+            components = active_components(self.settings)
+            resolve_components(self.settings["modelsDir"], components, self.settings["model"])
+            if not studio and event == "request":
+                resolve_lora(self.settings["modelsDir"], components)
             if self.probe():
                 if self.engine == "comfy":
                     _, problems = ComfyClient(self.config()).inspect(studio=True) if studio else ComfyClient(self.config()).inspect()
@@ -135,7 +149,7 @@ class EngineHost:
                     raise ValueError("Set the ComfyUI folder and Python executable in GenGate.")
                 self.runtime.mkdir(parents=True, exist_ok=True)
                 paths_file = self.runtime / "model-paths.yaml"
-                paths_file.write_text(json.dumps(extra_paths(self.settings["modelsDir"])), encoding="utf-8")
+                paths_file.write_text(json.dumps(extra_paths(self.settings["modelsDir"], components, self.settings["model"])), encoding="utf-8")
                 command = [str(python), "-s", "main.py", "--listen", "127.0.0.1", "--port",
                            str(urlparse(self.settings["comfyUrl"]).port),
                            "--disable-all-custom-nodes", "--whitelist-custom-nodes", "LanPaint",
@@ -149,7 +163,8 @@ class EngineHost:
                 if not python.is_file():
                     raise ValueError("Direct AI runtime is not installed. Run scripts/Setup-Direct.ps1, then select its Python executable.")
                 command = [str(python), "-X", "utf8", str(ROOT / "scripts/run_direct.py"), "--models", self.settings["modelsDir"],
-                           "--text-encoder", self.settings["textEncoder"], "--vae", self.settings["vae"], "--model", self.settings["model"]]
+                           "--text-encoder", components["textEncoder"], "--vae", components["vae"], "--model", self.settings["model"],
+                           "--components", json.dumps(components)]
                 cwd = ROOT
             if self.process is None or self.process.poll() is not None:
                 self.runtime.mkdir(parents=True, exist_ok=True)

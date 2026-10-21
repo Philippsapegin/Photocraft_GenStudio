@@ -10,9 +10,9 @@ FILES = {
 TEXT_ENCODERS = ("qwen3vl_8b_w4a8.safetensors", "qwen3vl_8b_int8_convrot.safetensors", "qwen3vl_8b_bf16.safetensors")
 FLUX = "flux-3-image-klein"
 MODELS = {
-    MODEL: {"label": "Qwen Image 2.1 Turbo", "references": 10, "grid": 32,
+    MODEL: {"label": "Qwen Image 2.1", "references": 10, "grid": 32,
             "files": FILES, "text_encoders": TEXT_ENCODERS},
-    FLUX: {"label": "FLUX 3 Image Klein", "references": 10, "grid": 16,
+    FLUX: {"label": "FLUX 3", "references": 10, "grid": 16,
            "files": {
                "diffusion_model": ("flux3-image-klein-int8-convrot.safetensors", ("diffusion_models", "unet")),
                "text_encoder": ("qwen3vl_4b_int8_convrot.safetensors", ("text_encoders", "clip")),
@@ -38,16 +38,21 @@ def catalog(root, model=MODEL):
     root = Path(root).expanduser().resolve()
     if not root.is_dir():
         raise ValueError("Choose an existing Models folder in Settings.")
-    result = {"model": model, "referenceLimit": spec["references"], "modelsDir": str(root), "textEncoders": [], "vaes": []}
-    for key, output in (("text_encoder", "textEncoders"), ("vae", "vaes")):
+    result = {"model": model, "referenceLimit": spec["references"], "modelsDir": str(root)}
+    outputs = {"diffusion_model": ("diffusionModels", "defaultModel"), "text_encoder": ("textEncoders", "defaultTextEncoder"),
+               "vae": ("vaes", "defaultVae"), "prompt_upsampler": ("promptUpsamplers", "defaultPromptUpsampler")}
+    for key in files:
+        output, default = outputs[key]
+        result[output] = []
         name, folders = files[key]
+        names = encoders if key == "text_encoder" else UPSAMPLERS if key == "prompt_upsampler" else (name,)
         seen = set()
         candidates = []
         for folder in folders:
             base = root / folder
             if base.is_dir():
                 candidates.extend((p, p.relative_to(base).as_posix()) for p in base.rglob("*.safetensors"))
-        candidates.extend((p, p.name) for p in root.glob("*.safetensors") if p.name in (*encoders, files["vae"][0]))
+        candidates.extend((p, p.name) for p in root.glob("*.safetensors"))
         for path, comfy_name in candidates:
             resolved = path.resolve()
             if not path.is_file() or not path.stat().st_size:
@@ -56,31 +61,58 @@ def catalog(root, model=MODEL):
             if identity in seen:
                 continue
             seen.add(identity)
-            compatible = path.name in encoders if key == "text_encoder" else path.name == name
+            compatible = path.name in names or compatible_name(path.name, key, model)
             result[output].append({"value": path.relative_to(root).as_posix(), "name": comfy_name,
                                    "compatible": compatible})
-        names = encoders if key == "text_encoder" else (name,)
         result[output].sort(key=lambda item: (names.index(Path(item["value"]).name)
                             if Path(item["value"]).name in names else 100, item["value"].casefold()))
         result[output] = result[output][:2048]
         compatible = [item for item in result[output] if item["compatible"]]
-        result["defaultTextEncoder" if key == "text_encoder" else "defaultVae"] = compatible[0]["value"] if compatible else ""
+        result[default] = compatible[0]["value"] if compatible else ""
     return result
 
 
-def resolve(root, text_encoder="", vae="", model=MODEL):
+def compatible_name(name, kind, model):
+    name = name.lower().replace("_", "").replace("-", "").replace(".", "")
+    if kind == "diffusion_model":
+        if any(part in name for part in ("vae", "lora", "encoder")):
+            return False
+        return name.startswith("qwenimage21") if model == MODEL else name.startswith("flux3")
+    if kind == "text_encoder":
+        return name.startswith("qwen3vl8b" if model == MODEL else "qwen3vl4b")
+    return False
+
+
+def selected_file(root, selection, folders):
+    """Explicit paths may live outside Models; never read checkpoint contents."""
+    root = Path(root).expanduser().resolve()
+    if not isinstance(selection, str) or not selection or "\x00" in selection:
+        raise ValueError("Invalid model component selection.")
+    path = Path(selection).expanduser()
+    if not path.is_absolute():
+        if ".." in Path(selection.replace(chr(92), "/")).parts or ":" in selection:
+            raise ValueError("Choose a valid model component file.")
+        path = root / path
+    if not path.is_file() or not path.stat().st_size:
+        raise ValueError(f"Model component is missing or empty: {path}")
+    folder = next((root / f for f in folders if path.is_relative_to(root / f)), None)
+    return {"path": str(path.resolve()), "name": path.relative_to(folder).as_posix() if folder else path.name}
+
+
+def resolve(root, text_encoder="", vae="", model=MODEL, *, model_file="", prompt_upsampler=""):
     spec = specification(model)
     root = Path(root).expanduser().resolve()
     if not root.is_dir():
         raise ValueError("Choose an existing Models folder in GenGate.")
-    overrides = {"text_encoder": text_encoder, "vae": vae}
+    overrides = {"text_encoder": text_encoder, "vae": vae, "diffusion_model": model_file, "prompt_upsampler": prompt_upsampler}
     found = {}
     for key, (name, folders) in spec["files"].items():
         override = overrides.get(key, "")
         if not isinstance(override, str):
             raise ValueError("Invalid model component selection.")
-        if override and (Path(override).is_absolute() or ".." in Path(override.replace(chr(92), "/")).parts or ":" in override):
-            raise ValueError("Choose a component inside the Models folder.")
+        if override:
+            found[key] = selected_file(root, override, folders)
+            continue
         names = ((override,) if override else spec["text_encoders"] if key == "text_encoder"
                  else UPSAMPLERS if key == "prompt_upsampler" else (name,))
         candidates = []
@@ -102,6 +134,11 @@ def resolve(root, text_encoder="", vae="", model=MODEL):
                 break
         unique = {str(path.resolve()).casefold(): (path, relative) for path, relative in candidates}
         if not unique:
+            output = {"diffusion_model": "diffusionModels", "text_encoder": "textEncoders", "vae": "vaes", "prompt_upsampler": "promptUpsamplers"}[key]
+            compatible = [item for item in catalog(root, model)[output] if item["compatible"]]
+            if compatible:
+                found[key] = selected_file(root, compatible[0]["value"], folders)
+                continue
             raise ValueError(f"Models folder is missing {folders[0]}/{override or name}. No weights were downloaded.")
         if len(unique) > 1:
             raise ValueError(f"Models folder contains multiple copies of {name}; choose a component in Advanced settings.")
@@ -115,8 +152,34 @@ def resolve(root, text_encoder="", vae="", model=MODEL):
     return found
 
 
-def extra_paths(root):
+def resolve_components(root, components, model=MODEL):
+    return resolve(root, components.get("textEncoder", ""), components.get("vae", ""), model,
+                   model_file=components.get("modelFile", ""), prompt_upsampler=components.get("promptUpsampler", ""))
+
+
+def resolve_lora(root, components):
+    if not components.get("constantLora") or not components.get("constantLoraStrength", 1.0):
+        return None
+    return selected_file(root, components["constantLora"], ("loras",))
+
+
+def extra_paths(root, components=None, model=MODEL):
     root = str(Path(root).expanduser().resolve())
-    return {"genstudio": {"base_path": root, "is_default": True,
+    paths = {"genstudio": {"base_path": root, "is_default": True,
                           "diffusion_models": "diffusion_models\nunet\n.",
-                          "text_encoders": "text_encoders\nclip\n.", "vae": "vae\n."}}
+                          "text_encoders": "text_encoders\nclip\n.", "vae": "vae\n.", "loras": "loras\n."}}
+    if components:
+        selected = resolve_components(root, components, model)
+        try:
+            lora = resolve_lora(root, components)
+        except (ValueError, OSError):
+            lora = None  # An unavailable edit-only adapter must not block Studio.
+        if lora:
+            selected["constant_lora"] = lora
+        categories = {"diffusion_model": "diffusion_models", "text_encoder": "text_encoders", "vae": "vae",
+                      "prompt_upsampler": "text_encoders", "constant_lora": "loras"}
+        for key, value in selected.items():
+            path = Path(value["path"])
+            if value["name"] == path.name:
+                paths["gengate_" + key] = {"base_path": str(path.parent), "is_default": True, categories[key]: "."}
+    return paths

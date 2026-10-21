@@ -63,6 +63,25 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(settings["directStartup"], "firstRequest")
         self.assertEqual(list(self.models.iterdir()), [])
 
+    def test_fresh_cuda_runtime_installs_only_into_its_private_copy(self):
+        runtime = self.root / "runtime"
+        host = runtime / ".venv/Scripts"
+        host.mkdir(parents=True)
+        (host / "python.exe").write_bytes(b"synthetic interpreter")
+        (host / "python313._pth").write_text("python313.zip\n.\nsite-packages\n..\\..\nimport site\n")
+        before = {p.name: p.read_bytes() for p in host.iterdir()}
+        private = runtime / ".runtime/qwen-direct"
+        with patch.object(installer, "run_logged") as install, \
+             patch.object(installer, "check_python", return_value=str(private / "python.exe")) as inspect:
+            result = installer.install_direct(runtime)
+        self.assertEqual(result, str(private / "python.exe"))
+        self.assertEqual(before, {p.name: p.read_bytes() for p in host.iterdir()})
+        self.assertEqual((private / "python.exe").read_bytes(), before["python.exe"])
+        args = install.call_args.args[0]
+        self.assertEqual(args[0], str(private / "python.exe"))
+        self.assertEqual(args[args.index("--target") + 1], str(private / "site-packages"))
+        inspect.assert_called_once_with(private / "python.exe", direct=True)
+
     def test_first_install_and_update_preserve_preferences_and_weights(self):
         for name in ("Launch.ps1", "PhotoCraft.cmd"):
             (self.bundle / name).write_text("fixture")
@@ -97,6 +116,25 @@ class InstallerTests(unittest.TestCase):
         self.assertTrue(updated["genStudio"]["segmentation"]["enabled"])
         self.assertEqual(updated["genStudio"]["segmentation"]["detector"], "yolov8m-worldv2")
         self.assertTrue(prefs_path.with_suffix(".before-setup.json").is_file())
+        self.assertEqual(list(self.models.iterdir()), [sentinel])
+        self.assertFalse(list(self.destination.rglob("*.safetensors")))
+
+        # Later updates must also retain each preset's manual files and edit-only
+        # adapter, without copying weights into the application directory.
+        from genstudio.settings import component_defaults
+        presets = {
+            "qwen-image-2.1-turbo": {**component_defaults(), "modelFile": "diffusion_models/qwen-custom.safetensors",
+                                     "constantLora": "loras/qwen-edit.safetensors", "constantLoraStrength": .65},
+            "flux-3-image-klein": {**component_defaults(), "promptUpsampler": "text_encoders/custom-upsampler.safetensors",
+                                   "constantLora": "loras/flux-edit.safetensors", "constantLoraStrength": .4},
+        }
+        updated["genStudio"]["presets"] = presets
+        installer.write_json(prefs_path, updated)
+        with patch.object(installer, "check_python", return_value="existing/python.exe"), \
+             patch("genstudio.models.resolve_components", return_value={}) as discover:
+            installer.install(request, self.bundle, shortcuts=False)
+            discover.assert_called_once_with(str(self.models.resolve()), presets["flux-3-image-klein"], "flux-3-image-klein")
+        self.assertEqual(installer.read_json(prefs_path)["genStudio"]["presets"], presets)
         self.assertEqual(list(self.models.iterdir()), [sentinel])
         self.assertFalse(list(self.destination.rglob("*.safetensors")))
 

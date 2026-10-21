@@ -76,7 +76,7 @@ def build_workflow(config: dict, image_name: str, mask_name: str, seed: int,
             image_input = "image_1"
     encode_inputs = {"clip": ["2", 0], "vae": ["3", 0], "prompt": prompt,
                      "negative_prompt": "", "resolution": 0, image_input: ["6", 0]}
-    return {
+    graph = {
         "1": node("UNETLoader", unet_name=config["diffusion_model"], weight_dtype="default"),
         "2": node("CLIPLoader", clip_name=config["text_encoder"], type="qwen_image",
                   device=config.get("clip_device", "default")),
@@ -98,3 +98,8 @@ def build_workflow(config: dict, image_name: str, mask_name: str, seed: int,
         "13": node("VAEDecode", samples=["12", 0], vae=["3", 0]),
         "14": node("SaveImage", images=["13", 0], filename_prefix="PhotoCraft_GenStudio"),
     }
+    from genstudio.lora import graph as lora_graph
+    model, clip = lora_graph(config, graph, ["1", 0], ["2", 0])
+    graph["4"]["inputs"]["model"] = model
+    graph["8"]["inputs"]["clip"] = clip
+    return graph

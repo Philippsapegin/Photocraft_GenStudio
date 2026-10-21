@@ -16,14 +16,14 @@ from .models import MODEL, FLUX, specification
 
 
 class Worker:
-    def __init__(self, model, text_encoder="", vae="", model_id=MODEL):
+    def __init__(self, model, text_encoder="", vae="", model_id=MODEL, *, components=None):
         specification(model_id)
         self.model_id = model_id
         if model_id == FLUX:
             from .flux_pipeline import FluxPipeline
-            self.pipeline = FluxPipeline(model, text_encoder, vae)
+            self.pipeline = FluxPipeline(model, text_encoder, vae, components=components)
         else:
-            self.pipeline = DirectPipeline(model, text_encoder, vae)
+            self.pipeline = DirectPipeline(model, text_encoder, vae, components=components)
         self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="genstudio-direct")
         self.jobs = {}
         self.lock = threading.RLock()
@@ -92,6 +92,7 @@ class Handler(BaseHTTPRequestHandler):
                 return send(200, {"service": "genstudio-direct", "ready": not problems,
                                   "inpaint_protocol": 2, "model": worker.model_id,
                                   "studio_protocol": 1,
+                                  "components": worker.pipeline.components,
                                   "textEncoder": worker.pipeline.text_encoder, "vae": worker.pipeline.vae,
                                   "modelsDir": str(worker.pipeline.models.resolve()), "problems": problems})
             if self.command == "POST" and self.path == "/jobs":
@@ -127,8 +128,9 @@ def main():
     parser.add_argument("--text-encoder", default="")
     parser.add_argument("--vae", default="")
     parser.add_argument("--model", default=MODEL, choices=(MODEL, FLUX))
+    parser.add_argument("--components", type=json.loads)
     args = parser.parse_args()
-    worker = Worker(args.models, args.text_encoder, args.vae, args.model)
+    worker = Worker(args.models, args.text_encoder, args.vae, args.model, components=args.components)
     problems = worker.pipeline.check()
     if problems:
         raise SystemExit("\n".join(problems))

@@ -22,6 +22,15 @@ def before(source):
 
 
 def after(source):
+    menu = source / "crates/ui-egui/src/menus.rs"
+    text = menu.read_text(encoding="utf-8")
+    if '("genstudio.component.browse",' not in text:
+        text = text.replace('pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[',
+            'pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[\n    ("genstudio.component.browse", "Choose Preset Component", &[], None),')
+    if '        "genstudio.component.browse" => true,' not in text:
+        text = text.replace('        "genstudio.open" | "genstudio.models.browse" | "genstudio.progress.set" => true,',
+            '        "genstudio.component.browse" => true,\n        "genstudio.open" | "genstudio.models.browse" | "genstudio.progress.set" => true,')
+    menu.write_text(text, encoding="utf-8")
     # Independent preparers share module/registry anchors. Repeated preparation
     # must never register a command twice after another hook inserts between them.
     for rel in ("crates/engine/src/lib.rs", "crates/engine/src/commands.rs", "crates/ui-egui/src/lib.rs"):
@@ -48,7 +57,7 @@ def after(source):
                 path.write_text(new, encoding="utf-8")
     for path in (source / "crates/ui-egui/src/i18n").glob("*.tsv"):
         text = path.read_text(encoding="utf-8").replace("Gen Studio", "GenGate")
-        for label in ("GenGate Settings", "GenGate Settings…"):
+        for label in ("GenGate Settings", "GenGate Settings…", "Choose Preset Component"):
             if "\t" + label + "\t" not in text:
                 text += "\n\t" + label + "\t" + label + "\n"
         seen = set()

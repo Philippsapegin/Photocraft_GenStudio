@@ -1,4 +1,21 @@
-# Alpha validation — 0.6.1-alpha.1
+# Release validation
+
+## 0.9.0 beta — 2026-10-22
+
+- Python: **88 tests, 83 passed, 5 tensor tests skipped** in the lightweight host.
+- The native editor and matching CLI reuse the validated preset/LoRA build: baseline 1,464 engine / 2,344 UI tests passed, followed by 6 engine, 9 Preferences UI and 8 GenGate UI regression tests on the final changes. Clippy, layering, WebAssembly, parity and panic checks passed; two known upstream localization failures remain excluded. No native behavior changed for the release version bump.
+- Windows ZIP CRC and all **2,374 manifest files** verified after extraction. Packaged Python sources match this repository; host and installer both report **0.9.0**. No model weights are bundled, and the lightweight Python has no torch.
+- Real installer checks: fresh installation, upgrade from published 0.8, legacy encoder/VAE migration, and a second update with both presets and Constant LoRA strengths. Startup policies, unrelated preferences, previous executables and profile backups are retained. Paths with spaces and Cyrillic characters work.
+- ComfyUI setup was exercised against an isolated fixture: missing LanPaint is rejected before installation unless enabled; its bundled source installs correctly, and existing custom-node files survive updates. No ComfyUI server was started.
+- The graphical Setup form and temporary Windows shortcut were checked. Shared CUDA Python package metadata and selected model-file sizes/timestamps are unchanged.
+- Official MCP checks ran against the **installed beta and bundled runtime**: settings discovery/persistence/cancel, Qwen and FLUX workspaces, startup/progress/queue feedback, and the independent segmentation tools. All passed with synthetic pixels and workers. The setup window was inspected visually.
+- Real inference, model quality, performance and GPU memory use were not tested. The separate CUDA runtime download was not repeated; its private-copy/install-target behavior has a regression test, while actual installation checks reused the existing CUDA Python.
+
+Archive: `PhotoCraft-GenGate-0.9.0-windows-x64.zip`, **147,294,289 bytes**, SHA-256 `bb83ce7ae48ae242f31a1179310a04af89bd1346a2585d8a3fa3f47617ee44d3`.
+
+Editor SHA-256: `479abde62cf0aa95635d961346a747b00be60b400caeae46faf1e782816d6482`. Compiled defaults are neutral; installation writes machine-specific paths into the separate runtime/profile.
+
+## 0.6.1-alpha.1
 
 Release checks on Windows x64, 2026-10-16. **No real generation, model download, model loading or CUDA inference was performed.** Test documents contain synthetic pixels only.
 

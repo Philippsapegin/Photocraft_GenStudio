@@ -7,7 +7,7 @@ NODES = ("UNETLoader", "CLIPLoader", "VAELoader", "LoadImage", "CLIPTextEncode",
          "BatchImagesNode", "VAEDecode", "SaveImage")
 
 
-def workflow(config, references, seed, prompt, width, height, object_info=None):
+def workflow(config, references, seed, prompt, width, height, object_info=None, *, constant_lora=False):
     if len(references) > 10:
         raise ValueError("FLUX 3 Klein supports up to 10 reference images.")
     def node(kind, **inputs):
@@ -48,4 +48,9 @@ def workflow(config, references, seed, prompt, width, height, object_info=None):
         graph["8"] = node("BatchImagesNode", **batch)
         graph["6"]["inputs"]["image"] = ["8", 0]
         graph["12"]["inputs"].update(positive=previous, negative=previous)
+    if constant_lora:
+        from .lora import graph as lora_graph
+        model, clip = lora_graph(config, graph, ["1", 0], ["2", 0])
+        graph["4"]["inputs"]["model"] = model
+        graph["7"]["inputs"]["clip"] = clip
     return graph

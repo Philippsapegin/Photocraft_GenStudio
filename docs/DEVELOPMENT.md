@@ -1,6 +1,6 @@
 # Development
 
-The public alpha is Windows x64. The source repository contains the Python host and native integration templates, not a second copy of PhotoCraft or model weights.
+The public beta is Windows x64. The source repository contains the Python host and native integration templates, not a second copy of PhotoCraft or model weights.
 
 ## Host tests
 
@@ -12,7 +12,7 @@ python -m venv .venv
 .venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-Tests use synthetic images and mock model components. Three tensor-level inpainting tests skip when torch is unavailable. With a CUDA Python that already has torch installed, they can also be run on CPU without loading any weights:
+Tests use synthetic images and mock model components. Five tensor-level tests skip when torch is unavailable. With a CUDA Python that already has torch installed, they can also be run on CPU without loading any weights:
 
 ```powershell
 $env:CUDA_VISIBLE_DEVICES = ''
@@ -59,7 +59,7 @@ The packager refuses to reuse an existing staging directory. Move a previous sta
 ## Release
 
 1. Finish host, native and installer checks; test the extracted archive with an isolated profile. Keep actual inference opt-in.
-2. Update the version in `packaging/installer.py`, README download links and release notes together.
+2. Update the version in `packaging/installer.py`, `genstudio/__init__.py`, `packaging/Setup.ps1`, README download links and release notes together.
 3. Commit the source. Create a matching prerelease tag and upload the Windows ZIP and `SHA256SUMS.txt` as GitHub Release assets. Never commit binaries or weights to Git.
 4. Verify the public release metadata and asset names. Record tests and actual limitations in release notes.
 

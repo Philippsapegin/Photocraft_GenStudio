@@ -20,8 +20,8 @@ impl ModelSpec {
     }
 }
 pub const MODELS: [ModelSpec; 2] = [
-    ModelSpec { id: "qwen-image-2.1-turbo", label: "Qwen Image 2.1 Turbo", reference_limit: 10, zero_based: false },
-    ModelSpec { id: "flux-3-image-klein", label: "FLUX 3 Image Klein", reference_limit: 10, zero_based: true },
+    ModelSpec { id: "qwen-image-2.1-turbo", label: "Qwen Image 2.1", reference_limit: 10, zero_based: false },
+    ModelSpec { id: "flux-3-image-klein", label: "FLUX 3", reference_limit: 10, zero_based: true },
 ];
 pub fn model_spec(id: &str) -> Option<ModelSpec> {
     MODELS.into_iter().find(|m| m.id == id)
@@ -49,11 +49,48 @@ pub enum Startup {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+pub struct PresetComponents {
+    pub model_file: String,
+    pub text_encoder: String,
+    pub prompt_upsampler: String,
+    pub vae: String,
+    pub constant_lora: String,
+    pub constant_lora_strength: f64,
+}
+impl Default for PresetComponents {
+    fn default() -> Self {
+        Self {
+            model_file: String::new(),
+            text_encoder: String::new(),
+            prompt_upsampler: String::new(),
+            vae: String::new(),
+            constant_lora: String::new(),
+            constant_lora_strength: 1.0,
+        }
+    }
+}
+impl PresetComponents {
+    pub fn validate(&self) -> std::result::Result<(), String> {
+        for value in [&self.model_file, &self.text_encoder, &self.prompt_upsampler, &self.vae, &self.constant_lora] {
+            if value.len() > 4096 || value.contains('\0') {
+                return Err("Invalid preset component path".into());
+            }
+        }
+        if !self.constant_lora_strength.is_finite() || !(-20.0..=20.0).contains(&self.constant_lora_strength) {
+            return Err("Constant LoRA strength must be between -20 and 20".into());
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct Settings {
     pub segmentation: crate::gengate_segmentation::Settings,
     pub model: String,
     pub text_encoder: String,
     pub vae: String,
+    pub presets: std::collections::BTreeMap<String, PresetComponents>,
     pub engine: Engine,
     pub comfy_startup: Startup,
     pub direct_startup: Startup,
@@ -83,6 +120,7 @@ impl Default for Settings {
             model: v.get("model").and_then(Value::as_str).unwrap_or("qwen-image-2.1-turbo").to_owned(),
             text_encoder: string("textEncoder"),
             vae: string("vae"),
+            presets: v.get("presets").and_then(|value| serde_json::from_value(value.clone()).ok()).unwrap_or_default(),
             engine: if v.get("engine").and_then(Value::as_str) == Some("direct") { Engine::Direct } else { Engine::Comfy },
             comfy_startup: Startup::FirstRequest,
             direct_startup: Startup::FirstRequest,
@@ -113,6 +151,19 @@ fn read_installed_defaults(path: &std::path::Path) -> Option<Value> {
 }
 
 impl Settings {
+    pub fn components(&self) -> PresetComponents {
+        self.presets.get(&self.model).cloned().unwrap_or_else(|| {
+            if self.presets.is_empty() {
+                PresetComponents { text_encoder: self.text_encoder.clone(), vae: self.vae.clone(), ..Default::default() }
+            } else {
+                PresetComponents::default()
+            }
+        })
+    }
+    pub fn components_mut(&mut self) -> &mut PresetComponents {
+        let initial = self.components();
+        self.presets.entry(self.model.clone()).or_insert(initial)
+    }
     pub fn startup(&self) -> Startup {
         match self.engine {
             Engine::Comfy => self.comfy_startup,
@@ -127,6 +178,12 @@ impl Settings {
     }
     pub fn validate(&self) -> std::result::Result<(), String> {
         self.segmentation.validate()?;
+        for (preset, components) in &self.presets {
+            if model_spec(preset).is_none() {
+                return Err("Unknown preset components".into());
+            }
+            components.validate()?;
+        }
         for s in [
             &self.model,
             &self.text_encoder,
@@ -337,7 +394,12 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let settings: Settings = serde_json::from_value(p.clone()).map_err(|e| EngineError::Other(e.to_string()))?;
     settings.validate().map_err(EngineError::Other)?;
-    s.execute("prefs.set", json!({"path":"genStudio", "value":settings}))?;
+    // Preferences merges section objects one level down. Pass component maps as
+    // leaf values so a previously empty presets map can gain its first entry.
+    let fields = serde_json::to_value(&settings).map_err(|e| EngineError::Other(e.to_string()))?;
+    let values: serde_json::Map<String, Value> =
+        fields.as_object().into_iter().flatten().map(|(key, value)| (format!("genStudio.{key}"), value.clone())).collect();
+    s.execute("prefs.set", json!({"values":values}))?;
     begin(s, "configure", "manual")
 }
 
@@ -360,7 +422,7 @@ pub fn specs() -> Vec<CommandSpec> {
         make(
             "genstudio.engine.configure",
             "Configure GenGate Engine",
-            "{model, engine, textEncoder, vae, comfyStartup, directStartup, comfyUrl, comfyDir, comfyPython, directPython, modelsDir, runtimeRoot}",
+            "{model: presetId, presets: {presetId: {modelFile, textEncoder, promptUpsampler, vae, constantLora, constantLoraStrength}}, engine, comfyStartup, directStartup, comfyUrl, comfyDir, comfyPython, directPython, modelsDir, runtimeRoot}",
             set,
         ),
     ]
@@ -369,6 +431,40 @@ pub fn specs() -> Vec<CommandSpec> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn preset_components_roundtrip_preserves_each_family_and_legacy_choices() {
+        let mut settings = Settings { text_encoder: "old-encoder.safetensors".into(), vae: "old-vae.safetensors".into(), ..Default::default() };
+        let original = settings.model.clone();
+        settings.components_mut().constant_lora = "helper.safetensors".into();
+        settings.components_mut().constant_lora_strength = 0.7;
+        settings.model = "flux-3-image-klein".into();
+        assert!(settings.components().text_encoder.is_empty());
+        settings.components_mut().model_file = "flux-custom.safetensors".into();
+        settings.components_mut().prompt_upsampler = "upsampler.safetensors".into();
+        settings = serde_json::from_value(serde_json::to_value(settings).unwrap()).unwrap();
+        assert_eq!(settings.components().model_file, "flux-custom.safetensors");
+        settings.model = original;
+        assert_eq!(settings.components().text_encoder, "old-encoder.safetensors");
+        assert_eq!(settings.components().constant_lora_strength, 0.7);
+        settings.components_mut().constant_lora_strength = f64::NAN;
+        assert!(settings.validate().is_err());
+    }
+    #[test]
+    fn configuring_first_preset_components_persists_both_families_atomically() {
+        let mut session = Session::new();
+        let root = tempfile::tempdir().unwrap();
+        let mut settings = Settings { runtime_root: root.path().to_string_lossy().into_owned(), ..Default::default() };
+        settings.components_mut().constant_lora = "loras/qwen-edit.safetensors".into();
+        settings.components_mut().constant_lora_strength = 0.65;
+        settings.model = "flux-3-image-klein".into();
+        settings.components_mut().model_file = "diffusion_models/custom-flux.safetensors".into();
+        settings.components_mut().constant_lora_strength = 0.4;
+        session.execute("genstudio.engine.configure", serde_json::to_value(&settings).unwrap()).unwrap();
+        assert_eq!(session.prefs().gen_studio, settings);
+        let mut restored = Session::new();
+        restored.load_prefs_json(&session.prefs_to_json()).unwrap();
+        assert_eq!(restored.prefs().gen_studio, settings);
+    }
     #[test]
     #[cfg(not(target_arch = "wasm32"))]
     fn installed_defaults_are_bounded_and_tolerate_bom() {

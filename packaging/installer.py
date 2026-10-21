@@ -1,4 +1,4 @@
-"""Per-user Windows alpha installer. Never downloads or opens model weights."""
+"""Per-user Windows installer. Never downloads or opens model weights."""
 from __future__ import annotations
 
 import argparse
@@ -12,7 +12,7 @@ import subprocess
 import sys
 import uuid
 
-VERSION = "0.8.0-alpha.1"
+VERSION = "0.9.0"
 REPOSITORY = "https://github.com/Philippsapegin/Photocraft_GenStudio"
 
 
@@ -218,6 +218,12 @@ def install(request, bundle, *, shortcuts=True):
             settings["segmentation"]=validate_segmentation(old_settings["segmentation"])
         except ValueError:
             pass
+    if isinstance(old_settings.get("presets"), dict):
+        from genstudio.settings import validate as validate_settings
+        try:
+            settings["presets"] = validate_settings({**settings, "presets": old_settings["presets"]})["presets"]
+        except ValueError:
+            pass
     write_json(runtime / "config.photocraft.json", settings)
     if engine == "comfy" and not lanpaint.exists():
         report("Installing the bundled, pinned LanPaint extension into the selected ComfyUI...")
@@ -248,7 +254,12 @@ def install(request, bundle, *, shortcuts=True):
     sys.path.insert(0, str(runtime))
     from genstudio.models import resolve
     try:
-        resolve(settings["modelsDir"],settings.get("textEncoder",""),settings.get("vae",""),settings.get("model","qwen-image-2.1-turbo"))
+        if settings.get("presets"):
+            from genstudio.models import resolve_components
+            from genstudio.settings import active_components
+            resolve_components(settings["modelsDir"], active_components(settings), settings["model"])
+        else:
+            resolve(settings["modelsDir"],settings.get("textEncoder",""),settings.get("vae",""),settings.get("model","qwen-image-2.1-turbo"))
         report("Model files found. No weights were loaded.")
     except ValueError as error:
         report("Setup completed; models still need attention: " + str(error))

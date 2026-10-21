@@ -14,7 +14,8 @@ import sys
 
 from genfill.comfy import Cancelled
 from .core_pipeline import import_core, inpaint_references
-from .models import FLUX, resolve
+from .models import FLUX, resolve_components
+from .settings import validate_components
 from .settings import ROOT
 
 CORE = ROOT / ".runtime/flux-core"
@@ -49,9 +50,10 @@ def masked_prompt(prompt):
 class FluxPipeline:
     model_id = FLUX
 
-    def __init__(self, models, text_encoder="", vae=""):
+    def __init__(self, models, text_encoder="", vae="", *, components=None):
         self.models = Path(models)
-        self.text_encoder, self.vae = text_encoder, vae
+        self.components = validate_components(components if components is not None else {"textEncoder": text_encoder, "vae": vae})
+        self.text_encoder, self.vae = self.components["textEncoder"], self.components["vae"]
         self.pipe = None
         self.caption = None
 
@@ -73,7 +75,7 @@ class FluxPipeline:
             except (importlib.metadata.PackageNotFoundError, ValueError):
                 problems.append(f"FLUX 3 dependency {name} is missing. Run scripts/Setup-Direct.ps1.")
         try:
-            resolve(self.models, self.text_encoder, self.vae, FLUX)
+            resolve_components(self.models, self.components, FLUX)
         except (ValueError, OSError) as error:
             problems.append(str(error))
         return problems
@@ -87,8 +89,8 @@ class FluxPipeline:
         self.pipe = None
         gc.collect()
         memory.soft_empty_cache()
-        progress("FLUX 3 Klein · expanding prompt…")
-        files = resolve(self.models, self.text_encoder, self.vae, FLUX)
+        progress("FLUX 3 · expanding prompt…")
+        files = resolve_components(self.models, self.components, FLUX)
         llm = sd.load_clip([files["prompt_upsampler"]["path"]], clip_type=sd.CLIPType.FLUX3, disable_dynamic=True)
         previous = comfy.utils.PROGRESS_BAR_HOOK
 
@@ -123,8 +125,8 @@ class FluxPipeline:
             return self.pipe
         sd, _ = import_core(core=CORE)
         import comfy.utils
-        files = resolve(self.models, self.text_encoder, self.vae, FLUX)
-        progress("Loading FLUX 3 Klein · INT8…")
+        files = resolve_components(self.models, self.components, FLUX)
+        progress("Loading FLUX 3 components…")
         model = sd.load_diffusion_model(files["diffusion_model"]["path"], disable_dynamic=True)
         if model is None:
             raise RuntimeError("The selected FLUX 3 diffusion model is unsupported.")
@@ -133,7 +135,7 @@ class FluxPipeline:
         self.pipe = model, clip, vae
         return self.pipe
 
-    def generate_studio(self, references, seed, prompt, width, height, cancel, progress, *, _minimum=256):
+    def generate_studio(self, references, seed, prompt, width, height, cancel, progress, *, _minimum=256, _constant_lora=False):
         if len(references) > 10 or width % 16 or height % 16 or not _minimum <= width <= 2048 or not _minimum <= height <= 2048:
             raise ValueError("Invalid FLUX 3 generation dimensions or reference count.")
         if cancel.is_set():
@@ -159,7 +161,7 @@ class FluxPipeline:
 
         def step(index, denoised, noisy, total):
             check()
-            progress(f"FLUX 3 Klein · {index + 1}/{total}")
+            progress(f"FLUX 3 · {index + 1}/{total}")
 
         with torch.inference_mode():
             key = caption_key(references, prompt, width, height)
@@ -174,6 +176,9 @@ class FluxPipeline:
                 self.caption = key, caption
             check()
             model, clip, vae = self.load(progress)
+            if _constant_lora:
+                from .lora import apply_constant
+                model, clip = apply_constant(model, clip, self.models, self.components, progress)
             latents = []
             for index, pixels in enumerate(images):
                 check()
@@ -206,4 +211,4 @@ class FluxPipeline:
         # FLUX3 is an editing model. Pixel-exact masking is applied by the host
         # after rendering, shared with Remove Tool and selection Ai Fill.
         return self.generate_studio([reference, coverage], seed, masked_prompt(prompt),
-                                    image.width, image.height, cancel, progress, _minimum=16)
+                                    image.width, image.height, cancel, progress, _minimum=16, _constant_lora=True)

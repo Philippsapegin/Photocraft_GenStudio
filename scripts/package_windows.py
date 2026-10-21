@@ -1,4 +1,4 @@
-"""Build the Windows alpha ZIP; downloads code/runtime only, never model weights."""
+"""Build the Windows release ZIP; downloads code/runtime only, never model weights."""
 from __future__ import annotations
 import argparse
 from concurrent.futures import ThreadPoolExecutor

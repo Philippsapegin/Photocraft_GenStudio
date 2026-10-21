@@ -8,7 +8,8 @@ from pathlib import Path
 import sys
 
 from genfill.comfy import Cancelled
-from .models import resolve
+from .models import resolve_components
+from .settings import validate_components
 from .settings import ROOT
 
 CORE = ROOT / ".runtime/qwen-core"
@@ -56,9 +57,10 @@ def import_core(cpu=False, core=CORE):
 
 
 class DirectPipeline:
-    def __init__(self, models, text_encoder="", vae=""):
+    def __init__(self, models, text_encoder="", vae="", *, components=None):
         self.models = Path(models)
-        self.text_encoder, self.vae = text_encoder, vae
+        self.components = validate_components(components if components is not None else {"textEncoder": text_encoder, "vae": vae})
+        self.text_encoder, self.vae = self.components["textEncoder"], self.components["vae"]
         self.pipe = None
 
     def check(self):
@@ -68,7 +70,7 @@ class DirectPipeline:
         if not (CORE / "comfy/sd.py").is_file():
             problems.append("Direct model library is missing. Run scripts/Setup-Direct.ps1.")
         try:
-            resolve(self.models, self.text_encoder, self.vae)
+            resolve_components(self.models, self.components)
         except (ValueError, OSError) as error:
             problems.append(str(error))
         # No torch imports, CUDA initialization, weights loading or downloads here.
@@ -80,10 +82,10 @@ class DirectPipeline:
         problems = self.check()
         if problems:
             raise RuntimeError("\n".join(problems))
-        files = resolve(self.models, self.text_encoder, self.vae)
+        files = resolve_components(self.models, self.components)
         sd, _ = import_core()
         import comfy.utils
-        progress("Loading Qwen 2.1 Turbo · existing INT8 checkpoints…")
+        progress("Loading Qwen Image 2.1 components…")
         model = sd.load_diffusion_model(files["diffusion_model"]["path"], disable_dynamic=True)
         if model is None:
             raise RuntimeError("The selected diffusion model is unsupported.")
@@ -113,7 +115,7 @@ class DirectPipeline:
 
         def step(index, denoised, noisy, total):
             check()
-            progress(f"Qwen 2.1 Turbo · {index + 1}/{total}")
+            progress(f"Qwen Image 2.1 · {index + 1}/{total}")
 
         with torch.inference_mode():
             images, latents = [], []
@@ -143,6 +145,8 @@ class DirectPipeline:
             raise Cancelled()
         reference, mask_reference = inpaint_references(image, mask)
         model, clip, vae = self.load(progress)
+        from .lora import apply_constant
+        model, clip = apply_constant(model, clip, self.models, self.components, progress)
         import numpy as np
         import torch
         import comfy.sample
@@ -157,7 +161,7 @@ class DirectPipeline:
 
         def step(index, denoised, noisy, total):
             cancelled()
-            progress(f"Qwen 2.1 Turbo · {index + 1}/{total}")
+            progress(f"Qwen Image 2.1 · {index + 1}/{total}")
 
         with torch.inference_mode():
             pixels = torch.from_numpy(np.array(reference).astype(np.float32) / 255.0).unsqueeze(0)
@@ -183,7 +187,7 @@ class DirectPipeline:
             noise_mask = torch.nn.functional.adaptive_max_pool2d(
                 mask_pixels[..., :1].movedim(-1, 1), latent.shape[-2:])
             noise = comfy.sample.prepare_noise(latent, seed)
-            progress("Qwen 2.1 Turbo · generating…")
+            progress("Qwen Image 2.1 · generating…")
             cancelled()
             samples = comfy.sample.sample_custom(model, noise, 1.0, comfy.samplers.sampler_object("euler"),
                        torch.tensor(TURBO_SIGMAS, dtype=torch.float32), positive, negative, latent,

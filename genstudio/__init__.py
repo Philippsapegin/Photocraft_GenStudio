@@ -1,3 +1,3 @@
 """PhotoCraft GenGate engine host. Model imports stay in the inference worker."""
 
-VERSION = "0.8.0-alpha.1"
+VERSION = "0.9.0"

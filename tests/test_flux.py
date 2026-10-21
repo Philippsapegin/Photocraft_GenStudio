@@ -226,7 +226,7 @@ class FluxTests(unittest.TestCase):
         pipeline.pipe = object()
         with patch.dict(sys.modules, {"comfy": comfy, "comfy.utils": utils, "comfy.model_management": memory}), \
              patch("genstudio.flux_pipeline.import_core", return_value=(sd, None)), \
-             patch("genstudio.flux_pipeline.resolve", return_value={"prompt_upsampler": {"path": "synthetic"}}):
+                patch("genstudio.flux_pipeline.resolve_components", return_value={"prompt_upsampler": {"path": "synthetic"}}):
             result = pipeline.expand(["reference"], 7, "Use <ref_image_0>", 1024, 1024, cancel, lambda msg: None)
             self.assertEqual(result, "A scene from <ref_image_0>.")
             self.assertEqual(llm.arguments["images"], ["reference"])

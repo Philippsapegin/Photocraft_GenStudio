@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -15,7 +16,7 @@ def defaults():
     from genfill.server import load_config
     old = load_config()
     from .segmentation_models import DEFAULTS
-    return {"segmentation": dict(DEFAULTS), "model": MODEL, "textEncoder": "", "vae": "",
+    return {"segmentation": dict(DEFAULTS), "model": MODEL, "textEncoder": "", "vae": "", "presets": {},
             "engine": "comfy", "comfyStartup": "firstRequest", "directStartup": "firstRequest",
             "comfyUrl": old["comfy_url"], "comfyDir": old.get("comfy_dir", ""),
             "comfyPython": old.get("comfy_python", ""),
@@ -42,8 +43,13 @@ def validate(value):
     result.update(value)
     from .segmentation_models import validate as validate_segmentation
     result["segmentation"] = validate_segmentation(result["segmentation"])
+    from .models import MODELS
+    presets = result["presets"]
+    if not isinstance(presets, dict) or presets.keys() - MODELS.keys():
+        raise ValueError("Unknown model preset settings.")
+    result["presets"] = {key: validate_components(item) for key, item in presets.items()}
     for key, item in result.items():
-        if key == "segmentation":
+        if key in ("segmentation", "presets"):
             continue
         if not isinstance(item, str) or len(item) > 4096 or "\x00" in item:
             raise ValueError("Invalid engine setting: " + key)
@@ -63,6 +69,33 @@ def validate(value):
     except ValueError:
         raise ValueError("ComfyUI address must contain a valid port.") from None
     return result
+
+
+def component_defaults():
+    return {"modelFile": "", "textEncoder": "", "promptUpsampler": "", "vae": "", "constantLora": "", "constantLoraStrength": 1.0}
+
+
+def validate_components(value):
+    result = component_defaults()
+    if not isinstance(value, dict) or value.keys() - result.keys():
+        raise ValueError("Invalid preset components.")
+    result.update(value)
+    for key, item in result.items():
+        if key == "constantLoraStrength":
+            if isinstance(item, bool) or not isinstance(item, (int, float)) or not math.isfinite(item) or not -20 <= item <= 20:
+                raise ValueError("Constant LoRA strength must be a number between -20 and 20.")
+        elif not isinstance(item, str) or len(item) > 4096 or "\x00" in item:
+            raise ValueError("Invalid preset component: " + key)
+    return result
+
+
+def active_components(settings):
+    presets = settings.get("presets", {})
+    if presets:
+        return validate_components(presets.get(settings["model"], {}))
+    # Migrate the existing flat encoder/VAE preferences without leaking them to
+    # another family once the first per-preset entry has been saved.
+    return validate_components({"textEncoder": settings.get("textEncoder", ""), "vae": settings.get("vae", "")})
 
 
 def load(path=SETTINGS_PATH):

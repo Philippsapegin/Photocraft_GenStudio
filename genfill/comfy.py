@@ -51,7 +51,7 @@ class ComfyClient:
             return value[0]
         return value[1].get("options", []) if len(value) > 1 else []
 
-    def inspect(self, studio=False) -> tuple[dict, list[str]]:
+    def inspect(self, studio=False, constant_lora=None) -> tuple[dict, list[str]]:
         info = self.request("/object_info", timeout=30)
         flux = self.config.get("model") == "flux-3-image-klein"
         if flux:
@@ -66,6 +66,12 @@ class ComfyClient:
             components.append(("CLIPLoader", "clip_name", "prompt_upsampler"))
             if "CLIPLoader" in info and "flux3" not in self.choices(info, "CLIPLoader", "type"):
                 problems.append("FLUX 3 Klein requires ComfyUI 0.41.3 or newer. Update your ComfyUI, or select Direct.")
+        edit = not studio if constant_lora is None else constant_lora
+        if edit and self.config.get("constant_lora") and self.config.get("constant_lora_strength", 1.0):
+            if "LoraLoader" not in info:
+                problems.append("Missing node LoraLoader. Update ComfyUI.")
+            else:
+                components.append(("LoraLoader", "lora_name", "constant_lora"))
         for node, field, config_key in components:
             if node in info and self.config[config_key] not in self.choices(info, node, field):
                 problems.append("Missing model: " + self.config[config_key])
@@ -95,7 +101,7 @@ class ComfyClient:
             from genstudio.flux_pipeline import masked_prompt
             reference, coverage = inpaint_references(image, mask)
             return self.generate_studio([reference, coverage], seed, masked_prompt(prompt),
-                                        image.width, image.height, cancel, progress)
+                                        image.width, image.height, cancel, progress, _constant_lora=True)
         info, problems = self.inspect()
         if problems:
             raise RuntimeError("\n".join(problems))
@@ -110,8 +116,8 @@ class ComfyClient:
         workflow = build_workflow(self.config, image_name, mask_name, seed, prompt, info)
         return self.run_workflow(workflow, cancel, progress, uid)
 
-    def generate_studio(self, references, seed, prompt, width, height, cancel, progress):
-        info, problems = self.inspect(studio=True)
+    def generate_studio(self, references, seed, prompt, width, height, cancel, progress, *, _constant_lora=False):
+        info, problems = self.inspect(studio=True, constant_lora=_constant_lora)
         if problems:
             raise RuntimeError("\n".join(problems))
         uid = uuid.uuid4().hex
@@ -125,7 +131,7 @@ class ComfyClient:
             names.append(self.upload(f"genstudio-{uid}-{index}.png", png_bytes(image)))
         if self.config.get("model") == "flux-3-image-klein":
             from genstudio.flux_workflow import workflow as flux_workflow
-            workflow = flux_workflow(self.config, names, seed, prompt, width, height, info)
+            workflow = flux_workflow(self.config, names, seed, prompt, width, height, info, constant_lora=_constant_lora)
         else:
             workflow = studio_workflow(self.config, names, seed, prompt, width, height, info)
         return self.run_workflow(workflow, cancel, progress, uid)

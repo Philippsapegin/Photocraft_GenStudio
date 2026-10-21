@@ -25,7 +25,7 @@ class Handler(JobHandler):
                 if self.headers.get("Content-Type", "").split(";")[0] != "application/json":
                     raise ValueError("Content-Type: application/json required.")
                 length = int(self.headers.get("Content-Length", "0"))
-                if not 0 < length <= 64 * 1024:
+                if not 0 < length <= 128 * 1024:
                     raise ValueError("Invalid control request size.")
                 body = json.loads(self.rfile.read(length))
                 if not isinstance(body, dict):

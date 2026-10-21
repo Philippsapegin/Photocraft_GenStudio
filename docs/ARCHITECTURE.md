@@ -23,7 +23,7 @@ PhotoCraft native tools and GenGate settings
 - `photocraft/*-locales.json`: original native menu/feedback catalogs.
 - `scripts/prepare_*.py`: repeatable integration of templates and hooks.
 - `packaging/`: graphical Windows setup, safe per-user installation, runtime lock and launcher.
-- `scripts/package_windows.py`: self-contained Windows alpha packaging.
+- `scripts/package_windows.py`: self-contained Windows release packaging.
 - `tests/`, `scripts/photocraft_*_smoke.py`: synthetic tests and official MCP validation.
 
 ## Image path
@@ -42,7 +42,7 @@ The host starts/stops only its own processes and attaches to an existing engine 
 
 Setup verifies the release manifest, chooses existing shared models and writes machine-local paths only into the installation. Executables/runtime are placed in a new version subfolder on each install. The stable launcher sets `PHOTOCRAFT_CONFIG_DIR` to the installation's `Profile`; updates preserve unrelated preferences and old executables. Existing external Python environments are inspected without importing torch and never modified. A new CUDA environment, when selected, is private to that installed version.
 
-The host listens on loopback, rejects browser-origin requests and validates input sizes. This alpha supports one shared host configuration per computer at a time; simultaneous independent installations are not isolated inference servers.
+The host listens on loopback, rejects browser-origin requests and validates input sizes. This beta supports one shared host configuration per computer at a time; simultaneous independent installations are not isolated inference servers.
 
 Full Studio output uses `gsST` layer metadata for the source/model prompts and dimensions. This is separate from selection-fill galleries (`gsAI`). Output surfaces are prepared on the worker in the destination colour format, then inserted atomically into the original document. The empty reference is filled through a separate bounded layer-capture job. Studio engine controls live in the native Preferences working copy, with Apply/OK/Cancel semantics.
 
