@@ -87,11 +87,14 @@ class InpaintSamplingTests(unittest.TestCase):
                 worker = Worker("unused")
                 worker.pipeline = pipeline
                 encode_picture = lambda picture: base64.b64encode(png_bytes(picture)).decode("ascii")
-                try:
-                    job = worker.submit({"image": encode_picture(image), "mask": encode_picture(mask),
-                                         "seed": 42, "prompt": "A green tree"})
-                finally:
-                    worker.pool.shutdown(wait=True)
+                from contextlib import nullcontext
+                with patch("genstudio.direct_worker.gpu_lease", return_value=nullcontext()), \
+                        patch("genstudio.direct_worker.release_gpu"):
+                    try:
+                        job = worker.submit({"image": encode_picture(image), "mask": encode_picture(mask),
+                                             "seed": 42, "prompt": "A green tree"})
+                    finally:
+                        worker.pool.shutdown(wait=True)
                 result = worker.jobs[job["id"]]
                 self.assertEqual(result["state"], "done", result["message"])
                 output = decode_png(result["result"]["image"], 32 * 32)

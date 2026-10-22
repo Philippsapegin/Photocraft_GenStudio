@@ -485,6 +485,8 @@ fn settings(app: &mut PhotocraftApp, ui: &mut egui::Ui, draft: &mut Settings, st
             app.ui.gen_studio.advanced_were_open = true;
         }
     });
+    crate::widgets::checkbox(ui, &mut draft.reduce_edit_resolution, "Reduce AI fill resolution (up to 2\u{00d7})")
+        .on_hover_text("Keep crops up to 768 px at full resolution. Larger fills and Remove Tool crops reduce progressively, up to 2×. Off preserves the original pixel size.");
     let mut progress = view["progress"].as_bool().unwrap_or(!app.ui.gen_studio.hide_fill_progress);
     if crate::widgets::checkbox(ui, &mut progress, "Show progress bars under masks").changed() {
         view["progress"] = json!(progress);

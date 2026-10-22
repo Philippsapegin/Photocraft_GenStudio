@@ -1,6 +1,7 @@
 """Wire the Qwen generation workspace into the pinned native editor."""
 from pathlib import Path
 import shutil
+import re
 
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -23,8 +24,9 @@ def prepare(source,replace):
     end=text.find("\n[[package]]",start)
     if end<0:end=len(text)
     package=text[start:end]
-    if '\n "base64",' not in package:
-        package=package.replace('dependencies = [\n','dependencies = [\n "base64",\n',1)
+    if not re.search(r'\n "base64(?: 0\.22\.1)?",',package):
+        base64_name='base64 0.22.1' if text.count('name = "base64"')>1 else 'base64'
+        package=package.replace('dependencies = [\n',f'dependencies = [\n "{base64_name}",\n',1)
         lock.write_text(text[:start]+package+text[end:],encoding="utf-8")
     def module(path,anchor,addition):
         text=path.read_text(encoding="utf-8")

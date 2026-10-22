@@ -186,7 +186,8 @@ def main():
             # All existing checkboxes keep their native semantics in the queue.
             click(238,50);click(367,50)
             options=inspect()["toolOptions"]
-            assert options["sample_all_layers"] and options["remove_new_layer"] and options["remove_after_each_stroke"]
+            sample_all=options.get("sample_all",{}).get("remove",options.get("sample_all_layers",False))
+            assert sample_all and options["remove_new_layer"] and options["remove_after_each_stroke"]
             stroke(150);stroke(270)
             until(lambda:len(host.calls)==4 and not queue())
             layers=mcp.run("document.inspect")["layers"]

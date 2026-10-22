@@ -87,6 +87,7 @@ impl PresetComponents {
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct Settings {
     pub segmentation: crate::gengate_segmentation::Settings,
+    pub reduce_edit_resolution: bool,
     pub model: String,
     pub text_encoder: String,
     pub vae: String,
@@ -117,6 +118,7 @@ impl Default for Settings {
         let string = |key: &str| v.get(key).and_then(Value::as_str).unwrap_or_default().to_owned();
         Self {
             segmentation: Default::default(),
+            reduce_edit_resolution: v.get("reduceEditResolution").and_then(Value::as_bool).unwrap_or(false),
             model: v.get("model").and_then(Value::as_str).unwrap_or("qwen-image-2.1-turbo").to_owned(),
             text_encoder: string("textEncoder"),
             vae: string("vae"),
@@ -214,7 +216,7 @@ pub struct Runtime {
     pub catalog: Arc<Mutex<Value>>,
     pub state: Arc<Mutex<Snapshot>>,
     pub queue: crate::genstudio_queue::Queue,
-    pub selection_cache: Mutex<Option<(std::sync::Weak<photocraft_doc::Document>, photocraft_geom::Rect)>>,
+    pub(crate) selection_cache: Mutex<Option<crate::genstudio_ai::SelectionCache>>,
 }
 
 #[derive(Default)]

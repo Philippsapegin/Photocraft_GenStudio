@@ -141,7 +141,7 @@ pub(crate) fn capture_ai(s: &Session, p: &Value) -> Result<AiRequest> {
     let mut plan = plan(s, p)?;
     let doc = s.active().ok_or(EngineError::NoDocument)?.doc.clone();
     let bounds = plan.strokes.iter().map(stroke_bounds).reduce(|a,b| a.union(&b)).ok_or_else(|| other("empty stroke"))?.intersect(&doc.bounds());
-    plan.window = bounds.inflate(sampling_margin(bounds).clamp(96, MAX_MARGIN)).intersect(&doc.bounds());
+    plan.window = crate::genstudio_edit::aligned_context(bounds, doc.bounds(), sampling_margin(bounds).clamp(96, MAX_MARGIN))?;
     if u64::from(plan.window.width()) * u64::from(plan.window.height()) > MAX_PIXELS { return Err(other("the masked rectangle is too large; use a smaller stroke")); }
     let settings = s.prefs().gen_studio.clone();
     settings.validate().map_err(other)?;

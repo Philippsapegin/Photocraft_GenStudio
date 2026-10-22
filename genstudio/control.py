@@ -12,20 +12,46 @@ from urllib.parse import urlsplit
 
 from .lifecycle import hidden_process, http_json
 from .settings import ROOT
+from .processes import identity, process_lock
 
-BASE = os.environ.get("GENSTUDIO_SERVICE_URL", "http://127.0.0.1:8766").rstrip("/")
-_address = urlsplit(BASE)
-if (_address.scheme != "http" or _address.hostname != "127.0.0.1" or
-        _address.path or _address.query or _address.fragment or _address.username or
-        not _address.port):
-    raise ValueError("GenGate service must use a local 127.0.0.1 HTTP address.")
+DEFAULT_BASE = "http://127.0.0.1:8766"  # Legacy placeholder; never discovered by probing this port.
+BASE = os.environ.get("GENSTUDIO_SERVICE_URL", DEFAULT_BASE).rstrip("/")
+ENDPOINT = ROOT / ".runtime/genstudio/endpoint.json"
+
+
+def local_url(value):
+    address = urlsplit(value)
+    if (address.scheme != "http" or address.hostname != "127.0.0.1" or
+            address.path or address.query or address.fragment or address.username or not address.port):
+        raise ValueError("GenGate service must use a local 127.0.0.1 HTTP address.")
+    return value
+
+
+def discover():
+    global BASE
+    if os.environ.get("GENSTUDIO_SERVICE_URL"):
+        BASE = local_url(os.environ["GENSTUDIO_SERVICE_URL"].rstrip("/"))
+        return
+    BASE = DEFAULT_BASE
+    try:
+        record = json.loads(ENDPOINT.read_text(encoding="utf-8"))
+        if record.get("identity") == identity():
+            BASE = local_url(record["url"])
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
 
 
 def health():
+    if BASE == DEFAULT_BASE and not os.environ.get("GENSTUDIO_SERVICE_URL"):
+        discover()
+        if BASE == DEFAULT_BASE:
+            return None
     try:
-        value = http_json(BASE + "/health", timeout=1)
-        if value.get("service") != "photocraft-genstudio":
-            raise RuntimeError("Port 8766 belongs to another application.")
+        value = http_json(local_url(BASE) + "/health", timeout=1)
+        if value.get("service") != "photocraft-genstudio" or value.get("identity") != identity():
+            if os.environ.get("GENSTUDIO_SERVICE_URL"):
+                raise RuntimeError("The configured GenGate service belongs to another version or installation.")
+            return None
         return value
     except (URLError, TimeoutError, ConnectionError):
         return None
@@ -41,26 +67,30 @@ def run(action, settings=None, event="manual"):
     if not current and action in ("status", "stop"):
         return {"state": "stopped", "ready": False, "owned": False, "message": "Stopped"}
     if not current:
-        if BASE != "http://127.0.0.1:8766":
+        if os.environ.get("GENSTUDIO_SERVICE_URL"):
             raise RuntimeError("The isolated GenGate service is unavailable.")
         folder = ROOT / ".runtime/genstudio"
         folder.mkdir(parents=True, exist_ok=True)
-        with open(folder / "host.log", "ab", buffering=0) as out, open(folder / "host-errors.log", "ab", buffering=0) as err:
-            process = hidden_process([str(ROOT / ".venv/Scripts/python.exe"), "-X", "utf8", "-m", "genstudio.service"], stdout=out, stderr=err)
-        deadline = time.monotonic() + 15
-        while time.monotonic() < deadline and not health():
-            if process.poll() is not None:
-                # Another editor may have won the bind race.
-                if health():
-                    break
-                raise RuntimeError("GenGate host failed to start. See .runtime/genstudio/host-errors.log.")
-            time.sleep(0.15)
-        if not health():
-            raise RuntimeError("GenGate host startup timed out.")
+        with process_lock(folder / "startup.lock", timeout=20):
+            discover()
+            if not health():
+                with open(folder / "host.log", "ab", buffering=0) as out, open(folder / "host-errors.log", "ab", buffering=0) as err:
+                    process = hidden_process([str(ROOT / ".venv/Scripts/python.exe"), "-X", "utf8", "-m", "genstudio.service"], stdout=out, stderr=err)
+                deadline = time.monotonic() + 15
+                while time.monotonic() < deadline:
+                    discover()
+                    if health():
+                        break
+                    if process.poll() is not None:
+                        raise RuntimeError("GenGate host failed to start. See .runtime/genstudio/host-errors.log.")
+                    time.sleep(0.15)
+                else:
+                    raise RuntimeError("GenGate host startup timed out.")
     # Segmentation is editor-owned and uses a separate Direct process. Keep its
     # preferences out of the generation-service protocol (including older hosts).
     engine_settings = {key: value for key, value in settings.items() if key != "segmentation"} if settings is not None else None
-    return http_json(BASE + "/engine", {"action": action, "settings": engine_settings, "event": event}, timeout=330)
+    return http_json(BASE + "/engine", {"action": action, "settings": engine_settings, "event": event},
+                     timeout=330 if action in ("start", "ensure") else 30)
 
 
 def main():

@@ -10,6 +10,27 @@ fn err(e: impl std::fmt::Display) -> EngineError {
     EngineError::Other(format!("Ai Fill: {e}"))
 }
 
+/// Extend context to the model's pixel grid without moving or resampling it.
+/// At canvas edges the Python transport pads the remaining outside border.
+pub(crate) fn aligned_context(bounds: photocraft_geom::Rect, canvas: photocraft_geom::Rect, margin: i32) -> Result<photocraft_geom::Rect> {
+    let rect = bounds.inflate(margin).intersect(&canvas);
+    if rect.is_empty() { return Err(err("the edit rectangle is empty")); }
+    let step = 32_i64;
+    let axis = |start: i32, end: i32, lo: i32, hi: i32| -> Result<(i32, i32)> {
+        let (start, end, lo, hi) = (i64::from(start), i64::from(end), i64::from(lo), i64::from(hi));
+        let size = end - start;
+        let target = (size + step - 1) / step * step;
+        if target > hi - lo {
+            return Ok((i32::try_from(lo).map_err(err)?, i32::try_from(hi).map_err(err)?));
+        }
+        let left = (start - (target - size) / 2).clamp(lo, hi - target);
+        Ok((i32::try_from(left).map_err(err)?, i32::try_from(left + target).map_err(err)?))
+    };
+    let (x0, x1) = axis(rect.x0, rect.x1, canvas.x0, canvas.x1)?;
+    let (y0, y1) = axis(rect.y0, rect.y1, canvas.y0, canvas.y1)?;
+    Ok(photocraft_geom::Rect::new(x0, y0, x1, y1))
+}
+
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn generate(_: &Settings, _: &Image, _: &Image, _: &JobCtx) -> Result<(Image, Image)> {
     Err(err("the local AI engine requires the desktop app"))
@@ -213,4 +234,31 @@ pub(crate) fn read_png(path: &std::path::Path, size: (u32, u32)) -> Result<Image
 
 pub(crate) fn rgba(image: &Image) -> Image {
     image.convert(ChannelLayout::Rgba, SampleType::U8)
+}
+
+#[cfg(test)]
+mod geometry_tests {
+    use super::*;
+    use photocraft_geom::Rect;
+
+    #[test]
+    fn context_grows_to_the_grid_without_moving_the_original_mask() {
+        let canvas = Rect::new(0, 0, 4000, 3000);
+        let bounds = Rect::new(101, 201, 864, 710);
+        let aligned = aligned_context(bounds, canvas, 0).unwrap();
+        assert_eq!((aligned.width(), aligned.height()), (768, 512));
+        assert!(aligned.x0 <= bounds.x0 && aligned.y0 <= bounds.y0);
+        assert!(aligned.x1 >= bounds.x1 && aligned.y1 >= bounds.y1);
+    }
+
+    #[test]
+    fn edge_context_uses_existing_pixels_and_leaves_outside_padding_to_transport() {
+        let canvas = Rect::new(0, 0, 4000, 3000);
+        let bounds = Rect::new(3237, 2491, 4000, 3000);
+        let aligned = aligned_context(bounds, canvas, 0).unwrap();
+        assert_eq!(aligned, Rect::new(3232, 2488, 4000, 3000));
+        let small = Rect::new(0, 0, 763, 509);
+        assert_eq!(aligned_context(small, small, 256).unwrap(), small);
+        assert!(aligned_context(Rect::EMPTY, canvas, 0).is_err());
+    }
 }

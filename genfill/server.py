@@ -15,7 +15,7 @@ import uuid
 
 from . import __version__
 from .comfy import Cancelled, ComfyClient
-from .image_ops import bounded_int, decode_png, prepare_edit, png_bytes, result_patch
+from .image_ops import bounded_int, decode_png, prepare_edit, png_bytes, result_patch, restore_result
 from .workflow import edit_prompt
 from .progress import sampling_fraction
 
@@ -57,11 +57,12 @@ class JobManager:
         rectangle = body.get("return_rectangle", False)
         preserve_roi = body.get("preserve_roi", False)
         masked_input = body.get("masked_input", False)
-        if any(not isinstance(value, bool) for value in (rectangle, preserve_roi, masked_input)):
+        pixel_aligned, downsample = body.get("pixel_aligned", False), body.get("downsample", False)
+        if any(not isinstance(value, bool) for value in (rectangle, preserve_roi, masked_input, pixel_aligned, downsample)):
             raise ValueError("Rectangle, ROI and masked-input options must be booleans.")
         edit = prepare_edit(image, mask, context=body.get("context", 96),
                             max_size=body.get("max_size", 768), grow=body.get("grow", 8),
-                            preserve_roi=preserve_roi)
+                            preserve_roi=preserve_roi, pixel_aligned=pixel_aligned, downsample=downsample)
         with self.lock:
             # Bound memory, releasing old result PNGs and their masks.
             for key, job in list(self.jobs.items()):
@@ -96,7 +97,7 @@ class JobManager:
             output = self.client.generate(reference, edit.model_mask, seed, prompt, job.cancel, progress)
             if job.cancel.is_set():
                 raise Cancelled()
-            patch = result_patch(edit, output, feather)
+            patch = restore_result(edit, output) if rectangle else result_patch(edit, output, feather)
             result = {"image": base64.b64encode(png_bytes(patch)).decode("ascii"),
                       "x": edit.box[0], "y": edit.box[1], "seed": seed,
                       "width": patch.width, "height": patch.height,
@@ -104,12 +105,10 @@ class JobManager:
             if rectangle:
                 # Keep every generated pixel on the new layer; the editor owns a separate,
                 # editable layer mask. Legacy clients still receive an alpha-clipped patch.
-                from PIL import Image, ImageChops, ImageFilter
-                full = output.convert("RGBA").resize(patch.size, Image.Resampling.LANCZOS)
+                from PIL import ImageChops, ImageFilter
                 coverage = edit.mask.crop(edit.box)
                 if feather:
                     coverage = ImageChops.multiply(coverage, coverage.filter(ImageFilter.GaussianBlur(feather)))
-                result["image"] = base64.b64encode(png_bytes(full)).decode("ascii")
                 result["mask"] = base64.b64encode(png_bytes(coverage)).decode("ascii")
             with self.lock:
                 if job.cancel.is_set():

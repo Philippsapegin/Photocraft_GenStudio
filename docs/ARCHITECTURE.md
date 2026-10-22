@@ -7,9 +7,9 @@ PhotoCraft native tools and GenGate settings
                    |
         background control / edit client
                    |
-         Python host 127.0.0.1:8766
+         Python host (private loopback port)
             /                  \
-   Direct worker :8767      local ComfyUI
+   Direct worker (own port) local ComfyUI
    pinned model library     Qwen nodes + LanPaint
             \                  /
             shared Models folder
@@ -28,7 +28,7 @@ PhotoCraft native tools and GenGate settings
 
 ## Image path
 
-Remove uses 96–512 px of context; selection fill uses 256–1024 px. Context is clipped to the canvas and sent at no more than 768 px on its longest side. Native output is converted back to the document's depth/profile and applied through its original mask. New layers keep the generated context rectangle plus a real editable layer mask. Queue entries capture tool/selection/target settings but sample source pixels at dispatch, after preceding results.
+Remove uses 96–512 px of context; selection fill uses 256–1024 px. The context rectangle expands to multiples of 32 using existing canvas pixels, without changing the selection or resampling its contents. At an unaligned canvas boundary, transport replicates the missing outside border and removes that padding from the result. Edits keep their native pixel resolution by default; there is no 768 px cap. Preferences > GenGate exposes `reduceEditResolution`, off by default. Its economy mode keeps rectangles with both sides at most 768 px unchanged. Above that threshold the uniform scale is `max(0.5, sqrt(768 / aligned_longest_side))`: output size grows more slowly until 3072 px, then stays at half resolution. Content dimensions round upward to individual pixels; separate padding aligns the model input to 32, rather than stretching content to the grid. Restoration removes model-input padding before upsampling, then source-edge padding, and applies the original mask. Native output is converted back to the document's depth/profile. New layers keep the generated context rectangle plus a real editable layer mask. Queue entries capture tool/selection/target settings but sample source pixels at dispatch, after preceding results. Native context and Direct masked requests remain bounded to 16 Mi pixels; full-workspace generation retains its separate resolution controls.
 
 Direct inpainting protocol 2 supplies an opaque neutral placeholder over the missing region in image 1, a separate binary edit mask as image 2, and an explicit latent `noise_mask` during sampling. Alpha remains image transparency. The Turbo schedule has eight Euler steps with CFG=1. The reference image latent preserves surrounding context. Tiny nonzero strokes survive max reduction to the latent grid. Tests mock only model components; real output quality remains unverified for this release.
 
@@ -38,11 +38,15 @@ The full-generation workspace uses `/studio/jobs`, with up to ten ordered refere
 
 ## Lifecycle and installation
 
-The host starts/stops only its own processes and attaches to an existing engine without taking ownership. Startup policies are independent for Direct and ComfyUI. Readiness probes do not load model weights. Settings and startup work run off the GUI thread; progress feeds persistent canvas masks and optional bars.
+The host starts/stops only its own Direct worker and may attach to an external ComfyUI without taking ownership. Startup policies are independent for Direct and ComfyUI. Readiness probes do not load model weights. Settings and startup work run off the GUI thread; progress feeds persistent canvas masks and optional bars. Status is read-only and remains available during startup.
 
-Setup verifies the release manifest, chooses existing shared models and writes machine-local paths only into the installation. Executables/runtime are placed in a new version subfolder on each install. The stable launcher sets `PHOTOCRAFT_CONFIG_DIR` to the installation's `Profile`; updates preserve unrelated preferences and old executables. Existing external Python environments are inspected without importing torch and never modified. A new CUDA environment, when selected, is private to that installed version.
+Setup installs GenGate separately from an existing PhotoCraft. The add-on contains checksum-bound BSDIFF deltas, without complete editor executables. Both editor and CLI are reconstructed locally from the exact supported upstream files. A recoverable transaction installs them at the original PhotoCraft paths and retains verified originals under `.gengate/backups`. Existing PhotoCraft shortcuts and its ordinary profile remain in use. GenGate runtime versions live in the separately selected GenGate folder; a small `runtime/config.photocraft.json` beside PhotoCraft points to that runtime. Existing external Python environments are inspected without importing torch and never modified. A new CUDA environment, when selected, is private to the add-on.
 
-The host listens on loopback, rejects browser-origin requests and validates input sizes. This beta supports one shared host configuration per computer at a time; simultaneous independent installations are not isolated inference servers.
+The PhotoCraft launcher checks for upstream file replacements. It reapplies a patch only when the complete base hashes match a supported catalog entry; unknown releases remain untouched, launch as ordinary PhotoCraft and need patch adaptation. Uninstall restores owned binaries and settings but preserves externally updated files and unrelated preferences. This is a local editor patch, not the official WASM filter API. Supported hosts: official PhotoCraft 0.8.2 and 0.12.0 Windows x64. See [migration decisions](ADDON_MIGRATION.md).
+
+Setup uses the single PhotoCraft name in Start and Desktop and backs up/removes obsolete editor launcher duplicates. Both shortcuts use the same stable GenGate launcher; uninstall repoints them to the ordinary editor executable. The 0.12 integration keeps shell commands in upstream's shared engine table, uses per-tool sampling options and propagates the new fallible Remove footprint API.
+
+The host listens on an OS-assigned loopback port, rejects browser-origin requests and validates input sizes. Each runtime publishes its endpoint under `.runtime/genstudio/endpoint.json`; clients verify the protocol, version, runtime path and source fingerprint before forwarding settings. An OS lock prevents concurrent editors from starting duplicate hosts. Direct workers use separate ports and host-specific ownership IDs. Old services on ports 8766/8767 are never discovered or reused.
 
 Full Studio output uses `gsST` layer metadata for the source/model prompts and dimensions. This is separate from selection-fill galleries (`gsAI`). Output surfaces are prepared on the worker in the destination colour format, then inserted atomically into the original document. The empty reference is filled through a separate bounded layer-capture job. Studio engine controls live in the native Preferences working copy, with Apply/OK/Cancel semantics.
 
@@ -62,4 +66,8 @@ Settings are nested under the backward-compatible `genStudio.segmentation` prefe
 
 `genstudio.segmentation` prepares hash-pinned downloads and private Ultralytics/CLIP modules, then starts one short-lived GPU process through `scripts/run_segmentation.py`. YOLO-World supplies a salient foreground box to interactive SAM3; Sky uses the SAM3 semantic predictor. Object Selection is cropped before inference, so no output can escape its rectangle. No ComfyUI server, generator host or model is involved. Cancellation terminates the owned GPU child; errors retain the document. Native masks keep full document resolution and the source document color/depth is unchanged. Real model quality and memory use remain unverified.
 
+Direct generation and selection share only a cancellable per-user GPU lease. They keep separate processes, model settings and Python dependencies. The generation worker offloads cached models before releasing the lease, including after inference errors; selection releases its GPU allocations by exiting. Waiting selection requests can be cancelled before importing GPU dependencies or opening weights. The process using CUDA owns the lease; the OS releases it if that worker crashes. This coordination does not control unrelated external ComfyUI jobs.
+
 Display-name migration preserves command IDs, profile keys and gsST/gsAI metadata. Source preparation de-duplicates generated menu/registry entries and is content-idempotent after formatting.
+
+The floating Ai Fill prompt owns delete keys independently of pointer hover. A held Backspace/Delete retains its text-field owner through a focus transition until release. Pure delete frames bypass canvas shortcut dispatch; accumulated canvas Clear autorepeats are coalesced within one frame while separate presses keep their order. Selection bounds and reusable AI-layer checks compare COW mask tile identities after pixel-only document changes, avoiding repeated mask scans.

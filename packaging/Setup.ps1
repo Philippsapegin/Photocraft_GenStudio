@@ -6,14 +6,14 @@ Add-Type -AssemblyName System.Drawing
 $bundle = $PSScriptRoot
 $python = Join-Path $bundle 'runtime\.venv\Scripts\python.exe'
 if (-not (Test-Path -LiteralPath $python) -and -not $ValidateOnly) {
-    [System.Windows.Forms.MessageBox]::Show('Extract the complete Windows release ZIP, then run Setup.cmd. Source archives do not include the editor or Python.', 'PhotoCraft GenGate') | Out-Null
+    [System.Windows.Forms.MessageBox]::Show('Extract the complete GenGate add-on ZIP, then run Setup.cmd. Install PhotoCraft separately first.', 'GenGate') | Out-Null
     exit 1
 }
 if ($ValidateOnly) {
     Add-Type -ReferencedAssemblies System.Windows.Forms -TypeDefinition 'public class GenStudioSetupPreviewForm : System.Windows.Forms.Form { protected override bool ShowWithoutActivation { get { return true; } } }'
     $form = New-Object GenStudioSetupPreviewForm
 } else { $form = New-Object System.Windows.Forms.Form }
-$form.Text = 'PhotoCraft GenGate 0.9.0 - Beta Setup'
+$form.Text = 'GenGate 0.9.1 - Add-on Setup'
 $form.ClientSize = New-Object System.Drawing.Size(700, 655)
 $form.StartPosition = 'CenterScreen'
 $form.FormBorderStyle = 'FixedDialog'
@@ -46,9 +46,9 @@ function BrowseFolder($field) {
     $dialog.Dispose()
 }
 [void](Label 'Local AI tools inside PhotoCraft' 22 16)
-[void](Label 'Choose your existing models. Setup never downloads or copies model weights.' 22 43)
+[void](Label 'For an existing PhotoCraft. No bundled editor or model weights.' 22 43)
 [void](Label 'Install folder' 22 78)
-$installDir = Field 104 (Join-Path $env:LOCALAPPDATA 'Programs\PhotoCraft GenGate')
+$installDir = Field 104 (Join-Path $env:LOCALAPPDATA 'Programs\GenGate')
 $browseInstall = Button 'Browse...' 600 103
 $browseInstall.Add_Click({ BrowseFolder $installDir })
 [void](Label 'Models folder (ComfyUI\models or a separate folder)' 22 143)
@@ -98,7 +98,7 @@ $desktop.SetBounds(22,462,655,25); $form.Controls.Add($desktop)
 $log = New-Object System.Windows.Forms.TextBox
 $log.SetBounds(22,493,658,97); $log.Multiline = $true; $log.ReadOnly = $true; $log.ScrollBars = 'Vertical'
 $log.BackColor = [System.Drawing.Color]::FromArgb(28,28,28); $log.ForeColor = [System.Drawing.Color]::Gainsboro
-$log.Text = 'No administrator access needed. Your existing editor stays open.'
+$log.Text = 'Save and close the selected PhotoCraft before installing. Originals are kept for restore.'
 $form.Controls.Add($log)
 $progress = New-Object System.Windows.Forms.ProgressBar
 $progress.SetBounds(22,607,398,8); $form.Controls.Add($progress)
@@ -155,6 +155,7 @@ $install.Add_Click({
         & (Join-Path $installDir.Text 'Launch.ps1'); $form.Close(); return
     }
     if (-not $modelsDir.Text.Trim()) { $log.Text = 'Choose a Models folder. You may select an empty folder and add models later.'; return }
+    if (-not $photocraftDir.Text.Trim()) { $log.Text = 'Choose the existing PhotoCraft installation folder.'; return }
     if (($engine.SelectedIndex -eq 1 -or $runtime.SelectedIndex -eq 1) -and -not $enginePython.Text.Trim()) {
         $log.Text = 'Choose the engine Python interpreter.'; return
     }
@@ -162,7 +163,7 @@ $install.Add_Click({
     $script:requestFile = Join-Path ([IO.Path]::GetTempPath()) ('genstudio-setup-' + $taskId + '.json')
     $script:logFile = [IO.Path]::ChangeExtension($script:requestFile, '.log')
     $script:errFile = [IO.Path]::ChangeExtension($script:requestFile, '.errors.log')
-    $request = @{ installDir=$installDir.Text; modelsDir=$modelsDir.Text; engine=@('direct','comfy')[$engine.SelectedIndex];
+    $request = @{ installDir=$installDir.Text; photocraftDir=$photocraftDir.Text; modelsDir=$modelsDir.Text; engine=@('direct','comfy')[$engine.SelectedIndex];
         python=$enginePython.Text; comfyDir=$comfyDir.Text; newRuntime=($runtime.SelectedIndex -eq 0);
         installLanPaint=$lanpaint.Checked; desktopShortcut=$desktop.Checked }
     $request | ConvertTo-Json | Set-Content -LiteralPath $script:requestFile -Encoding UTF8
@@ -179,6 +180,19 @@ $install.Add_Click({
 $form.Add_FormClosing({
     if ($script:child -and -not $script:child.HasExited) { $_.Cancel = $true }
 })
+# Add the host row above the existing settings without changing their spacing.
+foreach ($control in $form.Controls) { if ($control.Top -ge 78) { $control.Top += 64 } }
+$form.ClientSize = New-Object System.Drawing.Size(700, 719)
+[void](Label 'Existing PhotoCraft folder' 22 78)
+$hostCandidates = @((Join-Path $env:LOCALAPPDATA 'Programs\PhotoCraft'), (Join-Path $env:ProgramFiles 'PhotoCraft'))
+foreach ($drive in (Get-PSDrive -PSProvider FileSystem)) { $hostCandidates += Join-Path $drive.Root 'Programs\PhotoCraft' }
+$hostDefault = ''
+foreach ($candidate in $hostCandidates) {
+    if ((Test-Path -LiteralPath (Join-Path $candidate 'photocraft.exe')) -and (Test-Path -LiteralPath (Join-Path $candidate 'photocraft-cli.exe'))) { $hostDefault = $candidate; break }
+}
+$photocraftDir = Field 104 $hostDefault
+$browseHost = Button 'Browse...' 600 103
+$browseHost.Add_Click({ BrowseFolder $photocraftDir })
 if ($ValidateOnly) {
     if ($ValidationScreenshot) {
         $form.StartPosition = 'Manual'; $form.Location = New-Object System.Drawing.Point(-30000,-30000)

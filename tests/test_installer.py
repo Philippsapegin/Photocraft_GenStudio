@@ -6,6 +6,8 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
+from installer_fixtures import fixture
+from genstudio import editor_patch
 
 spec = importlib.util.spec_from_file_location("installer", Path(__file__).resolve().parents[1] / "packaging/installer.py")
 installer = importlib.util.module_from_spec(spec)
@@ -21,21 +23,30 @@ class InstallerTests(unittest.TestCase):
         self.destination = self.root / "installed"
         self.models = self.root / "shared models"
         self.models.mkdir()
-        files = {"PhotoCraft.exe": b"fake exe", "runtime/.venv/Scripts/python.exe": b"fake python",
+        self.host = self.root / "existing PhotoCraft"
+        self.originals, self.outputs, self.catalog = fixture(self.bundle, self.host)
+        self.guard = patch.object(editor_patch, "assert_closed")
+        self.guard.start()
+        self.profile = self.host / "PhotoCraftData"
+        self.profile.mkdir()
+        files = {"runtime/.venv/Scripts/python.exe": b"fake python",
                  "runtime/genstudio/control.py": b"# fixture"}
         for name, content in files.items():
             p = self.bundle / name
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_bytes(content)
-        installer.write_json(self.bundle / "manifest.json", {"version": installer.VERSION,
-            "files": {name: hashlib.sha256(data).hexdigest() for name, data in files.items()}})
+        for name in ("Launch.ps1", "PhotoCraft.cmd", "Uninstall.cmd", "Uninstall.ps1"):
+            (self.bundle / name).write_text("fixture")
+        installer.write_json(self.bundle / "manifest.json", {"version": installer.VERSION, "installMode": "overlay",
+            "files": {p.relative_to(self.bundle).as_posix(): installer.sha256(p) for p in self.bundle.rglob("*") if p.is_file()}})
 
     def tearDown(self):
+        self.guard.stop()
         self.temp.cleanup()
 
     def test_manifest_rejects_tampering_and_path_traversal(self):
         self.assertEqual(installer.verify_bundle(self.bundle)["version"], installer.VERSION)
-        (self.bundle / "PhotoCraft.exe").write_bytes(b"corrupt")
+        (self.bundle / "runtime/genstudio/control.py").write_bytes(b"corrupt")
         with self.assertRaisesRegex(ValueError, "verification failed"):
             installer.verify_bundle(self.bundle)
         for name in ("../secret", "C:/secret", "/secret", "a\\secret", "x:stream"):
@@ -63,6 +74,24 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(settings["directStartup"], "firstRequest")
         self.assertEqual(list(self.models.iterdir()), [])
 
+    def test_unknown_editor_and_legacy_bundle_are_rejected_before_install_or_download(self):
+        (self.host / "photocraft.exe").write_bytes(b"new official editor version")
+        request = {"installDir": str(self.destination), "photocraftDir": str(self.host),
+                   "modelsDir": str(self.models), "engine": "direct", "newRuntime": True}
+        with patch.object(installer, "install_direct") as download:
+            with self.assertRaisesRegex(ValueError, "no compatible"):
+                installer.install(request, self.bundle, shortcuts=False)
+            download.assert_not_called()
+        self.assertFalse(self.destination.exists())
+        self.assertFalse((self.host / ".gengate").exists())
+        manifest = installer.read_json(self.bundle / "manifest.json")
+        p = self.bundle / "PhotoCraft.exe"
+        p.write_bytes(b"must not ship")
+        manifest["files"][p.name] = installer.sha256(p)
+        installer.write_json(self.bundle / "manifest.json", manifest)
+        with self.assertRaisesRegex(ValueError, "must not contain"):
+            installer.verify_bundle(self.bundle)
+
     def test_fresh_cuda_runtime_installs_only_into_its_private_copy(self):
         runtime = self.root / "runtime"
         host = runtime / ".venv/Scripts"
@@ -83,9 +112,9 @@ class InstallerTests(unittest.TestCase):
         inspect.assert_called_once_with(private / "python.exe", direct=True)
 
     def test_first_install_and_update_preserve_preferences_and_weights(self):
-        for name in ("Launch.ps1", "PhotoCraft.cmd"):
+        for name in ("Launch.ps1", "PhotoCraft.cmd", "Uninstall.cmd", "Uninstall.ps1"):
             (self.bundle / name).write_text("fixture")
-        request = {"installDir": str(self.destination), "modelsDir": str(self.models),
+        request = {"installDir": str(self.destination), "photocraftDir": str(self.host), "modelsDir": str(self.models),
                    "engine": "direct", "python": "existing/python.exe"}
         sentinel = self.models / "do not copy.safetensors"
         sentinel.write_bytes(b"synthetic sentinel")
@@ -94,7 +123,7 @@ class InstallerTests(unittest.TestCase):
         with patch.object(installer, "check_python", return_value="existing/python.exe"), \
              patch("genstudio.models.resolve", return_value={}) as discover:
             installer.install(request, self.bundle, shortcuts=False)
-            prefs_path = self.destination / "Profile/preferences.json"
+            prefs_path = self.profile / "preferences.json"
             preferences = installer.read_json(prefs_path)
             preferences["general"] = {"theme": "light"}
             preferences["genStudio"]["directStartup"] = "off"
@@ -105,7 +134,8 @@ class InstallerTests(unittest.TestCase):
             installer.install(request, self.bundle, shortcuts=False)
             after = installer.read_json(self.destination / "genstudio-install.json")
             discover.assert_called_with(str(self.models.resolve()),"text_encoders/custom.safetensors","vae/custom.safetensors","flux-3-image-klein")
-        self.assertNotEqual(before["executable"], after["executable"])
+        self.assertEqual(before["executable"], after["executable"])
+        self.assertNotEqual(before["runtime"], after["runtime"])
         self.assertTrue(Path(before["executable"]).is_file())
         updated = installer.read_json(prefs_path)
         self.assertEqual(updated["general"], {"theme": "light"})
@@ -115,9 +145,10 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(updated["genStudio"]["vae"], "vae/custom.safetensors")
         self.assertTrue(updated["genStudio"]["segmentation"]["enabled"])
         self.assertEqual(updated["genStudio"]["segmentation"]["detector"], "yolov8m-worldv2")
-        self.assertTrue(prefs_path.with_suffix(".before-setup.json").is_file())
+        self.assertTrue(list((self.host / ".gengate/backups").iterdir()))
         self.assertEqual(list(self.models.iterdir()), [sentinel])
         self.assertFalse(list(self.destination.rglob("*.safetensors")))
+        self.assertFalse(list(self.destination.rglob("photocraft.exe")))
 
         # Later updates must also retain each preset's manual files and edit-only
         # adapter, without copying weights into the application directory.

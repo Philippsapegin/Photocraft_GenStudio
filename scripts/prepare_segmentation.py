@@ -49,7 +49,7 @@ def prepare(source, replace):
     path=ui/"control.rs"
     text=path.read_text(encoding="utf-8")
     if 'let object_ai_select = bool_field' not in text:
-        text=text.replace('pub const UI_SET_FIELDS: [&str; 34] = [','pub const UI_SET_FIELDS: [&str; 35] = [\n    "objectAiSelect",',1)
+        text=re.sub(r'pub const UI_SET_FIELDS: \[&str; (\d+)\] = \[',lambda m:f'pub const UI_SET_FIELDS: [&str; {int(m.group(1))+1}] = [\n    "objectAiSelect",',text,count=1)
         text=text.replace('                let gradient_classic = bool_field(p, "gradientClassic")?;', '                let object_ai_select = bool_field(p, "objectAiSelect")?;\n                let gradient_classic = bool_field(p, "gradientClassic")?;',1)
         text=text.replace('                let gradient_before = app.ui.tool_options.clone();','                if let Some(enabled)=object_ai_select {app.ui.tool_options.object_ai_select=enabled;}\n                let gradient_before = app.ui.tool_options.clone();',1)
         path.write_text(text,encoding="utf-8")

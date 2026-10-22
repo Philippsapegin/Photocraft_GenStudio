@@ -1,5 +1,66 @@
 # Release validation
 
+## Floating prompt deletion and adaptive economy - 2026-10-23
+
+- Floating Ai Fill prompts have a document-scoped text widget ID and explicit ownership of Backspace/Delete frames. A held key retains its text owner through a focus transition until release. A fresh canvas key after release still clears normally. Accumulated Clear autorepeats coalesce within one frame; separate key presses retain their order.
+- Selection bounds and reusable-layer checks compare unchanged COW mask tiles across pixel-only edits instead of rescanning mask pixels. Changed selections and Undo/Redo invalidate the cached geometry.
+- Economy mode remains off by default. Both rectangle sides at most 768 px retain every original pixel. Larger aligned rectangles use `max(0.5, sqrt(768 / longest_side))`, capped at half resolution from 3072 px. Model-grid padding is separate from uniformly resized content and is removed before restoration. Growing crops do not shrink the output around the 2x threshold.
+- **128 Python tests: 123 passed, 5 tensor tests skipped.** Covers small-crop pixel identity, progressive sizes, <=2x bounds, monotonic threshold behavior, thin marks and removal of model-input padding.
+- **1,924 engine and 3,270 UI tests passed**, 27 ignored and the same two upstream translation assertions excluded. New keyboard regressions cover 800 repeats with the pointer outside the prompt, deletion to empty, a focus transition during a hold, a fresh canvas delete after release, and separate presses versus autorepeat. Mask-cache coverage includes pixel edits, selection edits, Undo and deselection.
+- Unit glue used opt-level 0 with optimized dependencies and 32 MiB test-thread stacks. The first unoptimized engine run exceeded Windows' default test stack in the existing `same_pixels_ignores_the_selection_but_not_layers` case; the complete run above passed with the explicit stack. Production binaries use the optimized release profile.
+- The original user hang did not reproduce in baseline synthetic mouse-outside-prompt checks. The changes protect keyboard ownership and remove redundant mask work; this is not proof of the exact original hang cause. Baseline 24 MP canvas-delete checks were responsive with the optional bar both hidden and visible.
+- Optimized release build, all-target clippy with warnings denied, dependency layers, WASM and the adversarial-command panic hunt passed. Official MCP verified the final executable: three pointer-outside deletion cases, full-resolution 2304x1824 fill, adaptive 1344x1056 fill, unchanged 576x480 small economy crop, preserved masks and Remove Tool. Screenshots were inspected in the Studio theme. A 24 MP native control check stayed responsive at 75-91 ms per Clear/inspect roundtrip; these are transport/UI measurements, not inference timings.
+- Installed into the existing separate GenGate runtime and PhotoCraft 0.12.0, with a full profile/recovery and software backup. Model files, saved native preferences and appearance remained unchanged. The economy preference stayed off. The installed executable was reopened and its settings read back through MCP without starting an engine. Installed SHA-256: `43a5680661faf8064eee6ccd7b0521f8ecb34ab1e4e54e7c97ac4dbf1cc35c18`.
+- The general `perf_scenarios` quick benchmark completed successfully after rerunning the limit-interrupted attempt. Its report remains in `.runtime/photocraft-source/target/perf/results.json`. No real generation, weight loading, CUDA model initialization or GPU-package changes were requested.
+
+Evidence: `.runtime/backspace-economy-gates.json`, `.runtime/edit-resolution-smoke-latest.json`, `.runtime/backspace-economy-installed.json` and `.runtime/backspace-economy-live-check.json`.
+
+## Native-resolution edits — 2026-10-22
+
+- Removed the native edit transport's 768 px cap. The previously observed 2528×1696 crop is prepared and restored at 2528×1696 by default. Direct masked requests accept up to the existing 16 Mi pixel context limit; FLUX masked edits no longer inherit the full-workspace 2048 px side limit.
+- Native selection-fill and Remove Tool context expands to multiples of 32 without moving source pixels or changing mask coverage. When canvas boundaries prevent expansion, edge padding is removed after inference. Wrong output dimensions are rejected instead of stretched.
+- Added `reduceEditResolution` in Preferences > GenGate, off by default. Its checked mode expands context to multiples of 64, then reduces both axes by exactly two. Restoring removes padding and retains the original output mask. The full-generation workspace keeps its existing independent size controls.
+- **125 Python tests: 120 passed, 5 tensor tests skipped.** New regressions cover exact pixel-coordinate retention, large crops, tiny masks, padding removal, checkbox types/defaults, the large Direct request path, FLUX's masked/full-workspace size distinction and full-rectangle HTTP output.
+- **1,923 engine and 3,268 UI tests passed**, with 27 ignored and the same two previously documented upstream translation tests excluded. Native geometry regressions cover expansion, canvas-edge handling, both grid sizes and empty rectangles.
+- Official MCP on the candidate PhotoCraft 0.12 build passed synthetic full-resolution selection fill (2304×1824), explicit reduction (1152×928 after extra alignment padding), unchanged selection bounds, unchanged pixels outside the mask, native preference persistence and Remove Tool integration. Both checkbox states were rendered and inspected in the Studio theme. No real model inference or weight loading was performed.
+- Release build, engine/UI all-target clippy with warnings denied, dependency layers, WASM and the adversarial-command panic hunt passed. Checksum-bound editor/CLI deltas were reconstructed successfully from the verified official 0.12 base.
+- Installed into the existing separate GenGate runtime and PhotoCraft 0.12.0 editor. The previous binaries, runtime files and complete profile/recovery data were backed up. Native preferences, appearance and shared model files were preserved; no model or GPU-package changes were made.
+- Reopened the installed editor and read back Direct, FLUX 3 Image Klein, Automatic prompt upsampler and `reduceEditResolution=false` through its official MCP. Its document remains open and the UI responds. No real generation or engine startup was requested. Installed executable SHA-256: `ceacd95a5bc0d3b8026012930448355468cef64522419ea154adbafa97f5e4fe`.
+
+Evidence: `.runtime/edit-resolution-native-gates.json`, `.runtime/edit-resolution-smoke-latest.json`, `.runtime/edit-resolution-installed.json` and `.runtime/edit-resolution-live-check.json`.
+
+## Live FLUX prompt-upsample diagnosis — 2026-10-22
+
+- Inspected the user's already-running job without launching inference. Its token count advanced from 53 to 161; image sampling had not started. The worker was active, rather than hung, at roughly 3.5 seconds per generated token. RTX 3060 VRAM use was 11,626/12,288 MiB.
+- The selected 24.55 GiB H3 checkpoint declares `source_architecture=Qwen3-VL-32B-Instruct`, 50 retained language layers, `minimax_h3_lm_head=false` and `minimax_h3_final_norm=false`. The pinned core routes that architecture through its MiniMax H3 conditioning tokenizer/model, rather than the Qwen3.5 prompt-generation adapter. It is unsuitable for the prompt-upsample role.
+- The supported Qwen3.5-9B W4A8 prompt upsampler already exists in the shared model folder (6.26 GiB). Only Safetensors headers and file sizes were read; no replacement download, model load or new generation was started.
+- Added header validation that rejects known conditioning-only H3 exports before importing the model core, while retaining custom full-checkpoint support. Token callbacks now forward activity to the editor without treating the token ceiling as an image-sampling completion percentage.
+- **116 Python tests: 111 passed, 5 tensor tests skipped.** Tests cover H3 rejection before core import, valid custom metadata, malformed headers, forwarded token activity, cancellation and progress-hook restoration. Synthetic worker tests do not use the user's GPU lease.
+- At the user's request, cancelled only the live FLUX job, waited for acknowledgement and stopped its owned worker. PhotoCraft stayed open. Installed the Python repair and configured the generation service to use Automatic prompt-upsample selection without starting an engine. The user subsequently applied the matching native Preferences setting; its persisted value was verified during the resolution fix.
+
+## Local engine isolation repair — 2026-10-22
+
+- Confirmed a stale Gen Studio **0.5.0** host on port 8766. Sending current settings to its status route reproduced `Unknown engine setting: model, presets, textEncoder, vae` without inference.
+- Generation now discovers only a runtime-specific endpoint with matching protocol, version, source fingerprint and installation path. Direct workers have private ports and host ownership IDs. Status is read-only and does not wait for a startup lock. Generator configuration preserves independent selection preferences.
+- Direct generation and segmentation use separate processes and a cancellable cross-process GPU lease. Generation offloads before releasing it, including after errors; the selection worker acquires it before importing GPU dependencies. Crash-release, cancellation, incompatible hosts and wrong worker ownership have regression coverage.
+- **115 Python tests: 110 passed, 5 tensor tests skipped.** Official MCP exercised the real installed PhotoCraft 0.12 executable with synthetic generation/selection workers: private host startup, Qwen → FLUX switching, an irregular selection on a 24 MP document, GPU queuing across documents, Use selection and prompt editing. Screenshot inspected.
+- The Python repair is installed into the existing GenGate runtime with a backup. Native editor/CLI, layout and model files are unchanged. Direct was restored at the user's request; FLUX and the selected YOLO/SAM settings were retained. A second MCP check against the repaired installed runtime captured a large selection and entered English/Unicode text successfully.
+- Windows recorded the reported incident as Application Hang (event 1002), not a native panic. The original hang was not reproduced; its precise cause and real GPU memory behavior remain unverified. No real inference, weight loading, CUDA initialization or GPU package changes were performed.
+
+Reproduce the synthetic integration check with `scripts/photocraft_process_isolation_smoke.py --exe <photocraft.exe> --cli <photocraft-cli.exe>`.
+
+## 0.9.1 add-on — 2026-10-22 (local, not published)
+
+- **100 Python tests: 95 passed, 5 tensor tests skipped.** Includes real BSDIFF reconstruction on synthetic binaries, repeat install, supported refresh, unknown upstream updates, verified original restore, failed-write rollback and interrupted-transaction recovery.
+- The add-on contains no complete PhotoCraft editor or CLI. Deltas reconstruct the exact previously validated native outputs from the hash-verified official 0.8.2 Windows x64 binaries. Native behaviour and appearance are unchanged; this is not a port to 0.12.0.
+- The extracted ZIP was installed by its actual embedded Python onto an isolated official editor in a path with spaces and Cyrillic characters. First install, update, supported-editor refresh/reapply, uninstall and reinstall passed. Native preferences and original editor hashes were preserved/restored; shared model folders were not populated or copied.
+- Official MCP on the patched, installed editor passed Settings, Qwen and FLUX workspaces, startup/progress/queue feedback, and segmentation with synthetic workers. No real generation, CUDA initialization or model-weight load was requested.
+- PowerShell entry points parse; the new Setup host-selection row was rendered and inspected. Existing GPU Python is inspected as metadata only. Installing a fresh GPU software runtime was not repeated.
+- Live migration: GenGate software installed into `D:\Programs\GenGate`, patch applied to the existing official `D:\Programs\PhotoCraft` 0.8.2, and the newest user preferences/layout migrated with a separate backup. Both native binary hashes match the validated GenGate build. Desktop GenGate launcher points to this installation; the legacy PhotoCraft shortcut now points to the normal editor path. Previous standalone files are retained. Shared model sizes/timestamps are unchanged; the old idle lightweight host was stopped and no replacement engine was started.
+- Unknown editor versions fail before install/download and are never replaced by an older build. The launcher opens ordinary PhotoCraft with a compatibility notice when no supported patch exists. Uninstall retains externally updated editor files and keeps software/recovery backups for manual removal.
+
+Reproduce the isolated distribution test with `scripts/photocraft_addon_smoke.py --archive <add-on.zip> --original <official-exe-folder> --gpu-python <existing-python.exe>`. GPU Python is inspected, not used for inference.
+
 ## 0.9.0 beta — 2026-10-22
 
 - Python: **88 tests, 83 passed, 5 tensor tests skipped** in the lightweight host.
@@ -153,3 +214,22 @@ Both generative families pass official-MCP smoke checks on the final release exe
 Windows archive: PhotoCraft-GenGate-0.8.0-alpha.1-windows-x64.zip, 147244499 bytes, SHA-256 455d7f232869cb6e69c3004a1ca3f323a657acf629b94049edb24ec13df94d21. Executable SHA-256 bfffe235dc49c392376cf104139802056f22b89887838770a66cb83aef2d1fd1. ZIP CRC, per-file manifest and neutral compiled defaults pass. All 33 bundled host/installer source files match the repository. The extracted installer creates a separate GenGate installation and shortcuts using the existing CUDA Python and shared models, without loading weights; the old editor remains running.
 
 The installed executable and its bundled embedded-Python runtime also pass both Qwen and Klein MCP regressions using --runtime <installed runtime>. This verifies the extracted release independently of the development host environment. The local GenGate profile retains FLUX 3 Image Klein, the existing shared model source and first-request startup.
+
+## 2026-10-22 - PhotoCraft 0.12.0 and one PhotoCraft launcher
+
+Ported the native overlay to official PhotoCraft v0.12.0, commit `6a2d027ee2e7ca12afd248544ed2262b0fa078dd`. The shared shell-command catalog, per-tool sampling flags, fallible Remove footprint, Properties panel and Object Finder gesture hooks now follow the new host. The selection prompt bar is hidden during Free Transform. Preferences sections scroll within their fixed-width column so the extra GenGate section does not prevent resizing.
+
+- Lightweight Python suite: 103 tests, 98 passed and five tensor tests skipped.
+- Native engine: 1,921 passed, 14 ignored. Native UI: 3,268 passed, 13 ignored, with the two previously documented upstream translation tests explicitly excluded. Initial integration failures were fixed and the full libraries rerun successfully. UI tests used an unoptimized UI crate with optimized dependencies; the shipped application is a release build.
+- Engine/UI all-target clippy with warnings denied, dependency layers and the full WASM check passed. Menu parity regeneration passed at 633/633 live entries; the adversarial-command panic hunt also passed.
+- The final release binaries passed all five synthetic official-MCP workflows: Preferences, Qwen Studio, FLUX Studio, queued fill feedback and segmentation. Native screenshots were visually inspected.
+- The official release's four embedded `craft-fonts` assets were verified by SHA-256 and checked for byte-for-byte inclusion in both rebuilt executables. Original OFL notices are retained in the add-on.
+- The extracted add-on passed installation, update, supported editor refresh/reapplication, restore and reinstall against an isolated official 0.12.0 editor, including Unicode paths. The package contains no complete PhotoCraft executable or model weights.
+
+Installed the validated overlay on `D:/Programs/PhotoCraft`, with the separate runtime under `D:/Programs/GenGate`. Native preferences outside GenGate, the appearance file and all model file sizes/timestamps were unchanged by installation. The active preset remains Qwen Image 2.1, Direct with first-request startup, using the existing shared model directory and GPU Python.
+
+Start and Desktop each contain one **PhotoCraft** shortcut to the same compatibility-checking launcher. Obsolete editor shortcuts are backed up outside Start/Desktop. `Get-StartApps` reports one PhotoCraft. Launching the actual Start shortcut opened PhotoCraft 0.12.0 and its installed GenGate panel with the expected runtime. The empty QA instance was closed gracefully; the same shortcut then opened a normal, responsive PhotoCraft instance for review.
+
+Installed editor SHA-256: `c03eb01dc6140bbb68ec474032cabb17682b6f0e594cbc11643748dfafbcc7fc`. Local add-on ZIP: `GenGate-0.9.1-windows-x64-addon.zip`, 178,850,392 bytes, SHA-256 `0c09583249e56f532d7406a2919abc90aabd8baba658fa896512344dc6feead4`. No commit, push, public release, real inference, shared GPU Python change or model download/copy was performed.
+
+Evidence: `.runtime/photocraft012-gates.json`, `.runtime/native012-mcp.json`, `.runtime/candidate012.json`, `.runtime/addon012-live-install.json` and `.runtime/shortcut012-validation/report.json`.

@@ -69,8 +69,9 @@ class FluxTests(unittest.TestCase):
             return {"service": "genstudio-direct", "ready": True, "modelsDir": settings["modelsDir"],
                     "textEncoder": "", "vae": "", "model": MODEL}
         host = EngineHost(settings, request=probe)
+        host.direct_url = "http://127.0.0.1:54321"
         self.assertFalse(host.probe())
-        host.request = lambda url: {**probe(url), "model": FLUX}
+        host.request = lambda url: {**probe(url), "model": FLUX, "owner": host.worker_id}
         self.assertTrue(host.probe())
 
     def test_worker_selection_is_lazy_and_does_not_import_a_model_library(self):
@@ -224,21 +225,50 @@ class FluxTests(unittest.TestCase):
         sd = types.SimpleNamespace(load_clip=lambda *a, **kw: llm, CLIPType=types.SimpleNamespace(FLUX3=37))
         pipeline = FluxPipeline("unused")
         pipeline.pipe = object()
+        messages = []
         with patch.dict(sys.modules, {"comfy": comfy, "comfy.utils": utils, "comfy.model_management": memory}), \
              patch("genstudio.flux_pipeline.import_core", return_value=(sd, None)), \
+             patch("genstudio.flux_pipeline.validate_upsampler"), \
                 patch("genstudio.flux_pipeline.resolve_components", return_value={"prompt_upsampler": {"path": "synthetic"}}):
-            result = pipeline.expand(["reference"], 7, "Use <ref_image_0>", 1024, 1024, cancel, lambda msg: None)
+            result = pipeline.expand(["reference"], 7, "Use <ref_image_0>", 1024, 1024, cancel, messages.append)
             self.assertEqual(result, "A scene from <ref_image_0>.")
             self.assertEqual(llm.arguments["images"], ["reference"])
             self.assertIsNone(pipeline.pipe)
             self.assertIs(utils.PROGRESS_BAR_HOOK, previous)
             self.assertEqual(events, ["unload", "unload"])
+            self.assertIn("FLUX 3 \u00b7 expanding prompt \u00b7 1 tokens", messages)
+            from genfill.progress import sampling_fraction
+            self.assertIsNone(sampling_fraction(messages[-1]))
             cancel.set()
             with self.assertRaises(Exception) as caught:
                 pipeline.expand([], 7, "scene", 1024, 1024, cancel, lambda msg: None)
             from genfill.comfy import Cancelled
             self.assertIsInstance(caught.exception, Cancelled)
             self.assertIs(utils.PROGRESS_BAR_HOOK, previous)
+
+    def test_conditioning_only_h3_cannot_be_used_as_a_prompt_upsampler(self):
+        import struct
+        from genstudio.flux_pipeline import validate_upsampler
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "custom.safetensors"
+            def checkpoint(metadata):
+                data = json.dumps({"__metadata__": metadata}).encode()
+                path.write_bytes(struct.pack("<Q", len(data)) + data)
+            checkpoint({"minimax_h3_lm_head": "false", "minimax_h3_final_norm": "false"})
+            with self.assertRaisesRegex(ValueError, "conditioning encoder"):
+                validate_upsampler(path)
+            with patch("genstudio.flux_pipeline.resolve_components", return_value={"prompt_upsampler": {"path": str(path)}}), \
+                    patch("genstudio.flux_pipeline.import_core") as gpu:
+                with self.assertRaisesRegex(ValueError, "conditioning encoder"):
+                    FluxPipeline(folder).expand([], 0, "prompt", 1024, 1024, threading.Event(), lambda msg: None)
+                gpu.assert_not_called()
+            # Custom full checkpoints remain allowed; a filename is not proof
+            # that an encoder is truncated or incapable of generating text.
+            checkpoint({"format": "pt", "source_repo": "custom prompt upsampler"})
+            validate_upsampler(path)
+            path.write_bytes(b"incomplete")
+            with self.assertRaisesRegex(ValueError, "Cannot read"):
+                validate_upsampler(path)
 
 
 class DownloadTests(unittest.TestCase):

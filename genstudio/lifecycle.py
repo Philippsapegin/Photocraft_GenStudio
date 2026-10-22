@@ -6,6 +6,8 @@ from pathlib import Path
 import subprocess
 import threading
 import time
+import socket
+import uuid
 from urllib.request import Request, urlopen
 from urllib.error import URLError
 from urllib.parse import urlparse
@@ -47,6 +49,8 @@ class EngineHost:
         self.busy = False
         self.message = "Stopped"
         self.runtime = ROOT / ".runtime/genstudio"
+        self.direct_url = None
+        self.worker_id = uuid.uuid4().hex
 
     def config(self):
         config = load_config()
@@ -92,7 +96,9 @@ class EngineHost:
             self.settings = settings
 
     def probe(self):
-        url = self.settings["comfyUrl"].rstrip("/") if self.engine == "comfy" else DIRECT_URL
+        if self.engine == "direct" and self.direct_url is None:
+            return False
+        url = self.settings["comfyUrl"].rstrip("/") if self.engine == "comfy" else self.direct_url
         try:
             info = self.request(url + ("/system_stats" if self.engine == "comfy" else "/health"))
             if self.engine == "comfy":
@@ -102,6 +108,7 @@ class EngineHost:
             old_components = {**component_defaults(),
                               "textEncoder": info.get("textEncoder", ""), "vae": info.get("vae", "")}
             return (info.get("service") == "genstudio-direct" and info.get("ready") is True
+                    and info.get("owner") == self.worker_id
                     and Path(info.get("modelsDir", "")).resolve() == Path(self.settings["modelsDir"]).resolve()
                     and info.get("components", old_components) == components
                     and info.get("model", "qwen-image-2.1-turbo") == self.settings["model"])
@@ -109,15 +116,22 @@ class EngineHost:
             return False
 
     def status(self):
-        with self.lock:
+        if not self.lock.acquire(blocking=False):
+            return {"engine": self.engine, "state": "starting", "ready": False,
+                    "owned": self.process is not None, "busy": self.busy,
+                    "message": self.message, "startup": self.policy()}
+        try:
             ready = self.probe()
             exited = self.process is not None and self.process.poll() is not None
             if exited:
                 self.message = "Engine exited. See .runtime/genstudio logs."
             return {"engine": self.engine, "state": "ready" if ready else "stopped",
+                    "workerUrl": self.direct_url if self.engine == "direct" else None,
                     "ready": ready, "owned": self.process is not None and not exited,
                     "busy": self.busy, "message": "Ready" if ready else self.message,
                     "startup": self.policy()}
+        finally:
+            self.lock.release()
 
     def ensure(self, event="request", progress=lambda message: None, cancel=None, studio=False):
         if event not in ("manual", "request", "appStart"):
@@ -162,7 +176,15 @@ class EngineHost:
                 python = Path(self.settings["directPython"])
                 if not python.is_file():
                     raise ValueError("Direct AI runtime is not installed. Run scripts/Setup-Direct.ps1, then select its Python executable.")
+                if self.process is None or self.process.poll() is not None:
+                    with socket.socket() as reservation:
+                        reservation.bind(("127.0.0.1", 0))
+                        port = reservation.getsockname()[1]
+                    self.worker_id = uuid.uuid4().hex
+                    self.direct_url = f"http://127.0.0.1:{port}"
+                port = urlparse(self.direct_url).port
                 command = [str(python), "-X", "utf8", str(ROOT / "scripts/run_direct.py"), "--models", self.settings["modelsDir"],
+                           "--port", str(port), "--owner", self.worker_id,
                            "--text-encoder", components["textEncoder"], "--vae", components["vae"], "--model", self.settings["model"],
                            "--components", json.dumps(components)]
                 cwd = ROOT
@@ -204,6 +226,7 @@ class EngineHost:
                     self.process.kill()
                     self.process.wait(timeout=5)
             self.process = None
+            self.direct_url = None
             for handle in self.logs:
                 handle.close()
             self.logs = []
@@ -230,7 +253,7 @@ class EngineHost:
             if self.engine == "comfy":
                 return ComfyClient(self.config()).generate(image, mask, seed, prompt, cancel, progress)
             from .direct_client import generate
-            return generate(image, mask, seed, prompt, cancel, progress)
+            return generate(image, mask, seed, prompt, cancel, progress, base=self.direct_url)
         finally:
             with self.lock:
                 self.busy = False
@@ -244,7 +267,7 @@ class EngineHost:
                 if self.engine == "comfy":
                     return ComfyClient(self.config()).generate_studio(references, seed, prompt, width, height, cancel, progress)
                 from .direct_client import generate_studio
-                return generate_studio(references, seed, prompt, width, height, cancel, progress)
+                return generate_studio(references, seed, prompt, width, height, cancel, progress, base=self.direct_url)
             finally:
                 with self.lock:
                     self.busy = False

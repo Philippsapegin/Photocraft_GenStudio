@@ -8,6 +8,7 @@ import subprocess
 import time
 
 from .segmentation_models import ROOT, ensure_models, ensure_modules, validate
+from .processes import gpu_lease
 
 
 def run(folder, settings, request, emit):
@@ -105,6 +106,19 @@ def choose_box(boxes, scores, size):
 
 def worker(payload):
     """Only this short-lived GPU process imports torch/Ultralytics."""
+    folder = Path(payload["folder"])
+    def waiting():
+        temporary = folder / "segmentation-progress.tmp"
+        temporary.write_text(json.dumps({"message": "Waiting for generation to release the GPU\u2026",
+                                         "progress": 0.4}), encoding="utf-8")
+        temporary.replace(folder / "segmentation-progress.json")
+    # The process actually using CUDA owns the lock. If the editor or transport
+    # exits unexpectedly, the GPU cannot be handed to generation prematurely.
+    with gpu_lease(cancelled=lambda: (folder / "cancel").exists(), waiting=waiting):
+        return _worker(payload)
+
+
+def _worker(payload):
     import contextlib
     import sys
     sys.path.insert(0, payload["modules"])

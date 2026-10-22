@@ -1,0 +1,20 @@
+{
+  "0.8.2": {
+    "upstream": "d43db3e153c76aefce9b32cef9099e458eaf17a8",
+    "archive": "https://github.com/storytold/photocraft/releases/download/v0.8.2/photocraft-0.8.2-windows-x64-portable.zip",
+    "archiveSha256": "242acd4134e7947b462d68748b32a6f038fa97099601da950652489690f81799",
+    "files": {
+      "photocraft.exe": "9bde104e9a8bd8aa00f489b69c044e3e8109f3cf526fa038a38bde0a1ad1f246",
+      "photocraft-cli.exe": "d2f9e77c0f06372963f87a5ac8279c2b14dabd8ab76ed38aab1d92a874ccbbee"
+    }
+  },
+  "0.12.0": {
+    "upstream": "6a2d027ee2e7ca12afd248544ed2262b0fa078dd",
+    "archive": "https://github.com/storytold/photocraft/releases/download/v0.12.0/photocraft-0.12.0-windows-x64-portable.zip",
+    "archiveSha256": "fdc8da51cba975e52ddc4dfb4833b4001c10ea7e067423b1304569a67a41aaff",
+    "files": {
+      "photocraft.exe": "87b33c510cb10797d9db7a2aa30a3aef491447061e515cb25ddc38b5411c0d1b",
+      "photocraft-cli.exe": "01bba9516c5666fc85761e4b227bdc23d57c142909447945fa84aeb7a81ad1f7"
+    }
+  }
+}

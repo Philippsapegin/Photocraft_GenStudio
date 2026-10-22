@@ -74,6 +74,8 @@ class PresetTests(unittest.TestCase):
                 settings={**defaults(),"engine":"direct","modelsDir":str(root),"model":family,"presets":{family:parts}}
                 health={"service":"genstudio-direct","ready":True,"modelsDir":str(root),"model":family,"components":parts}
                 host=EngineHost(settings,spawn=Mock(side_effect=AssertionError("No process may start")),request=Mock(return_value=health))
+                host.direct_url="http://127.0.0.1:54321"
+                health["owner"]=host.worker_id
                 self.assertTrue(host.ensure(studio=True)["ready"])
                 with self.assertRaisesRegex(ValueError,"missing or empty"):
                     host.ensure(studio=False)

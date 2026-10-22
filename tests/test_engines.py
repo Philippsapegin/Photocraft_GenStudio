@@ -1,5 +1,5 @@
 """Engine lifecycle and real HTTP transport. Never loads model weights."""
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from io import BytesIO
 import json
 from pathlib import Path
@@ -251,8 +251,10 @@ class DirectWorkerTests(unittest.TestCase):
             return Image.new("RGBA", image.size, "red")
         worker.pipeline.generate = generate
         encode = lambda image: base64.b64encode(png_bytes(image)).decode()
-        job = worker.submit({"image": encode(Image.new("RGB", (64, 64))), "mask": encode(Image.new("L", (64, 64), 255)), "seed": 42, "prompt": "a tree"})
-        worker.pool.shutdown(wait=True)
+        # A synthetic image must never wait for, or occupy, the user's GPU lease.
+        with patch("genstudio.direct_worker.gpu_lease", return_value=nullcontext()):
+            job = worker.submit({"image": encode(Image.new("RGB", (64, 64))), "mask": encode(Image.new("L", (64, 64), 255)), "seed": 42, "prompt": "a tree"})
+            worker.pool.shutdown(wait=True)
         result = worker.jobs[job["id"]]
         self.assertEqual(result["state"], "done")
         self.assertEqual(calls, [((64, 64), (64, 64), 42, "a tree")])

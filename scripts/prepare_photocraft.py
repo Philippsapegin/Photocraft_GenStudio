@@ -13,10 +13,12 @@ from prepare_selection_fill import prepare as prepare_selection_fill
 from prepare_studio import prepare as prepare_studio
 import prepare_gengate
 import prepare_segmentation
+import prepare_photocraft_012
 
 
 def replace(path, old, new):
     text = path.read_text(encoding="utf-8")
+    old, new = prepare_photocraft_012.anchors(path, text, old, new)
     if new in text:
         return
     if text.count(old) != 1:
@@ -25,6 +27,7 @@ def replace(path, old, new):
 
 
 def prepare(source):
+    prepare_photocraft_012.before(source)
     prepare_gengate.before(source)
     engine, ui = source / "crates/engine/src", source / "crates/ui-egui/src"
     shutil.copyfile(ROOT / "photocraft/genstudio.rs", engine / "genstudio.rs")
@@ -69,6 +72,7 @@ def prepare(source):
         prepare_studio(source, replace)
         prepare_segmentation.prepare(source, replace)
         prepare_gengate.after(source)
+        prepare_photocraft_012.after(source)
         return
     replace(engine / "lib.rs", "pub mod plugin_cmds;", "pub mod plugin_cmds;\npub mod genstudio;")
     replace(engine / "lib.rs", "pub struct Session {", "pub struct Session {\n    pub gen_studio: genstudio::Runtime,")
@@ -90,6 +94,7 @@ def prepare(source):
     prepare_studio(source, replace)
     prepare_segmentation.prepare(source, replace)
     prepare_gengate.after(source)
+    prepare_photocraft_012.after(source)
 
 
 def prepare_remove(engine, ui):
@@ -121,8 +126,12 @@ def prepare_remove(engine, ui):
             'json!({"sampleAllLayers": o.sample_all_layers, "newLayer": o.remove_new_layer, "useQwen": o.remove_use_qwen})')
     replace(ui / "retouch_ui.rs", '            crate::widgets::checkbox(ui, &mut o.remove_new_layer, tl!("Create a new layer"));',
             '            crate::widgets::checkbox(ui, &mut o.remove_use_qwen, "Use Qwen");\n            crate::widgets::checkbox(ui, &mut o.remove_new_layer, tl!("Create a new layer"));')
-    replace(ui / "tool_reset.rs", '        Tool::SpotHealing => reset!(spot_type, sample_all_layers),',
-            '        Tool::Remove => reset!(sample_all_layers, remove_new_layer, remove_after_each_stroke, remove_use_qwen),\n        Tool::SpotHealing => reset!(spot_type, sample_all_layers),')
+    if 'Tool::Remove => reset!(remove_new_layer, remove_after_each_stroke),' in (ui / 'tool_reset.rs').read_text(encoding='utf-8'):
+        replace(ui / 'tool_reset.rs', 'Tool::Remove => reset!(remove_new_layer, remove_after_each_stroke),',
+                'Tool::Remove => reset!(sample_all_layers, remove_new_layer, remove_after_each_stroke, remove_use_qwen),')
+    else:
+        replace(ui / "tool_reset.rs", '        Tool::SpotHealing => reset!(spot_type, sample_all_layers),',
+                '        Tool::Remove => reset!(sample_all_layers, remove_new_layer, remove_after_each_stroke, remove_use_qwen),\n        Tool::SpotHealing => reset!(spot_type, sample_all_layers),')
     reset = ui / "tool_reset.rs"
     contents = reset.read_text(encoding="utf-8").replace("        | Tool::Remove\n", "")
     reset.write_text(contents, encoding="utf-8")

@@ -16,7 +16,8 @@ def defaults():
     from genfill.server import load_config
     old = load_config()
     from .segmentation_models import DEFAULTS
-    return {"segmentation": dict(DEFAULTS), "model": MODEL, "textEncoder": "", "vae": "", "presets": {},
+    return {"segmentation": dict(DEFAULTS), "reduceEditResolution": False,
+            "model": MODEL, "textEncoder": "", "vae": "", "presets": {},
             "engine": "comfy", "comfyStartup": "firstRequest", "directStartup": "firstRequest",
             "comfyUrl": old["comfy_url"], "comfyDir": old.get("comfy_dir", ""),
             "comfyPython": old.get("comfy_python", ""),
@@ -49,6 +50,10 @@ def validate(value):
         raise ValueError("Unknown model preset settings.")
     result["presets"] = {key: validate_components(item) for key, item in presets.items()}
     for key, item in result.items():
+        if key == "reduceEditResolution":
+            if not isinstance(item, bool):
+                raise ValueError("Reduce edit resolution must be a checkbox value.")
+            continue
         if key in ("segmentation", "presets"):
             continue
         if not isinstance(item, str) or len(item) > 4096 or "\x00" in item:

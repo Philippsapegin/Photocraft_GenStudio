@@ -6,6 +6,7 @@ import base64
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import os
 import threading
 import uuid
 
@@ -13,10 +14,12 @@ from genfill.image_ops import decode_png, png_bytes
 from genfill.comfy import Cancelled
 from .core_pipeline import DirectPipeline
 from .models import MODEL, FLUX, specification
+from .processes import gpu_lease, release_gpu
 
 
 class Worker:
-    def __init__(self, model, text_encoder="", vae="", model_id=MODEL, *, components=None):
+    def __init__(self, model, text_encoder="", vae="", model_id=MODEL, *, components=None, owner=""):
+        self.owner = owner
         specification(model_id)
         self.model_id = model_id
         if model_id == FLUX:
@@ -37,7 +40,7 @@ class Worker:
             studio = request(data, self.model_id)
             image = mask = None
         else:
-            image, mask = decode_png(data.get("image"), 1024 * 1024), decode_png(data.get("mask"), 1024 * 1024)
+            image, mask = decode_png(data.get("image"), 16 << 20), decode_png(data.get("mask"), 16 << 20)
             if image.size != mask.size:
                 raise ValueError("Image and mask sizes differ.")
         from genfill.image_ops import bounded_int
@@ -65,13 +68,32 @@ class Worker:
         try:
             with self.lock:
                 job["state"] = "running"
-            output = self.pipeline.generate_studio(studio["references"], seed, prompt, studio["width"], studio["height"], job["cancel"], progress) if studio else self.pipeline.generate(image, mask, seed, prompt, job["cancel"], progress)
+            if os.environ.get("GENGATE_NO_INFERENCE") == "1":
+                raise RuntimeError("Generation inference is disabled for validation")
+            with gpu_lease(cancelled=job["cancel"].is_set,
+                           waiting=lambda: progress("Waiting for AI selection to release the GPU\u2026")):
+                failure = None
+                try:
+                    output = self.pipeline.generate_studio(studio["references"], seed, prompt, studio["width"], studio["height"], job["cancel"], progress) if studio else self.pipeline.generate(image, mask, seed, prompt, job["cancel"], progress)
+                except Cancelled:
+                    failure = "cancelled", "Cancelled"
+                except Exception as error:
+                    failure = "error", str(error)
+                    # Discard a partially loaded/broken pipeline, and clear its
+                    # traceback before offloading and handing off the GPU.
+                    self.pipeline.pipe = None
+                finally:
+                    release_gpu()
+                if failure:
+                    with self.lock:
+                        job.update(state=failure[0], message=failure[1])
+                    return
             with self.lock:
                 if job["cancel"].is_set():
                     raise Cancelled()
                 job["result"] = {"image": base64.b64encode(png_bytes(output)).decode("ascii")}
                 job.update(state="done", message="Done")
-        except Cancelled:
+        except (Cancelled, InterruptedError):
             with self.lock:
                 job.update(state="cancelled", message="Cancelled")
         except Exception as error:
@@ -90,6 +112,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.command == "GET" and self.path == "/health":
                 problems = worker.pipeline.check()
                 return send(200, {"service": "genstudio-direct", "ready": not problems,
+                                  "owner": worker.owner,
                                   "inpaint_protocol": 2, "model": worker.model_id,
                                   "studio_protocol": 1,
                                   "components": worker.pipeline.components,
@@ -99,7 +122,7 @@ class Handler(BaseHTTPRequestHandler):
                 if self.headers.get("Content-Type", "").split(";")[0] != "application/json":
                     raise ValueError("JSON content type required.")
                 length = int(self.headers.get("Content-Length", "0"))
-                if not 0 < length <= 96 * 1024 * 1024:
+                if not 0 < length <= 192 * 1024 * 1024:
                     raise ValueError("Invalid request size.")
                 return send(202, worker.submit(json.loads(self.rfile.read(length))))
             parts = self.path.strip("/").split("/")
@@ -129,12 +152,14 @@ def main():
     parser.add_argument("--vae", default="")
     parser.add_argument("--model", default=MODEL, choices=(MODEL, FLUX))
     parser.add_argument("--components", type=json.loads)
+    parser.add_argument("--port", type=int, default=0)
+    parser.add_argument("--owner", required=True)
     args = parser.parse_args()
-    worker = Worker(args.models, args.text_encoder, args.vae, args.model, components=args.components)
+    worker = Worker(args.models, args.text_encoder, args.vae, args.model, components=args.components, owner=args.owner)
     problems = worker.pipeline.check()
     if problems:
         raise SystemExit("\n".join(problems))
-    server = ThreadingHTTPServer(("127.0.0.1", 8767), Handler)
+    server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     server.worker = worker
     server.serve_forever()
 

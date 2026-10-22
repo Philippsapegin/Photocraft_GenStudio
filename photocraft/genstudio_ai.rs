@@ -62,12 +62,33 @@ fn save_gallery(layer:&mut Layer,value:&Gallery)->Result<()> {
     layer.psd_blocks.push((META,bytes));
     Ok(())
 }
+pub(crate) struct SelectionCache {
+    document:std::sync::Weak<Document>,
+    canvas:Rect,
+    mask:Option<Surface>,
+    bounds:Rect,
+}
+/// A COW mask snapshot can be compared without reading every pixel. Tile
+/// references change when a mask is edited, including after Undo/Redo.
+pub fn shared_mask(a:&Surface,b:&Surface)->bool {
+    a.format()==b.format() && a.default_pixel()==b.default_pixel() && a.tile_count()==b.tile_count()
+        && a.tiles().zip(b.tiles()).all(|((ac,at),(bc,bt))|ac==bc && Arc::ptr_eq(at,bt))
+}
+fn shared_selection(a:Option<&Surface>,b:Option<&Surface>)->bool {
+    match (a,b) {(Some(a),Some(b))=>shared_mask(a,b),(None,None)=>true,_=>false}
+}
 pub fn selected_bounds(s:&Session)->Rect {
     let Some(st)=s.active() else { return Rect::EMPTY };
     let mut cache=s.gen_studio.selection_cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    if let Some((prior,bounds))=&*cache && prior.upgrade().is_some_and(|doc|Arc::ptr_eq(&doc,&st.doc)) { return *bounds; }
+    if let Some(prior)=cache.as_mut() {
+        if prior.document.upgrade().is_some_and(|doc|Arc::ptr_eq(&doc,&st.doc)) {return prior.bounds;}
+        if prior.canvas==st.doc.bounds() && shared_selection(prior.mask.as_ref(),st.doc.selection.as_ref()) {
+            prior.document=Arc::downgrade(&st.doc);
+            return prior.bounds;
+        }
+    }
     let bounds=st.doc.selection.as_ref().map_or(Rect::EMPTY,|mask|mask_bounds(mask,st.doc.bounds()));
-    *cache=Some((Arc::downgrade(&st.doc),bounds));
+    *cache=Some(SelectionCache {document:Arc::downgrade(&st.doc),canvas:st.doc.bounds(),mask:st.doc.selection.clone(),bounds});
     bounds
 }
 fn mask_bounds(mask:&Surface,canvas:Rect)->Rect {
@@ -109,7 +130,7 @@ fn capture_mask(surface:&Surface,doc:&Document)->Result<Arc<FillMask>> {
     let bounds=mask_bounds(surface,doc.bounds());
     if bounds.is_empty() { return Err(error("the mask is empty")); }
     let margin=i32::try_from(bounds.width().max(bounds.height())).unwrap_or(1024).clamp(256,1024);
-    let rect=bounds.inflate(margin).intersect(&doc.bounds());
+    let rect=crate::genstudio_edit::aligned_context(bounds,doc.bounds(),margin)?;
     if u64::from(rect.width())*u64::from(rect.height())>MAX_PIXELS { return Err(error("the selected area and context are too large; use a smaller selection")); }
     let channels=surface.channels().max(1);
     let coverage:Vec<f32>=surface.read_region(rect).chunks_exact(channels).map(|p|p.first().copied().unwrap_or(0.0).clamp(0.0,1.0)).collect();
@@ -380,5 +401,20 @@ mod tests {
         let original=s.active().unwrap().doc.clone();
         assert!(create(&mut s,&json!({})).is_err());
         assert!(Arc::ptr_eq(&original,&s.active().unwrap().doc));
+    }
+    #[test]
+    fn selection_cache_survives_pixel_edits_and_tracks_mask_edits_and_undo() {
+        let mut s=scene(SampleType::U8);selection(&mut s);
+        let original=selected_bounds(&s);
+        let snapshot=s.gen_studio.selection_cache.lock().unwrap().as_ref().unwrap().mask.clone().unwrap();
+        s.edit("Pixels only",|doc,active| {crate::pixels_mut(doc.layer_mut(active.unwrap()).unwrap())?.write_region(Rect::new(1,1,2,2),&[1.0,0.0,0.0,1.0]);Ok(())}).unwrap();
+        assert_eq!(selected_bounds(&s),original);
+        assert!(shared_mask(&snapshot,s.active().unwrap().doc.selection.as_ref().unwrap()));
+        s.execute("select.rect",json!({"x":2,"y":3,"width":11,"height":13})).unwrap();
+        assert_eq!(selected_bounds(&s),Rect::new(2,3,13,16));
+        s.execute("edit.undo",json!({})).unwrap();
+        assert_eq!(selected_bounds(&s),original);
+        s.execute("select.deselect",json!({})).unwrap();
+        assert!(selected_bounds(&s).is_empty());
     }
 }

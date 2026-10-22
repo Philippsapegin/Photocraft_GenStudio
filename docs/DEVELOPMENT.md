@@ -22,22 +22,24 @@ $env:CUDA_VISIBLE_DEVICES = ''
 
 ## Build the native editor
 
-Install Git, Rust **1.95+**, MSVC Build Tools with the Windows SDK, and PhotoCraft's native build prerequisites from its [pinned development guide](https://github.com/storytold/photocraft/blob/d43db3e153c76aefce9b32cef9099e458eaf17a8/docs/development.md). Then:
+Install Git, Rust **1.95+**, MSVC Build Tools with the Windows SDK, and PhotoCraft's native build prerequisites from its [pinned development guide](https://github.com/storytold/photocraft/blob/6a2d027ee2e7ca12afd248544ed2262b0fa078dd/docs/development.md). Then:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Build-PhotoCraft.ps1
 ```
 
-This clones PhotoCraft v0.8.2 at `d43db3e153c76aefce9b32cef9099e458eaf17a8` into `.runtime/photocraft-source`, applies the templates and hooks, formats Rust and builds both executables with HEIF support. The preparer rejects changed integration points instead of silently patching another upstream version. It can be rerun on an already prepared checkout. Upstream remains under MIT OR Apache-2.0. Read its `AGENTS.md` and contribution instructions before editing upstream code.
+This builds pinned PhotoCraft v0.12.0 at `6a2d027ee2e7ca12afd248544ed2262b0fa078dd` in `.runtime/photocraft-0.12.0`, applies the templates and hooks, formats Rust and builds both executables with HEIF support. Pass `-HostVersion 0.8.2` for the older supported base in `.runtime/photocraft-source`; `-TargetDir` can reuse an existing Cargo cache. The preparer rejects changed integration points rather than silently patching another upstream version and can be rerun. Upstream remains under MIT OR Apache-2.0. Read its `AGENTS.md` and contribution instructions before editing upstream code.
 
-Distributed binaries contain neutral compiled defaults. On startup they read `runtime/config.photocraft.json` next to the executable; saved PhotoCraft preferences then take precedence. The installer writes both files for the chosen machine. No developer paths or personal settings belong in a release.
+For 0.12.0 the script also obtains the official release's `craft-fonts` revision `abb83316d96aa59c1cf64784289e378fe9fa5695`, verifies the four font hashes and sets `CRAFT_FONTS_DIR` with `CRAFT_FONTS_REQUIRED=1`. This preserves the editor's embedded Japanese text fallbacks. Font files stay in the ignored build cache; the add-on retains their OFL copyright/license notices.
+
+The locally reconstructed patched binaries contain neutral compiled defaults. On startup they read `runtime/config.photocraft.json` next to the existing PhotoCraft executable; saved PhotoCraft preferences then take precedence. Setup points these settings at the separately installed GenGate runtime. No developer paths or personal settings belong in a release.
 
 Targeted native checks after changing the templates:
 
 ```powershell
 $env:GENSTUDIO_NO_PROCESS = '1'
-cargo test --manifest-path .runtime/photocraft-source/Cargo.toml -p photocraft-engine --lib genstudio::
-cargo clippy --manifest-path .runtime/photocraft-source/Cargo.toml -p photocraft-engine --all-targets -- -D warnings
+cargo test --manifest-path .runtime/photocraft-0.12.0/Cargo.toml -p photocraft-engine --lib genstudio::
+cargo clippy --manifest-path .runtime/photocraft-0.12.0/Cargo.toml -p photocraft-engine --all-targets -- -D warnings
 ```
 
 Follow upstream's broader checks when changing commands, document structures or UI. The existing integration was exercised with engine/UI tests and synthetic official-MCP smoke checks. Two unrelated localization assertions in the pinned upstream UI suite are known failures (Turkish New Document “8 bit” and Hungarian “Enable animations”); do not describe the whole upstream suite as green.
@@ -47,12 +49,15 @@ The `photocraft_*_smoke.py` scripts launch an isolated editor/profile and synthe
 ## Package the Windows ZIP
 
 ```powershell
-python scripts/package_windows.py
+python scripts/build_editor_patch.py --original .runtime/official/0.12.0 --modified .runtime/photocraft-0.12.0/target/release --output .runtime/addon-patches --host-version 0.12.0 --upstream 6a2d027ee2e7ca12afd248544ed2262b0fa078dd
+python scripts/package_windows.py --patches .runtime/addon-patches
 ```
 
-The packager obtains the pinned Comfy model library and LanPaint **code**, and the SHA-256-pinned embedded CPython / host wheels from `packaging/runtime-lock.json`. It never obtains model weights. Use `--core` and `--lanpaint` to reuse existing pinned source checkouts; `--editor`, `--cli` and `--upstream` select an existing build. The result is in `dist/`, along with `SHA256SUMS.txt`.
+Obtain the official Windows portable archive recorded in `photocraft/editor-bases.json`, verify its archive hash and extract the original editor/CLI into `.runtime/official/<version>`. Select the actual Cargo output directory with `--modified`. The patch builder checks both input file hashes against that record, builds deltas and verifies exact forward reconstruction; existing entries for other supported bases are retained. New upstream versions require porting and validating the native integration, recording new official hashes and building another catalog entry; relabeling an old patch is not compatibility.
 
-The archive contains a native editor, matching official MCP CLI, local host, Python runtime, original source for the separate GPL libraries, notices, a manifest with per-file SHA-256 values, and the graphical setup entry point. Host wheel distributions keep their own `.dist-info/licenses` files. The application uses the CPython-provided VC runtime DLL beside the executable.
+The packager obtains the pinned Comfy model library and LanPaint **code**, and the SHA-256-pinned embedded CPython / host wheels from `packaging/runtime-lock.json`. It never obtains model weights. Use `--core` and `--lanpaint` to reuse existing pinned source checkouts; `--upstream` selects the licensed source build. The result is in `dist/`, along with `SHA256SUMS.txt`.
+
+The archive contains binary deltas and their catalog, local host, Python runtime, original source for the separate GPL libraries, notices, a manifest with per-file SHA-256 values, graphical setup and an uninstall entry point. Complete PhotoCraft editor/CLI files are forbidden by package verification. Host wheel distributions, including the BSD-licensed `bsdiff4` decoder, keep their license files.
 
 The packager refuses to reuse an existing staging directory. Move a previous staging directory aside before rebuilding. Compare the manifest and run setup with a temporary destination and `--no-shortcuts` for automated verification. Do not include `config.local.json`, `config.photocraft.json`, user profiles, document screenshots, logs, model files or an entire developer `.runtime` directory in Git.
 

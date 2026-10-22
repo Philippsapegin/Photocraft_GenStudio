@@ -11,24 +11,24 @@ from .lifecycle import DIRECT_URL, http_json
 from .transport import poll
 
 
-def generate(image, mask, seed, prompt, cancel, progress):
+def generate(image, mask, seed, prompt, cancel, progress, *, base=DIRECT_URL):
     encode = lambda im: base64.b64encode(png_bytes(im)).decode("ascii")
-    job = http_json(DIRECT_URL + "/jobs", {"image": encode(image), "mask": encode(mask),
+    job = http_json(base + "/jobs", {"image": encode(image), "mask": encode(mask),
                    "seed": seed, "prompt": prompt}, timeout=20)
-    return wait(job, cancel, progress)
+    return wait(job, cancel, progress, base=base)
 
 
-def generate_studio(references, seed, prompt, width, height, cancel, progress):
-    if http_json(DIRECT_URL + "/health").get("studio_protocol", 0) < 1:
+def generate_studio(references, seed, prompt, width, height, cancel, progress, *, base=DIRECT_URL):
+    if http_json(base + "/health").get("studio_protocol", 0) < 1:
         raise RuntimeError("Restart the Direct engine in Preferences > GenGate to enable full-image generation.")
-    job = http_json(DIRECT_URL + "/jobs", {"kind": "studio", "references": [
+    job = http_json(base + "/jobs", {"kind": "studio", "references": [
         base64.b64encode(png_bytes(image)).decode("ascii") for image in references],
         "prompt": prompt, "seed": seed, "width": width, "height": height}, timeout=60)
-    return wait(job, cancel, progress)
+    return wait(job, cancel, progress, base=base)
 
 
-def wait(job, cancel, progress):
-    path = DIRECT_URL + "/jobs/" + job["id"]
+def wait(job, cancel, progress, *, base=DIRECT_URL):
+    path = base + "/jobs/" + job["id"]
     complete=False
     try:
         deadline = time.monotonic() + 1800

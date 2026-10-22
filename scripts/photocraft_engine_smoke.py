@@ -176,7 +176,7 @@ def main():
                 assert status["status"]["ready"], status
                 report["real_direct_start"] = status
                 from genstudio.lifecycle import http_json
-                health = http_json("http://127.0.0.1:8767/health")
+                health = http_json(status["status"]["workerUrl"] + "/health")
                 assert Path(health["modelsDir"]).resolve() == Path(settings["modelsDir"]).resolve(), health
                 report["direct_health"] = health
                 mcp.run("genstudio.engine.stop")

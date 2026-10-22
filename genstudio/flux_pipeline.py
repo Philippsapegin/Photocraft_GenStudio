@@ -10,6 +10,7 @@ import importlib.metadata
 import json
 import math
 from pathlib import Path
+import struct
 import sys
 
 from genfill.comfy import Cancelled
@@ -19,6 +20,26 @@ from .settings import validate_components
 from .settings import ROOT
 
 CORE = ROOT / ".runtime/flux-core"
+
+
+def validate_upsampler(path):
+    """Reject known conditioning-only exports by reading their small header."""
+    try:
+        with Path(path).open("rb") as stream:
+            length = struct.unpack("<Q", stream.read(8))[0]
+            if not 0 < length <= 64 * 1024 * 1024:
+                raise ValueError("Invalid Safetensors header size")
+            header = json.loads(stream.read(length))
+        metadata = header.get("__metadata__", {})
+        if not isinstance(metadata, dict):
+            raise ValueError("Invalid checkpoint metadata")
+    except (OSError, ValueError, AttributeError, struct.error) as error:
+        raise ValueError("Cannot read the selected Prompt upsampler checkpoint: " + str(error)) from error
+    if (str(metadata.get("minimax_h3_lm_head", "")).lower() == "false" or
+            str(metadata.get("minimax_h3_final_norm", "")).lower() == "false"):
+        raise ValueError("The selected Prompt upsampler is a MiniMax H3 conditioning encoder, "
+                         "not a complete text-generation model. Set Prompt upsampler to Automatic "
+                         "or choose a full Qwen3.5 prompt upsampler in Preferences > GenGate > Advanced.")
 
 
 def caption_key(references, prompt, width, height):
@@ -75,12 +96,15 @@ class FluxPipeline:
             except (importlib.metadata.PackageNotFoundError, ValueError):
                 problems.append(f"FLUX 3 dependency {name} is missing. Run scripts/Setup-Direct.ps1.")
         try:
-            resolve_components(self.models, self.components, FLUX)
+            files = resolve_components(self.models, self.components, FLUX)
+            validate_upsampler(files["prompt_upsampler"]["path"])
         except (ValueError, OSError) as error:
             problems.append(str(error))
         return problems
 
     def expand(self, references, seed, prompt, width, height, cancel, progress):
+        files = resolve_components(self.models, self.components, FLUX)
+        validate_upsampler(files["prompt_upsampler"]["path"])
         sd, _ = import_core(core=CORE)
         import comfy.model_management as memory
         import comfy.utils
@@ -90,13 +114,15 @@ class FluxPipeline:
         gc.collect()
         memory.soft_empty_cache()
         progress("FLUX 3 · expanding prompt…")
-        files = resolve_components(self.models, self.components, FLUX)
         llm = sd.load_clip([files["prompt_upsampler"]["path"]], clip_type=sd.CLIPType.FLUX3, disable_dynamic=True)
         previous = comfy.utils.PROGRESS_BAR_HOOK
 
         def token_progress(value, total, preview=None, **kwargs):
             if cancel.is_set():
                 raise Cancelled()
+            # The token budget is a ceiling, not a known completion percentage.
+            # Keep this distinct from the later image-sampling step progress.
+            progress(f"FLUX 3 \u00b7 expanding prompt \u00b7 {int(value)} tokens")
 
         comfy.utils.set_progress_bar_global_hook(token_progress)
         try:
@@ -135,8 +161,9 @@ class FluxPipeline:
         self.pipe = model, clip, vae
         return self.pipe
 
-    def generate_studio(self, references, seed, prompt, width, height, cancel, progress, *, _minimum=256, _constant_lora=False):
-        if len(references) > 10 or width % 16 or height % 16 or not _minimum <= width <= 2048 or not _minimum <= height <= 2048:
+    def generate_studio(self, references, seed, prompt, width, height, cancel, progress, *, _minimum=256, _maximum=2048, _constant_lora=False):
+        if (len(references) > 10 or width % 16 or height % 16 or
+                not _minimum <= width <= _maximum or not _minimum <= height <= _maximum or width * height > 16 << 20):
             raise ValueError("Invalid FLUX 3 generation dimensions or reference count.")
         if cancel.is_set():
             raise Cancelled()
@@ -211,4 +238,4 @@ class FluxPipeline:
         # FLUX3 is an editing model. Pixel-exact masking is applied by the host
         # after rendering, shared with Remove Tool and selection Ai Fill.
         return self.generate_studio([reference, coverage], seed, masked_prompt(prompt),
-                                    image.width, image.height, cancel, progress, _minimum=16, _constant_lora=True)
+                                    image.width, image.height, cancel, progress, _minimum=16, _maximum=16384, _constant_lora=True)

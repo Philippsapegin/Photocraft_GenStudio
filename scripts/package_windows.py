@@ -89,18 +89,18 @@ def lanpaint_source(source):
 
 def build(args):
     upstream = args.upstream.resolve()
-    if not args.editor.is_file() or not args.cli.is_file():
-        raise ValueError("Build PhotoCraft and photocraft-cli first; see docs/DEVELOPMENT.md.")
-    source_defaults = json.loads((upstream / "crates/engine/src/genstudio-defaults.json").read_text())
-    if source_defaults.get("runtimeRoot") not in ("", "."):
-        raise ValueError("Do not distribute a build containing developer machine paths.")
-    target = ROOT / "dist" / ("PhotoCraft-GenGate-" + installer.VERSION + "-windows-x64")
+    from genstudio.editor_patch import catalog_for
+    patches = args.patches.resolve()
+    catalog = catalog_for(patches)
+    target = ROOT / "dist" / ("GenGate-" + installer.VERSION + "-windows-x64-addon")
     # A new package is staged next to earlier packages, never recursively removed.
     if target.exists():
         raise ValueError("Package staging directory already exists; move it aside before rebuilding: " + str(target))
     target.mkdir(parents=True)
     runtime = target / "runtime"
     runtime.mkdir()
+    shutil.copyfile(patches / "editor-patches.json", target / "editor-patches.json")
+    copy_tree(patches / "patches", target / "patches")
     for directory in ("genfill", "genstudio"):
         copy_tree(ROOT / directory, runtime / directory)
     for name in ("config.example.json", "requirements.txt", "LICENSE"):
@@ -119,7 +119,7 @@ def build(args):
     from genstudio.segmentation_models import ensure_modules
     copy_tree(ensure_modules(), runtime / ".runtime/segmentation/deps")
     copy_tree(ROOT / "packaging", runtime / "packaging")
-    for name in ("Setup.cmd", "Setup.ps1", "Launch.ps1", "PhotoCraft.cmd"):
+    for name in ("Setup.cmd", "Setup.ps1", "Launch.ps1", "PhotoCraft.cmd", "Uninstall.cmd", "Uninstall.ps1"):
         shutil.copyfile(ROOT / "packaging" / name, target / name)
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     # The package contains the user guide, while developer/source links should
@@ -130,8 +130,6 @@ def build(args):
             return match.group(0)
         return "](" + installer.REPOSITORY + "/blob/v" + installer.VERSION + "/" + link + ")"
     (target / "README.md").write_text(re.sub(r"\]\(([^)]+)\)", source_link, readme), encoding="utf-8")
-    shutil.copyfile(args.editor, target / "PhotoCraft.exe")
-    shutil.copyfile(args.cli, target / "photocraft-cli.exe")
     lock = json.loads((ROOT / "packaging/runtime-lock.json").read_text())
     inputs = [lock["python"], *lock["wheels"]]
     print("Fetching checksum-pinned Python and lightweight host wheels (no torch, no models)...", flush=True)
@@ -143,7 +141,6 @@ def build(args):
     (python_dir / "python313._pth").write_text("python313.zip\n.\nsite-packages\n..\\..\nimport site\n", encoding="utf-8")
     for wheel in downloads[1:]:
         extract(wheel, python_dir / "site-packages")
-    shutil.copyfile(python_dir / "vcruntime140.dll", target / "vcruntime140.dll")
     if args.core:
         core = args.core.resolve()
     else:
@@ -183,10 +180,18 @@ def build(args):
         shutil.copyfile(path, destination)
     shutil.copyfile(ROOT / "LICENSE", licenses / "GenGate-GPL-3.0.txt")
     shutil.copyfile(ROOT / "THIRD_PARTY.md", licenses / "THIRD_PARTY.md")
+    if any(entry["hostVersion"] == "0.12.0" for entry in catalog["patches"]):
+        from prepare_craft_fonts import prepare as prepare_fonts
+        fonts = prepare_fonts()
+        for path in (fonts / "fonts").rglob("OFL.txt"):
+            destination = licenses / "craft-fonts" / path.relative_to(fonts)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(path, destination)
     shutil.copyfile(python_dir / "LICENSE.txt", licenses / "Python-LICENSE.txt")
     # The embedded wheel dist-info directories retain all Python dependency
     # license texts; GPL model library and LanPaint retain original source.
-    manifest = {"version": installer.VERSION, "upstream": "d43db3e153c76aefce9b32cef9099e458eaf17a8",
+    manifest = {"version": installer.VERSION, "installMode": "overlay",
+                "upstream": [entry["upstream"] for entry in catalog["patches"]],
                 "includes_model_weights": False, "files": {}}
     for path in sorted(target.rglob("*")):
         if path.is_file():
@@ -213,10 +218,9 @@ def build(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    base = ROOT / ".runtime/photocraft-source"
+    base = ROOT / ".runtime/photocraft-0.12.0"
     parser.add_argument("--upstream", type=Path, default=base)
-    parser.add_argument("--editor", type=Path, default=base / "target/release/photocraft.exe")
-    parser.add_argument("--cli", type=Path, default=base / "target/release/photocraft-cli.exe")
+    parser.add_argument("--patches", type=Path, required=True, help="Verified editor-patches.json and binary deltas")
     parser.add_argument("--core", type=Path)
     parser.add_argument("--lanpaint", type=Path)
     build(parser.parse_args())

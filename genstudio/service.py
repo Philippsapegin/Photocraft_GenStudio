@@ -7,6 +7,7 @@ from genfill.server import Handler as JobHandler, JobManager
 from .lifecycle import EngineHost
 from .settings import load, save, validate
 from . import VERSION
+from .processes import identity
 
 
 class Handler(JobHandler):
@@ -19,7 +20,8 @@ class Handler(JobHandler):
         if dispatch(self):
             return
         if self.command == "GET" and self.path == "/health":
-            return self.send_json(200, {"service": "photocraft-genstudio", "version": VERSION})
+            return self.send_json(200, {"service": "photocraft-genstudio", "version": VERSION,
+                                        "identity": self.server.identity})
         if self.command == "POST" and self.path == "/engine":
             try:
                 if self.headers.get("Content-Type", "").split(";")[0] != "application/json":
@@ -34,8 +36,18 @@ class Handler(JobHandler):
                 if action not in ("status", "start", "stop", "ensure", "configure"):
                     raise ValueError("Unknown engine action.")
                 host = self.server.host
-                with host.lock:
+                # Idle polling must never configure, stop, or wait for a model
+                # startup. A selection worker has no relationship to this host.
+                if action == "status":
+                    return self.send_json(200, host.status())
+                if not host.lock.acquire(blocking=False):
+                    raise ValueError("The engine is starting. Wait for it to finish before changing its settings.")
+                try:
                     settings = validate(body["settings"]) if body.get("settings") is not None else None
+                    if settings is not None:
+                        # Generator controls cannot overwrite the independent
+                        # selection preferences when their payload omits them.
+                        settings["segmentation"] = host.settings["segmentation"]
                     changed = settings is not None and settings != host.settings
                     with self.server.manager.lock:
                         active = any(job.state not in ("done", "error", "cancelled")
@@ -55,6 +67,8 @@ class Handler(JobHandler):
                         result = {**host.status(), **stopped}
                     else:
                         result = host.status()
+                finally:
+                    host.lock.release()
                 return self.send_json(200, result)
             except (ValueError, RuntimeError, OSError) as error:
                 return self.send_json(400, {"error": str(error)})
@@ -64,10 +78,11 @@ class Handler(JobHandler):
     do_POST = dispatch
 
 
-def create_server(settings=None, port=8766, host=None):
+def create_server(settings=None, port=0, host=None):
     host = host or EngineHost(settings or load())
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     server.host = host
+    server.identity = identity()
     server.manager = JobManager(host.config(), client=host)
     from .studio import StudioJobs
     server.studio = StudioJobs(host)
@@ -75,7 +90,16 @@ def create_server(settings=None, port=8766, host=None):
 
 
 def main():
-    server = create_server()
+    # Bind an OS-assigned port, and publish it only after the server is ready.
+    # No global well-known port can connect an editor to an old installation.
+    from .control import ENDPOINT
+    import os
+    server = create_server(port=0)
+    ENDPOINT.parent.mkdir(parents=True, exist_ok=True)
+    temporary = ENDPOINT.with_suffix(".tmp")
+    temporary.write_text(json.dumps({"url": f"http://127.0.0.1:{server.server_port}",
+                                    "identity": server.identity, "pid": os.getpid()}), encoding="utf-8")
+    temporary.replace(ENDPOINT)
     try:
         server.serve_forever(poll_interval=0.5)
     finally:

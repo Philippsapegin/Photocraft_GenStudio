@@ -15,9 +15,40 @@ pub struct Cache {
     bar_model:Option<Gallery>,
     bar_saved_prompt:String,
     bar_variant_count:usize,
+    bar_prompt_id:Option<egui::Id>,
+    bar_delete_held:[bool;2],
 }
 fn rect(rect:egui::Rect)->Value { json!([rect.min.x,rect.min.y,rect.width(),rect.height()]) }
 fn failure(app:&mut PhotocraftApp,error:String) { crate::notices::error(app,error); }
+
+/// Give a focused floating prompt's delete/autorepeat events directly to egui.
+/// Do this before the editor's canvas/tool shortcut machinery, including for
+/// an empty prompt; deleting text must never dispatch Clear/Fill/Delete Layer.
+pub fn prompt_delete_frame(app:&mut PhotocraftApp,ctx:&egui::Context)->bool {
+    let focused=app.ai_layers.bar_prompt_id.is_some_and(|id|ctx.memory(|m|m.focused())==Some(id))
+        && !app.ai_layers.bar_info.is_null();
+    let mut held=app.ai_layers.bar_delete_held;
+    let handled=ctx.input(|i| {
+        let mut delete=false;
+        let mut only_delete=true;
+        for event in &i.events {
+            if let egui::Event::Key {key,pressed,repeat,..}=event {
+                let slot=match key {egui::Key::Backspace=>Some(0),egui::Key::Delete=>Some(1),_=>None};
+                if let Some(slot)=slot {
+                    // Autorepeat keeps its original text-field owner if a
+                    // result, click or layout change moves focus mid-hold.
+                    let owned=focused || (*repeat && held[slot]);
+                    if *pressed {held[slot]=owned;delete|=owned;only_delete&=owned;} else {held[slot]=false;}
+                } else if *pressed {only_delete=false;}
+            } else if matches!(event,egui::Event::WindowFocused(false)) {
+                held=[false;2];
+            }
+        }
+        delete && only_delete
+    });
+    app.ai_layers.bar_delete_held=held;
+    handled
+}
 
 pub fn properties(app:&mut PhotocraftApp,ui:&mut egui::Ui,layer:&Layer)->bool {
     if let Ok(Some(generation))=photocraft_engine::genstudio_generate::layer_generation(layer) {
@@ -99,12 +130,23 @@ pub fn properties(app:&mut PhotocraftApp,ui:&mut egui::Ui,layer:&Layer)->bool {
 fn reusable(app:&mut PhotocraftApp)->Option<LayerId> {
     let st=app.session.active()?;
     if let Some((prior,active,result))=&app.ai_layers.reuse
-        && *active==st.active_layer && prior.upgrade().is_some_and(|doc|Arc::ptr_eq(&doc,&st.doc)) { return *result; }
+        && *active==st.active_layer && prior.upgrade().is_some_and(|doc| {
+            Arc::ptr_eq(&doc,&st.doc) || (
+                shared_optional_mask(doc.selection.as_ref(),st.doc.selection.as_ref())
+                && match (active.and_then(|id|doc.layer(id)),active.and_then(|id|st.doc.layer(id))) {
+                    (Some(a),Some(b))=>shared_optional_mask(a.mask.as_ref().map(|m|&m.surface),b.mask.as_ref().map(|m|&m.surface))
+                        && match (genstudio_ai::block(a),genstudio_ai::block(b)) {(Some(a),Some(b))=>Arc::ptr_eq(a,b),(None,None)=>true,_=>false},
+                    (None,None)=>true,_=>false,
+                })
+        }) { return *result; }
     let doc=st.doc.clone();let active=st.active_layer;
     let result=reusable_inner(app);
     app.ai_layers.reuse=Some((Arc::downgrade(&doc),active,result));
     app.ai_layers.bar_model=result.and_then(|id|doc.layer(id)).and_then(|layer|genstudio_ai::gallery(layer).ok());
     result
+}
+fn shared_optional_mask(a:Option<&photocraft_raster::Surface>,b:Option<&photocraft_raster::Surface>)->bool {
+    match (a,b) {(Some(a),Some(b))=>genstudio_ai::shared_mask(a,b),(None,None)=>true,_=>false}
 }
 fn reusable_inner(app:&PhotocraftApp)->Option<LayerId> {
     let st=app.session.active()?;
@@ -114,7 +156,7 @@ fn reusable_inner(app:&PhotocraftApp)->Option<LayerId> {
 }
 pub fn show_bar(app:&mut PhotocraftApp,ui:&mut egui::Ui,xf:&ViewXform,index:usize) {
     app.ai_layers.bar_info=Value::Null;
-    if app.ui.gen_studio.open || app.ui.gen_studio.hide_ai_bar || app.session.active_index()!=Some(index) {return;}
+    if app.ui.gen_studio.open || app.ui.gen_studio.hide_ai_bar || app.ui.transform.is_some() || app.session.active_index()!=Some(index) {return;}
     let existing=reusable(app);
     let Some(st)=app.session.active() else {return;};
     let doc=st.doc.id;
@@ -151,7 +193,8 @@ pub fn show_bar(app:&mut PhotocraftApp,ui:&mut egui::Ui,xf:&ViewXform,index:usiz
         let t=Tokens::get(ui.ctx());
         let frame=egui::Frame::new().fill(t.card).stroke(egui::Stroke::new(1.0,t.card_border)).corner_radius(t.radius_lg).inner_margin(8.0);
         let response=frame.show(ui,|ui| {ui.horizontal(|ui| {
-            let prompt=ui.add(egui::TextEdit::singleline(&mut app.ui.gen_studio.selection_prompt).desired_width(width-110.0).hint_text("Prompt goes here…").id_salt("ai-selection-prompt"));
+            let prompt=ui.add(egui::TextEdit::singleline(&mut app.ui.gen_studio.selection_prompt).desired_width(width-110.0).char_limit(6000).hint_text("Prompt goes here…").id(egui::Id::new(("ai-selection-prompt",doc))));
+            app.ai_layers.bar_prompt_id=Some(prompt.id);
             let button=ui.add_enabled(enabled,egui::Button::new("Generate"));
             generate=button.clicked();
             info=json!({"prompt":app.ui.gen_studio.selection_prompt,"promptRect":rect(prompt.rect),"generateRect":rect(button.rect),"enabled":enabled});
@@ -185,6 +228,70 @@ mod tests {
     fn click(h:&mut egui_kittest::Harness<PhotocraftApp>,rect:&Value) {
         let r=rect.as_array().unwrap();let at=pos2((r[0].as_f64().unwrap()+r[2].as_f64().unwrap()/2.0) as f32,(r[1].as_f64().unwrap()+r[3].as_f64().unwrap()/2.0) as f32);
         h.hover_at(at);h.run_steps(2);h.drag_at(at);h.run_steps(2);h.drop_at(at);h.run_steps(3);
+    }
+    #[test]
+    fn floating_prompt_keeps_repeated_delete_keys_and_empty_field_edits_off_the_canvas() {
+        let mut app=app();selected(&mut app);
+        app.run("edit.aiFill",json!({"prompt":"A long prompt for deletion"})).unwrap();
+        app.session.edit("Synthetic fill",|doc,active| {
+            let layer=doc.layer_mut(active.unwrap()).unwrap();
+            layer.surface_mut().unwrap().write_region(photocraft_geom::Rect::new(128,90,129,91),&[1.0,0.0,0.0,1.0]);Ok(())
+        }).unwrap();
+        let mut h=egui_kittest::Harness::builder().with_size(vec2(800.0,600.0)).build_ui_state(|ui,app:&mut PhotocraftApp| {
+            crate::shortcuts::handle(app,ui.ctx());
+            if ui.ctx().fonts(|f|f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                let xf=ViewXform {rect:ui.max_rect(),zoom:1.0,center:[192.0,128.0],flip:false,rotation:0.0,aspect:1.0};
+                show_bar(app,ui,&xf,0);
+            }
+        },app);
+        PhotocraftApp::setup_context(&h.ctx,crate::theme::ThemeKind::Studio);h.run_steps(5);
+        let field=h.state().ai_layers.bar_info["promptRect"].clone();click(&mut h,&field);
+        assert!(h.ctx.text_edit_focused());
+        h.key_press_modifiers(egui::Modifiers::COMMAND,egui::Key::A);
+        h.event(egui::Event::Text("Long horizontally scrolling prompt — тест 👩‍💻 ".repeat(8)));h.run_steps(2);
+        h.hover_at(pos2(24.0,24.0));h.run_steps(2);
+        let document=h.state().session.active().unwrap().doc.clone();
+        for _ in 0..100 {
+            for _ in 0..8 {
+                h.event(egui::Event::Key {key:egui::Key::Backspace,physical_key:Some(egui::Key::Backspace),pressed:true,repeat:true,modifiers:egui::Modifiers::NONE});
+            }
+            h.run_steps(1);
+        }
+        h.event(egui::Event::Key {key:egui::Key::Backspace,physical_key:Some(egui::Key::Backspace),pressed:false,repeat:false,modifiers:egui::Modifiers::NONE});
+        h.run_steps(2);
+        assert_eq!(h.state().ui.gen_studio.selection_prompt,"");
+        assert!(Arc::ptr_eq(&document,&h.state().session.active().unwrap().doc),"typing never changes layers, pixels, selection or history");
+        assert!(crate::shortcut_dispatch::take_log(&h.ctx).is_empty(),"delete keys belong to the prompt, even after it is empty");
+        // Focus can move when a generated layer arrives or the user clicks a
+        // button before releasing a held key. Its remaining repeats stay owned
+        // by the original text field and must not start clearing canvas pixels.
+        h.event(egui::Event::Key {key:egui::Key::Backspace,physical_key:None,pressed:true,repeat:false,modifiers:egui::Modifiers::NONE});h.run_steps(1);
+        h.ctx.memory_mut(|m|m.surrender_focus(m.focused().unwrap()));
+        for _ in 0..8 {
+            h.event(egui::Event::Key {key:egui::Key::Backspace,physical_key:None,pressed:true,repeat:true,modifiers:egui::Modifiers::NONE});h.run_steps(1);
+        }
+        h.event(egui::Event::Key {key:egui::Key::Backspace,physical_key:None,pressed:false,repeat:false,modifiers:egui::Modifiers::NONE});h.run_steps(1);
+        assert!(Arc::ptr_eq(&document,&h.state().session.active().unwrap().doc),"a held delete never transfers from a prompt to pixels");
+        h.key_press(egui::Key::Backspace);h.run_steps(2);
+        assert_eq!(h.state().session.active().unwrap().doc.layer(h.state().session.active().unwrap().active_layer.unwrap()).unwrap().surface().unwrap().sample_channel(128,90,3),0.0,"a new canvas Backspace still clears normally after key release");
+    }
+    #[test]
+    fn canvas_backspace_coalesces_autorepeat_but_keeps_separate_presses() {
+        let mut app=app();selected(&mut app);
+        let ctx=egui::Context::default();
+        crate::shortcut_dispatch::set_dry_run(&ctx,true);
+        let event=|repeat|egui::Event::Key {key:egui::Key::Backspace,physical_key:None,pressed:true,repeat,modifiers:egui::Modifiers::NONE};
+        for (repeat,count) in [(true,1),(false,8)] {
+            let mut events=Vec::new();
+            for _ in 0..8 {
+                events.push(event(repeat));
+                if !repeat {events.push(egui::Event::Key {key:egui::Key::Backspace,physical_key:None,pressed:false,repeat:false,modifiers:egui::Modifiers::NONE});}
+            }
+            let input=egui::RawInput {events,..Default::default()};
+            let _=ctx.run_ui(input,|_| {crate::shortcut_dispatch::dispatch_pressed(&mut app,&ctx,crate::shortcut_dispatch::Focus::None,false);});
+            let log=crate::shortcut_dispatch::take_log(&ctx);
+            assert_eq!(log.iter().filter(|(id,_)|id=="edit.clear").count(),count);
+        }
     }
     #[test]
     fn selection_ai_menu_is_disabled_without_a_selection_and_precedes_fill() {
