@@ -46,6 +46,29 @@ Follow upstream's broader checks when changing commands, document structures or 
 
 The `photocraft_*_smoke.py` scripts launch an isolated editor/profile and synthetic HTTP backend. Pass `--exe` when the executable is outside the default build folder; `PHOTOCRAFT_CLI` can select a matching CLI executable. Do not use their explicit real-backend start flags unless you intend to start that service. No release validation requires real inference.
 
+### Windows layout-switch regression
+
+PhotoCraft 0.12.0 automatically initialized wgpu's WGL backend even when rendering
+through a native backend. Its hidden WGL window lives on a thread that waits on a
+channel without pumping Windows messages. A `WM_INPUTLANGCHANGEREQUEST`, including
+the one sent by NN Switch after text correction, can then block the main window
+while Windows notifies that hidden window. The 0.12 preparer excludes unused GL
+initialization from Automatic when DX12 adapters exist. Intel retains its native
+DX12 protection; explicit backend overrides and GL-only fallback remain available.
+
+To exercise both actual NN Switch modes, keep NN Switch running with its saved
+English/Russian bindings and run on Windows:
+
+```powershell
+.venv\Scripts\python.exe scripts/photocraft_layout_smoke.py --exe '<PhotoCraft>/photocraft.exe' --cli '<PhotoCraft>/photocraft-cli.exe'
+```
+
+This uses a disposable profile, a white test document, real keyboard input and the
+official MCP bridge. It checks both conversion directions, repeated Backspace with
+the pointer outside the prompt, unchanged document data and continued response.
+Engine startup and inference are disabled. It briefly takes focus; do not type in
+another application during the check. Reports/screenshots stay in `.runtime`.
+
 ## Package the Windows ZIP
 
 ```powershell

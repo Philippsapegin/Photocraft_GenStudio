@@ -36,6 +36,7 @@ def before(source):
 
 
 def after(source):
+    prepare_windows_input(source)
     shell = source / 'crates/engine/src/shell_commands.rs'
     menu = source / 'crates/ui-egui/src/menus.rs'
     if not shell.exists():
@@ -105,3 +106,72 @@ def after(source):
     qwen = remove / 'qwen.rs'
     text = qwen.read_text(encoding='utf-8').replace('let hole = hole(plan, None);', 'let hole = hole(plan, None)?;')
     qwen.write_text(text, encoding='utf-8')
+
+
+def prepare_windows_input(source):
+    """Avoid starting an unused, non-pumping WGL window on Windows."""
+    path = source / 'apps/photocraft/src/gpu_startup.rs'
+    if not path.exists():
+        return
+    text = path.read_text(encoding='utf-8')
+    marker = '// GenGate: unused WGL windows must not block Windows input-language broadcasts.'
+    if marker in text:
+        return
+    old = '''    let auto = plan.env.is_none() && plan.backend == GpuBackend::Auto && os == Os::Windows;
+    (auto && dx12_vendors().contains(&INTEL)).then_some(wgpu::Backends::DX12 | wgpu::Backends::GL)'''
+    new = '''    // GenGate: unused WGL windows must not block Windows input-language broadcasts.
+    // wgpu-hal 30's WGL helper waits on a channel without pumping its window.
+    // DefWindowProc(WM_INPUTLANGCHANGEREQUEST) then waits forever for that window.
+    // Do not initialize GL merely to enumerate a fallback when native adapters
+    // already exist. Keep GL available for GL-only machines and explicit choices.
+    let auto = plan.env.is_none() && plan.backend == GpuBackend::Auto && os == Os::Windows;
+    if !auto {
+        return None;
+    }
+    let vendors = dx12_vendors();
+    if vendors.is_empty() {
+        return None;
+    }
+    Some(if vendors.contains(&INTEL) { wgpu::Backends::DX12 } else { wgpu::Backends::DX12 | wgpu::Backends::VULKAN })'''
+    if text.count(old) != 1:
+        raise RuntimeError('PhotoCraft Windows graphics initialization changed; input-language fix needs review.')
+    text = text.replace(old, new)
+    text = text.replace(
+        '/// ids of the DX12 adapters, includes Intel: DX12, with GL as the last resort (see [`rank`]). An',
+        '/// ids of the DX12 adapters: native backends only when DX12 is available. An')
+    text = text.replace(
+        '/// crash is in that driver. `dx12_vendors` is called only for that plan; `None` keeps [`backends`]\'\n/// choice.',
+        '/// crash is in that driver, so Intel remains DX12-only. `dx12_vendors` is called only for\n/// that plan; `None` keeps [`backends`]\' choice for GL-only hardware and explicit overrides.')
+    text = text.replace('let dx12_gl = Some(wgpu::Backends::DX12 | wgpu::Backends::GL);',
+                        'let dx12_gl = Some(wgpu::Backends::DX12);')
+    text = text.replace('// No Intel adapter: egui\'s default backends, Vulkan included.',
+                        '// No Intel adapter: native backends, Vulkan included; no unused WGL window.')
+    for vendors in ('vec![NVIDIA, WARP]', 'vec![AMD]'):
+        text = text.replace(
+            'windows_auto_backends(&auto, Os::Windows, || ' + vendors + '), None)',
+            'windows_auto_backends(&auto, Os::Windows, || ' + vendors + '), Some(wgpu::Backends::DX12 | wgpu::Backends::VULKAN))')
+    text = text.replace('let vulkan_left_out = without_vulkan.is_some();',
+                        'let vulkan_left_out = without_vulkan.is_some_and(|backends| !backends.contains(wgpu::Backends::VULKAN));')
+    anchor = '    #[test]\n    fn cpu_prefers_software_adapters() {'
+    regression = '''    #[test]
+    fn windows_native_adapters_do_not_create_an_unused_wgl_input_language_deadlock() {
+        let auto = plan(Auto, None, None, false, Os::Windows);
+        for vendors in [vec![INTEL], vec![0x10de], vec![0x1002], vec![0x1414], vec![0x10de, INTEL]] {
+            let backends = windows_auto_backends(&auto, Os::Windows, || vendors).unwrap();
+            assert!(!backends.contains(wgpu::Backends::GL));
+            assert!(backends.contains(wgpu::Backends::DX12));
+        }
+        // Never enumerate DX12 or override the user's explicit OpenGL choice.
+        for explicit in [
+            plan(Gl, None, None, false, Os::Windows),
+            plan(Auto, None, Some("gl"), false, Os::Windows),
+        ] {
+            assert_eq!(windows_auto_backends(&explicit, Os::Windows, || panic!("explicit backend was probed")), None);
+        }
+        assert_eq!(windows_auto_backends(&auto, Os::Windows, Vec::new), None);
+    }
+
+'''
+    if text.count(anchor) != 1:
+        raise RuntimeError('PhotoCraft graphics regression test anchor changed.')
+    path.write_text(text.replace(anchor, regression + anchor), encoding='utf-8')

@@ -56,3 +56,25 @@ class Prepare012Tests(unittest.TestCase):
             compat.before(root)
             compat.after(root)
             self.assertEqual(menu.read_text(), 'older native table')
+
+    def test_windows_input_fix_is_repeatable_and_rejects_an_unknown_host(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            gpu = root / 'apps/photocraft/src/gpu_startup.rs'
+            gpu.parent.mkdir(parents=True)
+            gpu.write_text('different upstream implementation', encoding='utf-8')
+            with self.assertRaisesRegex(RuntimeError, 'needs review'):
+                compat.prepare_windows_input(root)
+            self.assertEqual(gpu.read_text(), 'different upstream implementation')
+            gpu.write_text('''pub fn windows_auto_backends() {
+    let auto = plan.env.is_none() && plan.backend == GpuBackend::Auto && os == Os::Windows;
+    (auto && dx12_vendors().contains(&INTEL)).then_some(wgpu::Backends::DX12 | wgpu::Backends::GL)
+}
+    #[test]
+    fn cpu_prefers_software_adapters() {}
+''', encoding='utf-8')
+            compat.prepare_windows_input(root)
+            patched = gpu.read_bytes()
+            compat.prepare_windows_input(root)
+            self.assertEqual(gpu.read_bytes(), patched)
+            self.assertIn('windows_native_adapters_do_not_create_an_unused_wgl_input_language_deadlock', gpu.read_text())

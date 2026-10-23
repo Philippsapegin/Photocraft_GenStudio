@@ -233,3 +233,41 @@ Start and Desktop each contain one **PhotoCraft** shortcut to the same compatibi
 Installed editor SHA-256: `c03eb01dc6140bbb68ec474032cabb17682b6f0e594cbc11643748dfafbcc7fc`. Local add-on ZIP: `GenGate-0.9.1-windows-x64-addon.zip`, 178,850,392 bytes, SHA-256 `0c09583249e56f532d7406a2919abc90aabd8baba658fa896512344dc6feead4`. No commit, push, public release, real inference, shared GPU Python change or model download/copy was performed.
 
 Evidence: `.runtime/photocraft012-gates.json`, `.runtime/native012-mcp.json`, `.runtime/candidate012.json`, `.runtime/addon012-live-install.json` and `.runtime/shortcut012-validation/report.json`.
+
+## 2026-10-23 - NN Switch and floating prompt hang
+
+Reproduced the real hang in an isolated copy of the installed 0.12.0 editor,
+without loading a model. CDB captured the main thread blocked inside
+`DefWindowProc(WM_INPUTLANGCHANGEREQUEST)`; Windows wait-chain traversal identified
+the target as the process's `wgpu-hal WGL Instance Thread`. That thread was parked
+in its shutdown-channel receive, without pumping its hidden window. A DX12-only
+diagnostic launch accepted both NN Switch commands. The previous synthetic
+Backspace checks had not exercised this external layout-change message.
+
+The source preparer now avoids initializing unused GL for Automatic on Windows
+when native DX12 adapters exist, retaining Vulkan on non-Intel hardware and the
+Intel DX12 safeguard. Explicit graphics choices and GL-only fallback are preserved.
+This fixes PhotoCraft startup; NN Switch's source, running process and saved
+hotkeys do not need changing.
+
+- Host suite: 129 tests, 124 passed, five tensor-dependent tests skipped.
+- Desktop application: 162 tests passed, one ignored, including the new graphics
+  initialization regression. Release build, all-target clippy with warnings denied
+  and dependency layers passed. Engine/UI/commands were unchanged in this fix.
+- Real NN Switch plus official MCP: five Last written word cycles and five
+  Selected text cycles, each English-to-Russian and back. Eight Backspace presses
+  per cycle with the pointer outside the prompt left document data unchanged.
+  Automatic rendering was used without a backend override; screenshots inspected.
+- No inference, model downloads, shared Python changes or NN Switch reinstall.
+
+Evidence: `.runtime/nn-gates.json`, `.runtime/nn-python-tests.log`,
+`.runtime/layout-smoke-latest.json`, `.runtime/nn-photocraft-main.txt` and
+`.runtime/nn-photocraft-input-thread.txt`.
+
+Installed through the existing separate add-on's verified delta/transaction path;
+editor SHA-256 `5be435fa67c3c166f7ba2f984e112a81c277670edd19510a4b885d26ea2cd4a9`.
+The installed editor passed another three cycles of each NN Switch mode in both
+directions, with the same Backspace and document-preservation checks. The launcher
+recognizes the updated patch. Native preferences, appearance and model file
+sizes/timestamps were preserved; the previous installation/profile were backed up.
+Evidence: `.runtime/nn-installed.json` and `.runtime/layout-smoke-latest.json`.
