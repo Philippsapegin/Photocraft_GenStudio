@@ -271,3 +271,56 @@ directions, with the same Backspace and document-preservation checks. The launch
 recognizes the updated patch. Native preferences, appearance and model file
 sizes/timestamps were preserved; the previous installation/profile were backed up.
 Evidence: `.runtime/nn-installed.json` and `.runtime/layout-smoke-latest.json`.
+
+## 2026-10-23 - FIBO Edit Turbo and Studio LoRAs
+
+Added the FIBO 2.0 Edit Turbo preset, its own component profile and isolated Direct
+library, plus the stock-node Comfy workflow. Discovery excludes Dev checkpoints.
+The INT8 Turbo model finished downloading and all three component hashes match
+the pinned manifest; the existing FLUX encoder and VAE were reused. Metadata-only
+readiness passed without importing Torch or loading weights.
+
+The separate LoRA browser navigates only inside the chosen `models/loras`, edits
+strengths, aliases and trigger words, and appends triggers by name click or drag.
+Studio adapters are independent of Constant LoRA. Portable adapter paths and
+strengths survive native and PSD layer-metadata round trips; older metadata
+defaults to an empty adapter list. Generated-layer drops restore the finished
+image and recipe. Ordinary-layer drops set the image and clear prompt/adapters.
+Drops into extra reference slots preserve the active recipe.
+
+- Python: 137 tests, 132 passed and five tensor-dependent skips. Includes Turbo
+  discovery, escaped paths, separate adapter stacks and synthetic FIBO sampling.
+- Native engine: 1,926 passed, 14 ignored. Full UI: 3,274 passed, 13 ignored,
+  with the same two documented upstream localization assertions excluded.
+- Official MCP with a synthetic host checks real UI clicks, folder navigation,
+  aliases/triggers, Save state, adapter forwarding, document save/reopen, layer
+  restoration, missing-folder handling and the FIBO reference syntax/limit.
+  The native UI suite also drags from the actual Layers panel and verifies that
+  the layer is imported into GenGate rather than reordered in the document.
+- On the optimized candidate, preparing a synthetic 24 MP layer for GenGate took
+  2.65 s; the UI answered during capture in 30 ms. This measures capture and
+  preview preparation only, without inference. Browser/settings screenshots were
+  inspected; metadata fields keep their full width and Save disables after saving.
+
+Real inference, tensor-level checkpoint/LoRA compatibility, output quality,
+VRAM peaks and speed remain intentionally untested. The shared GPU Python and
+NN Switch installation were not modified. No push or public release.
+
+Final optimized release, 29 focused native UI tests, all-target engine/UI clippy
+with warnings denied, dependency layers, WASM and adversarial command panic hunt
+passed. Menu parity was regenerated at 633/633 using the final release UI
+library's native `parity::compute` / `to_markdown` functions; the earlier Cargo
+generator builds were interrupted before completion.
+
+Installed through the existing separate add-on's verified delta path. Editor
+SHA-256: `cd4772370f77f4ef25f42910c7d4bf6c0a85cf65ab02150c23502cc7a9d1b61f`.
+The previous installation and full editor profile were backed up. Preferences,
+appearance and model sizes/timestamps were unchanged; the launcher recognizes
+the new patch. The installed executable and installed Python host passed the
+same synthetic MCP workflow (24 MP layer capture: 2.33 s, UI response: 42 ms).
+The installed FIBO readiness check also passed without importing Torch.
+
+Evidence: `.runtime/fibo-lora-gates.json`, `.runtime/fibo-lora-parity.log`,
+`.runtime/fibo-lora-package.json`, `.runtime/fibo-lora-installed.json`,
+`.runtime/lora-smoke-latest.json`, `.runtime/fibo-installed-readiness.json`
+and `.runtime/fibo2-download.json`.

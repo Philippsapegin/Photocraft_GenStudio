@@ -161,7 +161,7 @@ class FluxPipeline:
         self.pipe = model, clip, vae
         return self.pipe
 
-    def generate_studio(self, references, seed, prompt, width, height, cancel, progress, *, _minimum=256, _maximum=2048, _constant_lora=False):
+    def generate_studio(self, references, seed, prompt, width, height, cancel, progress, *, _minimum=256, _maximum=2048, _constant_lora=False, loras=None):
         if (len(references) > 10 or width % 16 or height % 16 or
                 not _minimum <= width <= _maximum or not _minimum <= height <= _maximum or width * height > 16 << 20):
             raise ValueError("Invalid FLUX 3 generation dimensions or reference count.")
@@ -203,6 +203,8 @@ class FluxPipeline:
                 self.caption = key, caption
             check()
             model, clip, vae = self.load(progress)
+            from .lora import apply_studio
+            model, clip = apply_studio(model, clip, self.models, loras, progress)
             if _constant_lora:
                 from .lora import apply_constant
                 model, clip = apply_constant(model, clip, self.models, self.components, progress)

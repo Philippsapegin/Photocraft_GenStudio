@@ -11,6 +11,8 @@ def prepare(source,replace):
     ui=source/"crates/ui-egui/src"
     shutil.copyfile(ROOT/"photocraft/genstudio_generate.rs",engine/"genstudio_generate.rs")
     shutil.copyfile(ROOT/"photocraft/genstudio_canvas.rs",ui/"genstudio_canvas.rs")
+    shutil.copyfile(ROOT/"photocraft/genstudio_lora.rs",engine/"genstudio_lora.rs")
+    shutil.copyfile(ROOT/"photocraft/genstudio_lora_ui.rs",ui/"genstudio_lora_ui.rs")
     for crate in ("engine","ui-egui"):
         manifest=source/"crates"/crate/"Cargo.toml"
         text=manifest.read_text(encoding="utf-8")
@@ -39,11 +41,15 @@ def prepare(source,replace):
         path.write_text("".join(lines),encoding="utf-8")
         if not seen:replace(path,anchor,anchor+"\n"+addition)
     module(engine/"lib.rs","pub mod genstudio;","pub mod genstudio_generate;")
+    module(engine/"lib.rs","pub mod genstudio;","pub mod genstudio_lora;")
+    if 'v.extend(crate::genstudio_lora::specs());' not in (engine/"commands.rs").read_text(encoding="utf-8"):
+        replace(engine/"commands.rs","v.extend(crate::genstudio::specs());","v.extend(crate::genstudio::specs());\n    v.extend(crate::genstudio_lora::specs());")
     replace(engine/"prefs.rs", '        section!("edit.preferences.plugIns", "Plug-ins\u2026"),', '        section!("edit.preferences.plugIns", "Plug-ins\u2026"),\n        section!("edit.preferences.genStudio", "Gen Studio\u2026"),')
     replace(ui/"menu_catalog.rs", '    (&["Edit", "Preferences"], "Plug-ins\u2026", None, "edit.preferences.plugIns"),', '    (&["Edit", "Preferences"], "Plug-ins\u2026", None, "edit.preferences.plugIns"),\n    (&["Edit", "Preferences"], "Gen Studio\u2026", None, "edit.preferences.genStudio"),')
     if 'v.extend(crate::genstudio_generate::specs());' not in (engine/"commands.rs").read_text(encoding="utf-8"):
         replace(engine/"commands.rs","v.extend(crate::genstudio::specs());","v.extend(crate::genstudio::specs());\n    v.extend(crate::genstudio_generate::specs());")
     module(ui/"lib.rs","pub mod genstudio_ui;","pub mod genstudio_canvas;")
+    module(ui/"lib.rs","pub mod genstudio_ui;","pub mod genstudio_lora_ui;")
     replace(ui/"lib.rs","pub(crate) ai_layers: crate::genstudio_ai_ui::Cache,","pub(crate) ai_layers: crate::genstudio_ai_ui::Cache,\n    pub(crate) studio: crate::genstudio_canvas::Cache,")
     replace(ui/"lib.rs","ai_layers: Default::default(),","ai_layers: Default::default(),\n            studio: Default::default(),")
     # Clean the duplicate hook left by the early pre-format preparer.
@@ -59,10 +65,13 @@ def prepare(source,replace):
         replace(engine/"jobs.rs",'const PREFIXES: &[&str] = &["jobs.",','const PREFIXES: &[&str] = &["genstudio.studio.", "genstudio.reference.", "jobs.",')
     if 'j.command.starts_with("genstudio.studio.")' not in (ui/"jobs_ui.rs").read_text(encoding="utf-8"):
         replace(ui/"jobs_ui.rs",'j.command.starts_with("genstudio.fill.")','(j.command.starts_with("genstudio.fill.") || j.command.starts_with("genstudio.studio.") || j.command.starts_with("genstudio.reference."))')
-    commands=("inspect","configure","submit","reference.browse","reference.set","reference.remove","reference.selection")
+    jobs_ui=ui/'jobs_ui.rs'
+    if 'j.command.starts_with("genstudio.loras.")' not in jobs_ui.read_text(encoding='utf-8'):
+        replace(jobs_ui,'j.command.starts_with("genstudio.reference.")','j.command.starts_with("genstudio.reference.") || j.command.starts_with("genstudio.loras.")')
+    commands=("inspect","configure","submit","reference.browse","reference.set","reference.remove","reference.selection","layer.restore")
     # These hidden automation actions still participate in PhotoCraft's command
     # catalog. Reuse the editor's translated action words beside the suite name.
-    words=("Properties","Settings","Generate","Open","Add","Remove","Selection")
+    words=("Properties","Settings","Generate","Open","Add","Remove","Selection","Open")
     for catalog in (ui/"i18n").glob("*.tsv"):
         text=catalog.read_text(encoding="utf-8")
         plain={cells[1]:cells[2] for line in text.splitlines() if len(cells:=line.split("\t"))==3 and not cells[0]}
@@ -84,6 +93,14 @@ def prepare(source,replace):
         tail=tail.replace(target,target+"\n"+insert,1)
         text=head+tail
         menu.write_text(text,encoding="utf-8")
+    for name in commands:
+        text=menu.read_text(encoding='utf-8')
+        command='genstudio.studio.'+name
+        if '"'+command+'",' not in text:
+            text=text.replace(anchor,anchor+'\n    ("'+command+'", "Gen Studio '+name+'", &[], None),')
+            pos=text.index('pub fn is_enabled')
+            text=text[:pos]+text[pos:].replace('    match id {','    match id {\n        "'+command+'" => true,',1)
+            menu.write_text(text,encoding='utf-8')
 
     text=menu.read_text(encoding="utf-8")
     if '"genstudio.settings.open"' not in text:
@@ -135,3 +152,22 @@ def prepare(source,replace):
                       "App start","First request"):
             if "\t"+label+"\t" not in text:text+="\n\t"+label+"\t"+label+"\n"
         catalog.write_text(text,encoding="utf-8")
+    # A panel drag reaches the document area before floating windows draw.
+    # Consume a GenGate drop first so it cannot copy/reorder the document layer.
+    transfer=ui/"layer_transfer.rs"
+    if transfer.exists() and 'genstudio_canvas::layer_drop' not in transfer.read_text(encoding='utf-8'):
+        replace(transfer,'    if let Some((dest, at)) = target {',
+            '    if let Some(layer) = t.layers.first()\n        && crate::genstudio_canvas::layer_drop(app,ctx,t.source.0,*layer) {\n        clear(ctx);\n        ctx.data_mut(|d|d.remove::<u64>(egui::Id::new("layer-drag")));\n        return;\n    }\n    if let Some((dest, at)) = target {')
+    for action in ('open','configure','settings','metadata.save','append'):
+        menu_text=menu.read_text(encoding='utf-8')
+        command='genstudio.loras.'+action
+        if '"'+command+'",' not in menu_text:
+            menu_text=menu_text.replace(anchor,anchor+'\n    ("'+command+'", "LoRAs '+action+'", &[], None),')
+            pos=menu_text.index('pub fn is_enabled')
+            menu_text=menu_text[:pos]+menu_text[pos:].replace('    match id {','    match id {\n        "'+command+'" => true,',1)
+            menu.write_text(menu_text,encoding='utf-8')
+    for catalog in (ui/'i18n').glob('*.tsv'):
+        text=catalog.read_text(encoding='utf-8')
+        for label in ('LoRA folder','Layer to GenGate','LoRAs open','LoRAs configure','LoRAs settings','LoRAs metadata.save','LoRAs append','Loras'):
+            if '\t'+label+'\t' not in text:text+='\n\t'+label+'\t'+label+'\n'
+        catalog.write_text(text,encoding='utf-8')

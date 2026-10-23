@@ -13,7 +13,7 @@ import uuid
 from genfill.image_ops import decode_png, png_bytes
 from genfill.comfy import Cancelled
 from .core_pipeline import DirectPipeline
-from .models import MODEL, FLUX, specification
+from .models import MODEL, FLUX, FIBO, MODELS, specification
 from .processes import gpu_lease, release_gpu
 
 
@@ -22,7 +22,10 @@ class Worker:
         self.owner = owner
         specification(model_id)
         self.model_id = model_id
-        if model_id == FLUX:
+        if model_id == FIBO:
+            from .fibo_pipeline import FiboPipeline
+            self.pipeline = FiboPipeline(model, text_encoder, vae, components=components)
+        elif model_id == FLUX:
             from .flux_pipeline import FluxPipeline
             self.pipeline = FluxPipeline(model, text_encoder, vae, components=components)
         else:
@@ -38,6 +41,8 @@ class Worker:
         if data.get("kind") == "studio":
             from .studio import request
             studio = request(data, self.model_id)
+            from .lora import validate_studio
+            validate_studio(studio['loras'], self.pipeline.models)
             image = mask = None
         else:
             image, mask = decode_png(data.get("image"), 16 << 20), decode_png(data.get("mask"), 16 << 20)
@@ -74,7 +79,7 @@ class Worker:
                            waiting=lambda: progress("Waiting for AI selection to release the GPU\u2026")):
                 failure = None
                 try:
-                    output = self.pipeline.generate_studio(studio["references"], seed, prompt, studio["width"], studio["height"], job["cancel"], progress) if studio else self.pipeline.generate(image, mask, seed, prompt, job["cancel"], progress)
+                    output = self.pipeline.generate_studio(studio["references"], seed, prompt, studio["width"], studio["height"], job["cancel"], progress, loras=studio['loras']) if studio else self.pipeline.generate(image, mask, seed, prompt, job["cancel"], progress)
                 except Cancelled:
                     failure = "cancelled", "Cancelled"
                 except Exception as error:
@@ -114,7 +119,7 @@ class Handler(BaseHTTPRequestHandler):
                 return send(200, {"service": "genstudio-direct", "ready": not problems,
                                   "owner": worker.owner,
                                   "inpaint_protocol": 2, "model": worker.model_id,
-                                  "studio_protocol": 1,
+                                  "studio_protocol": 2,
                                   "components": worker.pipeline.components,
                                   "textEncoder": worker.pipeline.text_encoder, "vae": worker.pipeline.vae,
                                   "modelsDir": str(worker.pipeline.models.resolve()), "problems": problems})
@@ -150,7 +155,7 @@ def main():
     parser.add_argument("--models", required=True)
     parser.add_argument("--text-encoder", default="")
     parser.add_argument("--vae", default="")
-    parser.add_argument("--model", default=MODEL, choices=(MODEL, FLUX))
+    parser.add_argument("--model", default=MODEL, choices=tuple(MODELS))
     parser.add_argument("--components", type=json.loads)
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--owner", required=True)

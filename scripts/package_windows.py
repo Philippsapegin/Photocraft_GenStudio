@@ -105,7 +105,7 @@ def build(args):
         copy_tree(ROOT / directory, runtime / directory)
     for name in ("config.example.json", "requirements.txt", "LICENSE"):
         shutil.copyfile(ROOT / name, runtime / name)
-    for name in ("run_direct.py", "run_segmentation.py", "download_segmentation.py", "prepare_qwen_core.py", "prepare_flux_core.py", "download_flux3.py", "Setup-Direct.ps1"):
+    for name in ("run_direct.py", "run_segmentation.py", "download_segmentation.py", "prepare_qwen_core.py", "prepare_flux_core.py", "prepare_fibo_core.py", "download_flux3.py", "download_fibo2.py", "Setup-Direct.ps1"):
         destination = runtime / "scripts" / name
         destination.parent.mkdir(exist_ok=True)
         shutil.copyfile(ROOT / "scripts" / name, destination)
@@ -114,6 +114,8 @@ def build(args):
     shutil.copyfile(ROOT / "photocraft/direct-requirements.txt", destination / "direct-requirements.txt")
     shutil.copyfile(ROOT / "photocraft/flux-requirements.txt", destination / "flux-requirements.txt")
     shutil.copyfile(ROOT / "photocraft/flux3-models.json", destination / "flux3-models.json")
+    for name in ('fibo2-models.json', 'fibo-requirements.txt'):
+        shutil.copyfile(ROOT / 'photocraft' / name, destination / name)
     for name in ("segmentation-models.json", "segmentation-requirements.txt"):
         shutil.copyfile(ROOT / "photocraft" / name, destination / name)
     from genstudio.segmentation_models import ensure_modules
@@ -158,6 +160,12 @@ def build(args):
     subprocess.run([str(python_dir / "python.exe"), "-m", "pip", "install", "--disable-pip-version-check",
         "--only-binary=:all:", "--no-deps", "--target", str(runtime / ".runtime/flux-core/deps"),
         "-r", str(runtime / "photocraft/flux-requirements.txt")], check=True)
+    from prepare_fibo_core import REVISION as FIBO_REV
+    fibo_core = prepare_core(revision=FIBO_REV, directory='fibo-core')
+    copy_tree(fibo_core, runtime / '.runtime/fibo-core', exclude=('deps',))
+    subprocess.run([str(python_dir / 'python.exe'), '-m', 'pip', 'install', '--disable-pip-version-check',
+        '--only-binary=:all:', '--no-deps', '--target', str(runtime / '.runtime/fibo-core/deps'),
+        '-r', str(runtime / 'photocraft/fibo-requirements.txt')], check=True)
     # LanPaint is source code, including its license. Install it into ComfyUI only
     # if the user explicitly selects the setup checkbox and it does not exist.
     copy_tree(lanpaint_source(args.lanpaint), runtime / "third_party/LanPaint",

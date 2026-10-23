@@ -9,6 +9,7 @@ FILES = {
 }
 TEXT_ENCODERS = ("qwen3vl_8b_w4a8.safetensors", "qwen3vl_8b_int8_convrot.safetensors", "qwen3vl_8b_bf16.safetensors")
 FLUX = "flux-3-image-klein"
+FIBO = "fibo-2-edit-turbo"
 MODELS = {
     MODEL: {"label": "Qwen Image 2.1", "references": 10, "grid": 32,
             "files": FILES, "text_encoders": TEXT_ENCODERS},
@@ -20,6 +21,12 @@ MODELS = {
                "prompt_upsampler": ("qwen3.5_9b_flux3_prompt_upsampler_w4a8.safetensors", ("text_encoders", "clip")),
            },
            "text_encoders": ("qwen3vl_4b_int8_convrot.safetensors", "qwen3vl_4b_bf16.safetensors")},
+    FIBO: {"label": "FIBO 2.0 Edit Turbo", "references": 4, "grid": 16, "edit_only": True,
+           "files": {
+               "diffusion_model": ("fibo2_edit_turbo_int8_convrot.safetensors", ("diffusion_models", "unet")),
+               "text_encoder": ("qwen3vl_4b_int8_convrot.safetensors", ("text_encoders", "clip")),
+               "vae": ("flux2-vae.safetensors", ("vae",)),
+           }, "text_encoders": ("qwen3vl_4b_int8_convrot.safetensors", "qwen3vl_4b_bf16.safetensors")},
 }
 UPSAMPLERS = ("qwen3.5_9b_flux3_prompt_upsampler_w4a8.safetensors",
               "qwen3.5_9b_flux3_prompt_upsampler_int8_convrot.safetensors",
@@ -77,6 +84,8 @@ def compatible_name(name, kind, model):
     if kind == "diffusion_model":
         if any(part in name for part in ("vae", "lora", "encoder")):
             return False
+        if model == FIBO:
+            return name.startswith("fibo2editturbo")
         return name.startswith("qwenimage21") if model == MODEL else name.startswith("flux3")
     if kind == "text_encoder":
         return name.startswith("qwen3vl8b" if model == MODEL else "qwen3vl4b")

@@ -9,7 +9,7 @@ import types
 import unittest
 from unittest.mock import Mock, patch
 from PIL import Image
-from genstudio.models import MODEL, FLUX, MODELS, catalog, resolve_components, extra_paths
+from genstudio.models import MODEL, FLUX, FIBO, MODELS, catalog, resolve_components, extra_paths
 from genstudio.settings import defaults, validate, active_components, component_defaults
 from genstudio.core_pipeline import DirectPipeline
 from genstudio.flux_pipeline import FluxPipeline
@@ -90,6 +90,15 @@ class LoraTests(unittest.TestCase):
                 masked=build_workflow(config,"image.png","mask.png",0,"remove")
                 studio=studio_workflow(config,[],0,"scene",512,512,{"TextEncodeQwenImage21":{"input":{}}})
                 self.assertEqual(masked["8"]["inputs"]["clip"],["15",1])
+            elif family==FIBO:
+                from genstudio.fibo_workflow import workflow as fibo_workflow
+                masked=fibo_workflow(config,['image.png'],0,'remove',512,512,constant_lora=True)
+                studio=fibo_workflow(config,['image.png'],0,'scene',512,512)
+                self.assertEqual(masked['4']['inputs']['clip'],['15',1])
+                self.assertEqual(masked['12']['inputs']['model'],['15',0])
+                self.assertEqual(masked['15']['inputs']['strength_model'],.7)
+                self.assertNotIn('15',studio)
+                continue
             else:
                 masked=workflow(config,[],0,"remove",512,512,constant_lora=True)
                 studio=workflow(config,[],0,"scene",512,512)

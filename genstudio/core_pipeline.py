@@ -95,13 +95,15 @@ class DirectPipeline:
         self.pipe = model, clip, vae
         return self.pipe
 
-    def generate_studio(self, references, seed, prompt, width, height, cancel, progress):
+    def generate_studio(self, references, seed, prompt, width, height, cancel, progress, *, loras=None):
         """Qwen 2.1 generation: zero target latent and up to ten image slots."""
         if cancel.is_set():
             raise Cancelled()
         if len(references) > 10 or width % 32 or height % 32 or not 256 <= width <= 2048 or not 256 <= height <= 2048:
             raise ValueError("Invalid Qwen generation dimensions or reference count.")
         model, clip, vae = self.load(progress)
+        from .lora import apply_studio
+        model, clip = apply_studio(model, clip, self.models, loras, progress)
         import numpy as np
         import torch
         import comfy.sample

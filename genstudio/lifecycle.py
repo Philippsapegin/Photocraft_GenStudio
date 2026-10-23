@@ -258,16 +258,16 @@ class EngineHost:
             with self.lock:
                 self.busy = False
 
-    def generate_studio(self, references, seed, prompt, width, height, cancel, progress):
+    def generate_studio(self, references, seed, prompt, width, height, cancel, progress, *, loras=None):
         with self.work_lock:
             with self.lock:
                 self.busy = True
             try:
                 self.ensure("request", progress, cancel, studio=True)
                 if self.engine == "comfy":
-                    return ComfyClient(self.config()).generate_studio(references, seed, prompt, width, height, cancel, progress)
+                    return ComfyClient(self.config()).generate_studio(references, seed, prompt, width, height, cancel, progress, loras=loras)
                 from .direct_client import generate_studio
-                return generate_studio(references, seed, prompt, width, height, cancel, progress, base=self.direct_url)
+                return generate_studio(references, seed, prompt, width, height, cancel, progress, base=self.direct_url, loras=loras)
             finally:
                 with self.lock:
                     self.busy = False

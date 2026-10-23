@@ -13,15 +13,17 @@ pub struct ModelSpec {
 }
 impl ModelSpec {
     pub fn chip(self, ordinal: usize) -> String {
-        if self.zero_based { format!("<ref_image_{}>", ordinal.saturating_sub(1)) } else { format!("[Image {ordinal}]") }
+        if self.id == "fibo-2-edit-turbo" { format!("<image_{ordinal}>") }
+        else if self.zero_based { format!("<ref_image_{}>", ordinal.saturating_sub(1)) } else { format!("[Image {ordinal}]") }
     }
     pub fn reference(self, ordinal: usize) -> String {
-        if self.zero_based { self.chip(ordinal) } else { format!("image {ordinal}") }
+        if self.zero_based || self.id == "fibo-2-edit-turbo" { self.chip(ordinal) } else { format!("image {ordinal}") }
     }
 }
-pub const MODELS: [ModelSpec; 2] = [
+pub const MODELS: [ModelSpec; 3] = [
     ModelSpec { id: "qwen-image-2.1-turbo", label: "Qwen Image 2.1", reference_limit: 10, zero_based: false },
     ModelSpec { id: "flux-3-image-klein", label: "FLUX 3", reference_limit: 10, zero_based: true },
+    ModelSpec { id: "fibo-2-edit-turbo", label: "FIBO 2.0 Edit Turbo", reference_limit: 4, zero_based: false },
 ];
 pub fn model_spec(id: &str) -> Option<ModelSpec> {
     MODELS.into_iter().find(|m| m.id == id)

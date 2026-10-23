@@ -9,6 +9,7 @@ A work-in-progress suite for [PhotoCraft](https://github.com/storytold/photocraf
 - **Preset-based setup:** compatible model components are selected automatically. Advanced settings let you choose your own model, text encoder, VAE and FLUX prompt upsampler, including INT8 and other supported formats.
 - **Native tools, uncluttered workspace:** editing tools stay inside PhotoCraft; configuration lives in **Edit → Preferences → GenGate Settings**.
 - **Constant LoRA:** an optional adapter with adjustable strength for Ai Fill and Remove Brush. It is separate from full image generation.
+- **LoRA Explorer:** browse `models/loras`, set strengths, aliases and trigger words. Drag a LoRA into the prompt to append its triggers. Drag a layer into GenGate to reuse its image, prompt and adapter settings; reference slots accept just its image.
 - **Optional economy mode:** small AI edits keep their original resolution; larger crops reduce progressively, by no more than 2×.
 
 ## Tools
@@ -27,7 +28,6 @@ A work-in-progress suite for [PhotoCraft](https://github.com/storytold/photocraf
 
 Planned:
 
-- Convenient LoRA syntax in the main generation window.
 - More presets for leading open-source image models.
 - Custom providers.
 - ComfyUI nodes for experimenting with node spaghetti.
@@ -71,6 +71,18 @@ Download the components for the preset you want. Use the linked single-file chec
 | Prompt upsampler | `qwen3.5_9b_flux3_prompt_upsampler_w4a8.safetensors` | [W4A8 · 6.72 GB](https://huggingface.co/ml-resources/flux-3-image-klein-comfy/resolve/3ba0f7064cbb1666a71e2820d3cc5c2273bb6cd0/text_encoders/qwen3.5_9b_flux3_prompt_upsampler_w4a8.safetensors?download=true) |
 | VAE | `flux2-vae.safetensors` | [0.34 GB](https://huggingface.co/ml-resources/flux-3-image-klein-comfy/resolve/3ba0f7064cbb1666a71e2820d3cc5c2273bb6cd0/vae/flux2-vae.safetensors?download=true) |
 
+**FIBO 2.0 Edit Turbo**
+
+Four-step editing with up to four references, using plain instructions or VGL JSON. Add an image to edit; this preset does not offer text-to-image. Advanced discovery selects Turbo, not Dev. Encoder and VAE are shared with FLUX where already installed.
+
+| Component | File | Download |
+| --- | --- | --- |
+| Model | `fibo2_edit_turbo_int8_convrot.safetensors` | [INT8 · 8.41 GB](https://huggingface.co/Comfy-Org/Fibo-2.0/resolve/b2bffaf57d48825a6989b986f24d5cfb8c71231b/diffusion_models/fibo2_edit_turbo_int8_convrot.safetensors) |
+| Text encoder | `qwen3vl_4b_int8_convrot.safetensors` | [INT8 · 4.86 GB](https://huggingface.co/Comfy-Org/Fibo-2.0/resolve/b2bffaf57d48825a6989b986f24d5cfb8c71231b/text_encoders/qwen3vl_4b_int8_convrot.safetensors) |
+| VAE | `flux2-vae.safetensors` | [0.34 GB](https://huggingface.co/Comfy-Org/Fibo-2.0/resolve/b2bffaf57d48825a6989b986f24d5cfb8c71231b/vae/flux2-vae.safetensors) |
+
+FIBO weights are CC BY-NC 4.0; commercial use requires an agreement with Bria. See the [publisher's model card](https://huggingface.co/briaai/Fibo-2.0-edit-turbo).
+
 **Independent Selection Engine**
 
 | Component | Download |
@@ -84,14 +96,14 @@ Enabling AI segmentation downloads its selected components automatically and reu
 
 ```text
 models/
-  diffusion_models/   # Qwen / FLUX image model
+  diffusion_models/   # Qwen / FLUX / FIBO image model
   text_encoders/      # Text encoder and FLUX prompt upsampler
   vae/               # VAE
   loras/             # Optional adapters, selected manually
   segmentation/      # YOLO-World and SAM3 .pt files
 ```
 
-Both presets can share this folder. Nested folders, `unet` / `clip` aliases and a flat folder also work. If discovery misses a component, select it using **Advanced → Browse**. Sizes above are download sizes, not VRAM requirements.
+All presets can share this folder. Nested folders, `unet` / `clip` aliases and a flat folder also work. If discovery misses a component, select it using **Advanced → Browse**. Sizes above are download sizes, not VRAM requirements.
 
 ## Development and licenses
 

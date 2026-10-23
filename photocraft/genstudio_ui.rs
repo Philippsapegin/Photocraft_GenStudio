@@ -322,6 +322,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         });
         if let (Some(response), Some((drag, toggle, _))) = (response, header) {
             let rect = response.response.rect;
+            crate::genstudio_canvas::set_window_rect(app,rect);
             if down
                 && drag.is_pointer_button_down_on()
                 && app.ui.gen_studio.drag_offset.is_none()
@@ -346,6 +347,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             crate::notices::error(app, e);
         }
     }
+    crate::genstudio_lora_ui::show(app,ctx);
 }
 
 fn component(ui: &mut egui::Ui, label: &str, value: &mut String, catalog: &Value, key: &str, default: &str, strength: Option<&mut f64>) -> bool {

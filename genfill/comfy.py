@@ -54,10 +54,13 @@ class ComfyClient:
     def inspect(self, studio=False, constant_lora=None) -> tuple[dict, list[str]]:
         info = self.request("/object_info", timeout=30)
         flux = self.config.get("model") == "flux-3-image-klein"
+        fibo = self.config.get('model') == 'fibo-2-edit-turbo'
         if flux:
             from genstudio.flux_workflow import NODES
-        required = NODES if flux else STUDIO_NODES if studio else REQUIRED_NODES
-        problems = [f"Missing node {name}. " + ("Update ComfyUI to 0.41.3 or newer." if flux else "Update ComfyUI." if studio else "Update ComfyUI and install LanPaint.")
+        if fibo:
+            from genstudio.fibo_workflow import NODES
+        required = NODES if flux or fibo else STUDIO_NODES if studio else REQUIRED_NODES
+        problems = [f"Missing node {name}. " + ("Update ComfyUI with native FIBO 2 support, or select Direct." if fibo else "Update ComfyUI to 0.41.3 or newer." if flux else "Update ComfyUI." if studio else "Update ComfyUI and install LanPaint.")
                     for name in required if name not in info]
         components = [("UNETLoader", "unet_name", "diffusion_model"),
                                         ("CLIPLoader", "clip_name", "text_encoder"),
@@ -66,6 +69,8 @@ class ComfyClient:
             components.append(("CLIPLoader", "clip_name", "prompt_upsampler"))
             if "CLIPLoader" in info and "flux3" not in self.choices(info, "CLIPLoader", "type"):
                 problems.append("FLUX 3 Klein requires ComfyUI 0.41.3 or newer. Update your ComfyUI, or select Direct.")
+        if fibo and 'CLIPLoader' in info and 'fibo2' not in self.choices(info, 'CLIPLoader', 'type'):
+            problems.append('FIBO 2 requires ComfyUI with native TextEncodeFibo2 support (2026-10-21 or newer), or select Direct.')
         edit = not studio if constant_lora is None else constant_lora
         if edit and self.config.get("constant_lora") and self.config.get("constant_lora_strength", 1.0):
             if "LoraLoader" not in info:
@@ -96,11 +101,14 @@ class ComfyClient:
 
     def generate(self, image: Image.Image, mask: Image.Image, seed: int, prompt: str,
                  cancel, progress) -> Image.Image:
-        if self.config.get("model") == "flux-3-image-klein":
+        if self.config.get("model") in ('flux-3-image-klein', 'fibo-2-edit-turbo'):
             from genstudio.core_pipeline import inpaint_references
             from genstudio.flux_pipeline import masked_prompt
             reference, coverage = inpaint_references(image, mask)
-            return self.generate_studio([reference, coverage], seed, masked_prompt(prompt),
+            instruction = masked_prompt(prompt)
+            if self.config.get('model') == 'fibo-2-edit-turbo':
+                instruction = 'Edit <image_1> using the white edit region in <image_2>. The gray region is missing content. ' + prompt + ' Return the edited first image only.'
+            return self.generate_studio([reference, coverage], seed, instruction,
                                         image.width, image.height, cancel, progress, _constant_lora=True)
         info, problems = self.inspect()
         if problems:
@@ -116,10 +124,19 @@ class ComfyClient:
         workflow = build_workflow(self.config, image_name, mask_name, seed, prompt, info)
         return self.run_workflow(workflow, cancel, progress, uid)
 
-    def generate_studio(self, references, seed, prompt, width, height, cancel, progress, *, _constant_lora=False):
+    def generate_studio(self, references, seed, prompt, width, height, cancel, progress, *, _constant_lora=False, loras=None):
         info, problems = self.inspect(studio=True, constant_lora=_constant_lora)
         if problems:
             raise RuntimeError("\n".join(problems))
+        from genstudio.lora import validate_studio
+        loras = validate_studio(loras or [])
+        if loras:
+            if 'LoraLoader' not in info:
+                raise RuntimeError('Missing node LoraLoader. Update ComfyUI.')
+            available = self.choices(info, 'LoraLoader', 'lora_name')
+            for item in loras:
+                if item['path'] not in available:
+                    raise RuntimeError('ComfyUI cannot find LoRA: ' + item['path'])
         uid = uuid.uuid4().hex
         names = []
         for index, image in enumerate(references):
@@ -129,11 +146,19 @@ class ComfyClient:
             if self.config.get("model") == "flux-3-image-klein":
                 image = Image.alpha_composite(Image.new("RGBA", image.size, "white"), image.convert("RGBA")).convert("RGB")
             names.append(self.upload(f"genstudio-{uid}-{index}.png", png_bytes(image)))
-        if self.config.get("model") == "flux-3-image-klein":
+        if self.config.get('model') == 'fibo-2-edit-turbo':
+            from genstudio.fibo_workflow import workflow as fibo_workflow
+            workflow = fibo_workflow(self.config, names, seed, prompt, width, height, loras=loras, constant_lora=_constant_lora)
+        elif self.config.get("model") == "flux-3-image-klein":
             from genstudio.flux_workflow import workflow as flux_workflow
             workflow = flux_workflow(self.config, names, seed, prompt, width, height, info, constant_lora=_constant_lora)
         else:
             workflow = studio_workflow(self.config, names, seed, prompt, width, height, info)
+        if loras and self.config.get('model') != 'fibo-2-edit-turbo':
+            from genstudio.lora import studio_graph
+            model, clip = studio_graph(workflow, workflow['4']['inputs']['model'], ['2', 0], loras)
+            workflow['4']['inputs']['model'] = model
+            workflow['7' if self.config.get('model') == 'flux-3-image-klein' else '8']['inputs']['clip'] = clip
         return self.run_workflow(workflow, cancel, progress, uid)
 
     def run_workflow(self, workflow, cancel, progress, uid):

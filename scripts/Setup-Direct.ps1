@@ -18,6 +18,8 @@ if ($ComfySource) {
 if ($LASTEXITCODE) { throw 'Could not prepare the direct model library.' }
 & $projectPython (Join-Path $PSScriptRoot 'prepare_flux_core.py')
 if ($LASTEXITCODE) { throw 'Could not prepare the FLUX 3 model library.' }
+& $projectPython (Join-Path $PSScriptRoot 'prepare_fibo_core.py')
+if ($LASTEXITCODE) { throw 'Could not prepare the FIBO 2 model library.' }
 if ($InstallDependencies) {
     # Explicit opt-in; reuse an existing GPU Python without duplicating its packages.
     $uv = Get-Command uv -ErrorAction Stop
@@ -27,5 +29,7 @@ if ($InstallDependencies) {
 $uv = Get-Command uv -ErrorAction Stop
 & $uv.Source pip install --python $Python --target (Join-Path $projectRoot '.runtime\flux-core\deps') --no-deps -r (Join-Path $projectRoot 'photocraft\flux-requirements.txt')
 if ($LASTEXITCODE) { throw 'Could not install the isolated FLUX 3 dependencies.' }
+& $uv.Source pip install --python $Python --target (Join-Path $projectRoot '.runtime\fibo-core\deps') --no-deps -r (Join-Path $projectRoot 'photocraft\fibo-requirements.txt')
+if ($LASTEXITCODE) { throw 'Could not install the isolated FIBO 2 dependencies.' }
 Write-Host "Direct runtime Python: $Python"
 Write-Host 'Select your existing Models folder in GenGate Settings. No model weights were downloaded or loaded.'

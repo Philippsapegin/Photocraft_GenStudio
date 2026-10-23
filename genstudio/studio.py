@@ -25,6 +25,10 @@ def request(value, model="qwen-image-2.1-turbo"):
     refs = value.get("references", [])
     if not isinstance(refs, list) or len(refs) > spec["references"]:
         raise ValueError(f"{spec['label']} supports up to {spec['references']} reference images.")
+    if spec.get('edit_only') and not refs:
+        raise ValueError('Add a source image to edit with FIBO 2.0 Edit Turbo.')
+    from .lora import validate_studio
+    loras = validate_studio(value.get('loras', []))
     width = bounded_int(value.get("width", 1024), 256, 2048, "Width")
     height = bounded_int(value.get("height", 1024), 256, 2048, "Height")
     grid = spec["grid"]
@@ -41,7 +45,7 @@ def request(value, model="qwen-image-2.1-turbo"):
         # by resizing every image to the output canvas dimensions.
         w, h = (max(grid, round(side / grid) * grid) for side in image.size)
         images.append(image.resize((w, h), Image.Resampling.LANCZOS))
-    return {"prompt": prompt, "references": images, "width": width, "height": height, "batch": count, "seed": seed}
+    return {"prompt": prompt, "references": images, "width": width, "height": height, "batch": count, "seed": seed, "loras": loras}
 
 
 class StudioJobs:
@@ -54,6 +58,9 @@ class StudioJobs:
     def submit(self, body):
         model = self.host.settings["model"]
         data = request(body, model)
+        from .lora import validate_studio
+        if data['loras']:
+            validate_studio(data['loras'], self.host.settings['modelsDir'])
         # Publish the queued job under the same lock used by /engine changes.
         # Validation may decode large images, so do it before taking that lock,
         # then reject a concurrent model change rather than using the wrong one.
@@ -89,7 +96,8 @@ class StudioJobs:
                 if job.cancel.is_set():
                     raise Cancelled()
                 output = self.host.generate_studio(data["references"], data["seed"] + index,
-                    data["prompt"], data["width"], data["height"], job.cancel, progress)
+                    data["prompt"], data["width"], data["height"], job.cancel, progress,
+                    **({'loras': data['loras']} if data['loras'] else {}))
                 if output.size != (data["width"], data["height"]):
                     raise RuntimeError("The engine returned the wrong generation dimensions.")
                 images.append({"image": base64.b64encode(png_bytes(output)).decode("ascii"), "seed": data["seed"] + index})

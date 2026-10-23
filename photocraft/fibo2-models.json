@@ -1,0 +1,11 @@
+{
+  "model": "fibo-2-edit-turbo",
+  "repository": "Comfy-Org/Fibo-2.0",
+  "revision": "b2bffaf57d48825a6989b986f24d5cfb8c71231b",
+  "license": "CC-BY-NC-4.0",
+  "files": [
+    {"path": "diffusion_models/fibo2_edit_turbo_int8_convrot.safetensors", "bytes": 8408562474, "sha256": "1f6fa7c499191f405467123f655f11762661eaa5bd479d1da8f161398ef72c3b"},
+    {"path": "text_encoders/qwen3vl_4b_int8_convrot.safetensors", "bytes": 4858559240, "sha256": "32de113cbf8282b02cbff0794b637b9d6676da09314a1db5a30bcea9bf4ee01c"},
+    {"path": "vae/flux2-vae.safetensors", "bytes": 336211292, "sha256": "868fe7b343cc8f3a19dbcfcafbc3d5f888802be3f89bd81b65b3621a066ce8f3"}
+  ]
+}

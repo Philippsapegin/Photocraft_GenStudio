@@ -19,10 +19,11 @@ pub struct Workspace {
     pub resolution: u32,
     pub aspect_ratio: String,
     pub monospace: bool,
+    pub loras: crate::genstudio_lora_ui::State,
 }
 impl Default for Workspace {
     fn default() -> Self {
-        Self { prompt: String::new(), batch: 1, resolution: 1024, aspect_ratio: "1:1".into(), monospace: false }
+        Self { prompt: String::new(), batch: 1, resolution: 1024, aspect_ratio: "1:1".into(), monospace: false, loras: Default::default() }
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -74,6 +75,8 @@ pub struct Cache {
     generation: Option<(JobId, u64)>,
     main_revision: u64,
     selection_doc: Option<std::sync::Weak<photocraft_doc::Document>>,
+    layer_capture: Option<(JobId, Slot, bool, u64)>,
+    window_rect: Option<Rect>,
 }
 #[derive(Clone)]
 struct RefDrag(u64);
@@ -106,15 +109,11 @@ fn next_slot(cache: &Cache) -> Option<Slot> {
 }
 // A chip is a reference identity, not a global replacement of image numbers.
 // Leave JSON, filenames and user-authored prose untouched.
-fn marker(text: &str) -> Option<(usize, usize, char, bool)> {
-    match (text.find("[Image "), text.find("<ref_image_")) {
-        (Some(a), Some(b)) if a <= b => Some((a, 7, ']', false)),
-        (_, Some(b)) => Some((b, 11, '>', true)),
-        (Some(a), None) => Some((a, 7, ']', false)),
-        _ => None,
-    }
+fn marker(text: &str) -> Option<(usize, usize, char, usize)> {
+    [("[Image ", 7, ']', 0), ("<ref_image_", 11, '>', 1), ("<image_", 7, '>', 2)]
+        .into_iter().filter_map(|(prefix,n,end,style)|text.find(prefix).map(|at|(at,n,end,style))).min_by_key(|v|v.0)
 }
-fn rewrite(prompt: &str, strict: bool, mut chip: impl FnMut(usize, bool) -> Result<String, String>) -> Result<String, String> {
+fn rewrite(prompt: &str, strict: bool, mut chip: impl FnMut(usize, usize) -> Result<String, String>) -> Result<String, String> {
     let mut out = String::new();
     let mut rest = prompt;
     while let Some((start, prefix, suffix, flux)) = marker(rest) {
@@ -122,7 +121,7 @@ fn rewrite(prompt: &str, strict: bool, mut chip: impl FnMut(usize, bool) -> Resu
         let tail = rest.get(start..).unwrap_or_default();
         if let Some(end) = tail.find(suffix)
             && let Some(number) = tail.get(prefix..end).and_then(|s| s.parse::<usize>().ok())
-            && let Some(ordinal) = if flux { number.checked_add(1) } else { Some(number) }
+            && let Some(ordinal) = if flux == 1 { number.checked_add(1) } else { Some(number) }
         {
             out.push_str(&chip(ordinal, flux)?);
             rest = tail.get(end + 1..).unwrap_or_default();
@@ -138,7 +137,7 @@ fn rewrite(prompt: &str, strict: bool, mut chip: impl FnMut(usize, bool) -> Resu
 }
 fn renumber(prompt: &str, before: &[u64], after: &[u64]) -> String {
     rewrite(prompt, false, |ordinal, flux| {
-        let model = if flux { MODELS[1] } else { MODELS[0] };
+        let model = MODELS.get(flux).copied().unwrap_or(MODELS[0]);
         let Some(id) = ordinal.checked_sub(1).and_then(|n| before.get(n)) else {
             return Ok(model.chip(ordinal));
         };
@@ -291,7 +290,19 @@ fn capture_result(cache: &mut Cache, result: &Value, ticket: u64) -> Result<(), 
     start_load(cache, Slot::Main, result["name"].as_str().unwrap_or("Selection").into(), result["source"] != "generated", move || Ok(bytes))
 }
 pub fn menu(app: &mut PhotocraftApp, id: &str, p: &Value) -> Option<Result<Value, String>> {
+    if let Some(result) = crate::genstudio_lora_ui::menu(app,id,p) { return Some(result); }
     match id {
+        "genstudio.studio.layer.restore" => Some((|| {
+            let target = if p.get("slot").is_some() { slot(p)? } else { Slot::Main };
+            let restore = p.get("restore").map_or(Ok(true), |v|v.as_bool().ok_or("Restore must be boolean"))?;
+            let result = app.run("genstudio.studio.layer.source",p.clone())?;
+            app.studio.next=app.studio.next.wrapping_add(1);
+            let ticket=app.studio.next;
+            app.studio.loading.insert(target,ticket);
+            if let Some(id)=result["job"].as_u64() { app.studio.layer_capture=Some((JobId(id),target,restore,ticket)); }
+            else { apply_layer(app,target,restore,&result,ticket)?; }
+            Ok(result)
+        })()),
         "genstudio.studio.inspect" => Some(Ok(app.studio.info.clone())),
         "genstudio.studio.configure" => Some((|| {
             let mut state = app.ui.gen_studio.workspace.clone();
@@ -362,14 +373,15 @@ pub fn menu(app: &mut PhotocraftApp, id: &str, p: &Value) -> Option<Result<Value
                 return Err("Wait for references to finish loading".into());
             }
             let state = &app.ui.gen_studio.workspace;
-            let references: Vec<_> = app.studio.main.iter().chain(app.studio.extras.iter().filter_map(Option::as_ref)).collect();
             let model = model_spec(&app.session.prefs().gen_studio.model).ok_or("Choose a supported model")?;
+            let references: Vec<_> = app.studio.main.iter().chain(app.studio.extras.iter().take(model.reference_limit.saturating_sub(1)).filter_map(Option::as_ref)).collect();
             let prompt = compiled_for(&state.prompt, references.len(), model)?;
             let (width, height) = dimensions(state.resolution, app.studio.main.as_ref().map(|r| r.image.dimensions()), &state.aspect_ratio);
             let references: Vec<_> = references.into_iter().map(|r| r.png.clone()).collect();
             let result = app.run(
                 "genstudio.studio.generate",
-                json!({"prompt":prompt,"sourcePrompt":state.prompt,"references":references,"width":width,"height":height,"batch":state.batch}),
+                json!({"prompt":prompt,"sourcePrompt":state.prompt,"references":references,"width":width,"height":height,"batch":state.batch,
+                    "loras":crate::genstudio_lora_ui::selected(&state.loras,&app.session.prefs().gen_studio.models_dir)}),
             )?;
             if app.studio.main.is_none() {
                 if let Some(id) = result["job"].as_u64() {
@@ -416,7 +428,47 @@ fn generated_reference(app: &mut PhotocraftApp, result: &Value) -> Result<(), St
     }
     Ok(())
 }
+fn apply_layer(app: &mut PhotocraftApp, target: Slot, restore: bool, result: &Value, ticket: u64) -> Result<(), String> {
+    if app.studio.loading.get(&target)!=Some(&ticket) { return Ok(()); }
+    let bytes=base64::engine::general_purpose::STANDARD.decode(result["image"].as_str().ok_or("Layer image is missing")?).map_err(err)?;
+    if restore {
+        let values:Vec<photocraft_engine::genstudio_lora::Selection>=serde_json::from_value(result["generation"].get("loras").cloned().unwrap_or_else(||json!([]))).map_err(err)?;
+        let models=app.session.prefs().gen_studio.models_dir.clone();
+        crate::genstudio_lora_ui::restore(&mut app.ui.gen_studio.workspace.loras,&models,&values)?;
+        if let Some(model)=result["generation"]["model"].as_str().filter(|id|model_spec(id).is_some()) {
+            app.session.edit_prefs(|p|p.gen_studio.model=model.into());
+        }
+        for slot in app.studio.extras.iter_mut(){*slot=None;}
+        app.studio.loading.retain(|slot,_|*slot==target);
+        app.studio.main=None;
+        app.studio.capture=None;app.studio.generation=None;
+        app.ui.gen_studio.workspace.prompt=result["prompt"].as_str().unwrap_or_default().into();
+        app.ui.gen_studio.workspace.resolution=if result["generation"]["width"].as_u64().unwrap_or(1024)>1024 {2048}else{1024};
+    }
+    start_load(&mut app.studio,target,result["name"].as_str().unwrap_or("Layer").into(),false,move||Ok(bytes))
+}
+pub fn set_window_rect(app: &mut PhotocraftApp, rect: Rect) {app.studio.window_rect=Some(rect);}
+pub fn layer_drop(app: &mut PhotocraftApp, ctx: &egui::Context, document: u64, layer: u64) -> bool {
+    if !app.ui.gen_studio.open || app.ui.gen_studio.collapsed {return false;}
+    let Some(at)=ctx.pointer_latest_pos() else{return false};
+    if !app.studio.window_rect.is_some_and(|rect|rect.contains(at)){return false;}
+    let slot=app.studio.rects.iter().find(|(_,rect)|rect.contains(at)).map_or(Slot::Main,|(slot,_)|*slot);
+    let mut params=json!({"documentId":document,"layer":layer,"restore":matches!(slot,Slot::Main)});
+    if let Slot::Extra(i)=slot {params["slot"]=json!(i);}
+    if let Err(e)=crate::menus::invoke(app,ctx,"genstudio.studio.layer.restore",params){crate::notices::error(app,e);}
+    true
+}
 pub fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    if let Some((id,slot,restore,ticket))=app.studio.layer_capture
+        && let Some(job)=app.session.jobs_with_recent().into_iter().find(|j|j.id==id && j.state!="running") {
+        app.studio.layer_capture=None;
+        if job.state=="done" {
+            if let Err(e)=apply_layer(app,slot,restore,&job.result.unwrap_or(Value::Null),ticket){crate::notices::error(app,e);}
+        } else {
+            app.studio.loading.remove(&slot);
+            crate::notices::error(app,job.error.unwrap_or("Layer capture cancelled".into()));
+        }
+    }
     if let Some((id, revision)) = app.studio.generation
         && let Some(job) = app.session.jobs_with_recent().into_iter().find(|j| j.id == id && j.state != "running")
     {
@@ -662,6 +714,14 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> Vec<(&'static str, Va
                     .show(ui)
             });
         let output = scroll.inner;
+        let mut edit = output.state;
+        let mut inserted = false;
+        if egui::DragAndDrop::payload::<crate::genstudio_lora_ui::Drag>(ui.ctx()).is_some()
+            && let Some(payload)=output.response.dnd_release_payload::<crate::genstudio_lora_ui::Drag>() {
+            crate::genstudio_lora_ui::append(&mut state.prompt,&payload.triggers);
+            edit.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(state.prompt.chars().count()))));
+            inserted = true;
+        }
         cache.prompt_rect = Some(prompt_rect);
         if let Some(payload) = output.response.dnd_release_payload::<RefDrag>()
             && let Some(index) = ids(&cache).iter().position(|id| *id == payload.0)
@@ -672,8 +732,10 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> Vec<(&'static str, Va
                 .map(|p| usize::from(output.galley.cursor_from_pos(p - output.galley_pos).index))
                 .unwrap_or_else(|| state.prompt.chars().count());
             let cursor = insert_for(&mut state.prompt, at, index + 1, model);
-            let mut edit = output.state;
             edit.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(cursor))));
+            inserted = true;
+        }
+        if inserted {
             edit.store(ui.ctx(), output.response.id);
             output.response.request_focus();
         }
@@ -726,9 +788,13 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> Vec<(&'static str, Va
         if text_mode.clicked() {
             state.monospace = !state.monospace;
         }
+        let loras=ui.add_enabled(crate::genstudio_lora_ui::available(&app.session.prefs().gen_studio.models_dir),egui::Button::new("LoRAs").min_size(vec2(54.0,control_height)));
+        controls["loras"]=rect_json(loras.rect);
+        if loras.clicked(){actions.push(("genstudio.loras.open",json!({})));}
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let running = app.session.jobs().iter().any(|j| j.command == "genstudio.studio.generate" && j.state == "running");
-            let ready = !running && cache.loading.is_empty() && !state.prompt.trim().is_empty();
+            let ready = !running && cache.loading.is_empty() && !state.prompt.trim().is_empty()
+                && (model.id!="fibo-2-edit-turbo" || !ids(&cache).is_empty());
             let generate = ui.add_enabled(
                 ready,
                 egui::Button::new(egui::RichText::new("Generate").color(accent_label(&tokens))).min_size(vec2(72.0, control_height)).fill(tokens.accent),
@@ -748,7 +814,7 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> Vec<(&'static str, Va
     ui.small("Reference images");
     ui.add_space(4.0);
     let mut visible: Vec<Slot> =
-        cache.extras.iter().enumerate().filter(|(i, r)| r.is_some() || cache.loading.contains_key(&Slot::Extra(*i))).map(|(i, _)| Slot::Extra(i)).collect();
+        cache.extras.iter().enumerate().take(model.reference_limit.saturating_sub(1)).filter(|(i, r)| r.is_some() || cache.loading.contains_key(&Slot::Extra(*i))).map(|(i, _)| Slot::Extra(i)).collect();
     if let Some(blank) = next_slot(&cache) {
         visible.push(blank);
     }
@@ -762,7 +828,7 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> Vec<(&'static str, Va
     let list: Vec<_> = cache
         .main
         .iter()
-        .chain(cache.extras.iter().filter_map(Option::as_ref))
+        .chain(cache.extras.iter().take(model.reference_limit.saturating_sub(1)).filter_map(Option::as_ref))
         .enumerate()
         .map(|(i, r)| json!({"id":r.id,"number":i+1,"chip":model.chip(i+1),"name":r.name,"width":r.image.width(),"height":r.image.height()}))
         .collect();
@@ -770,6 +836,7 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> Vec<(&'static str, Va
             "loading":!cache.loading.is_empty(),"promptRect":cache.prompt_rect.map(|r|[r.min.x,r.min.y,r.width(),r.height()]),
         "slots":cache.rects.iter().map(|(s,r)|json!({"slot":match s {Slot::Main=>json!("main"),Slot::Extra(i)=>json!(i)},"rect":[r.min.x,r.min.y,r.width(),r.height()]})).collect::<Vec<_>>()});
     app.studio = cache;
+    app.studio.info["loras"]=crate::genstudio_lora_ui::info(app);
     actions
 }
 pub fn dropped(app: &mut PhotocraftApp, ctx: &egui::Context, files: &[egui::DroppedFileHandle], at: Option<egui::Pos2>) -> bool {
@@ -917,6 +984,55 @@ mod tests {
         app.ui.gen_studio.initialized = true;
         app.ui.gen_studio.workspace.prompt = "A quiet forest at sunrise".into();
         app
+    }
+    #[test]
+    fn a_lora_drag_appends_triggers_without_moving_reference_chips_or_changing_adapters() {
+        let mut app=fixture();app.ui.gen_studio.open=true;
+        let mut harness=egui_kittest::Harness::builder().with_size(vec2(1200.0,900.0)).build_ui_state(|ui,app:&mut PhotocraftApp|{
+            if ui.ctx().fonts(|f|f.families().contains(&egui::FontFamily::Name("medium".into()))){crate::genstudio_ui::show(app,ui.ctx());}
+        },app);
+        PhotocraftApp::setup_context(&harness.ctx,crate::theme::ThemeKind::Studio);harness.run_steps(6);
+        let to=harness.state().studio.prompt_rect.unwrap().center();
+        let from=pos2(10.0,10.0);
+        harness.event(egui::Event::PointerMoved(from));
+        harness.event(egui::Event::PointerButton{pos:from,button:egui::PointerButton::Primary,pressed:true,modifiers:egui::Modifiers::NONE});harness.run_steps(1);
+        egui::DragAndDrop::set_payload(&harness.ctx,crate::genstudio_lora_ui::Drag{triggers:"portrait, soft light".into()});
+        harness.event(egui::Event::PointerMoved(to));harness.run_steps(2);
+        harness.event(egui::Event::PointerButton{pos:to,button:egui::PointerButton::Primary,pressed:false,modifiers:egui::Modifiers::NONE});harness.run_steps(2);
+        assert!(harness.state().ui.gen_studio.workspace.prompt.ends_with("portrait, soft light"));
+        assert!(crate::genstudio_lora_ui::selected(&harness.state().ui.gen_studio.workspace.loras,"").is_empty());
+    }
+    #[test]
+    fn a_real_layers_panel_drag_loads_gengate_instead_of_reordering_the_document() {
+        use egui_kittest::kittest::Queryable;
+        let mut session=photocraft_engine::Session::new();
+        session.execute("file.new",json!({"width":64,"height":48})).unwrap();
+        session.execute("layer.new.layer",json!({"name":"GenGate drag fixture"})).unwrap();
+        session.execute("edit.fill",json!({"color":"#cc5533"})).unwrap();
+        let original=session.active().unwrap().doc.clone();
+        let mut h=egui_kittest::Harness::builder().with_size(vec2(1600.0,1000.0)).with_max_steps(64).build_eframe(move|cc|{
+            PhotocraftApp::setup_context(&cc.egui_ctx,crate::theme::ThemeKind::Studio);
+            let mut app=PhotocraftApp::new(session,crate::Services::default());
+            app.ui.gen_studio.open=true;app.ui.gen_studio.initialized=true;
+            app.ui.gen_studio.workspace.prompt="Clear on ordinary layer drop".into();
+            app
+        });
+        h.run_steps(8);
+        let from=h.get_by_role_and_label(egui::accesskit::Role::Button,"GenGate drag fixture").rect().center();
+        let to=h.state().studio.prompt_rect.unwrap().center();
+        h.event(egui::Event::PointerMoved(from));h.run_steps(1);
+        h.event(egui::Event::PointerButton{pos:from,button:egui::PointerButton::Primary,pressed:true,modifiers:egui::Modifiers::NONE});h.run_steps(1);
+        for i in 1..=8 {h.event(egui::Event::PointerMoved(from+(to-from)*(i as f32/8.0)));h.run_steps(1);}
+        h.event(egui::Event::PointerButton{pos:to,button:egui::PointerButton::Primary,pressed:false,modifiers:egui::Modifiers::NONE});
+        for _ in 0..100 {
+            h.run_steps(2);
+            if h.state().studio.main.as_ref().is_some_and(|r|r.name=="GenGate drag fixture") {break;}
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert_eq!(h.state().studio.main.as_ref().map(|r|r.name.as_str()),Some("GenGate drag fixture"));
+        assert!(h.state().ui.gen_studio.workspace.prompt.is_empty());
+        assert_eq!(h.state().session.active().unwrap().doc.layers.len(),original.layers.len());
+        assert_eq!(h.state().session.active().unwrap().doc.layers.iter().map(|l|l.id).collect::<Vec<_>>(),original.layers.iter().map(|l|l.id).collect::<Vec<_>>());
     }
     fn rect(value: &Value) -> Rect {
         Rect::from_min_size(

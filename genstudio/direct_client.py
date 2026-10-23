@@ -18,12 +18,12 @@ def generate(image, mask, seed, prompt, cancel, progress, *, base=DIRECT_URL):
     return wait(job, cancel, progress, base=base)
 
 
-def generate_studio(references, seed, prompt, width, height, cancel, progress, *, base=DIRECT_URL):
-    if http_json(base + "/health").get("studio_protocol", 0) < 1:
+def generate_studio(references, seed, prompt, width, height, cancel, progress, *, base=DIRECT_URL, loras=None):
+    if http_json(base + "/health").get("studio_protocol", 0) < (2 if loras else 1):
         raise RuntimeError("Restart the Direct engine in Preferences > GenGate to enable full-image generation.")
     job = http_json(base + "/jobs", {"kind": "studio", "references": [
         base64.b64encode(png_bytes(image)).decode("ascii") for image in references],
-        "prompt": prompt, "seed": seed, "width": width, "height": height}, timeout=60)
+        "prompt": prompt, "seed": seed, "width": width, "height": height, "loras": loras or []}, timeout=60)
     return wait(job, cancel, progress, base=base)
 
 
@@ -48,7 +48,7 @@ def wait(job, cancel, progress, *, base=DIRECT_URL):
             if job["state"] == "cancelled":
                 raise Cancelled()
             cancel.wait(0.25)
-        raise RuntimeError("Direct Qwen generation timed out.")
+        raise RuntimeError("Direct generation timed out.")
     finally:
         if not complete:
             try: http_json(path + "/cancel", {},timeout=2)

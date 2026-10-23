@@ -177,10 +177,12 @@ pub struct Generation {
     pub model: String,
     pub width: u32,
     pub height: u32,
+    #[serde(default)]
+    pub loras: Vec<crate::genstudio_lora::Selection>,
 }
 pub fn layer_generation(layer: &photocraft_doc::Layer) -> Result<Option<Generation>> {
     let Some((_, bytes)) = layer.psd_blocks.iter().find(|(key, _)| *key == PROMPT_BLOCK) else { return Ok(None) };
-    if bytes.len() > 32 << 10 {
+    if bytes.len() > 256 << 10 {
         return Err(error("Generation metadata is too large"));
     }
     let mut bytes = bytes.as_slice();
@@ -192,6 +194,7 @@ pub fn layer_generation(layer: &photocraft_doc::Layer) -> Result<Option<Generati
         }
     }
     let value: Generation = serde_json::from_slice(bytes).map_err(error)?;
+    crate::genstudio_lora::validate(&value.loras).map_err(error)?;
     if value.version != 1
         || value.prompt.len() > 12000
         || value.compiled_prompt.len() > 12000
@@ -240,6 +243,13 @@ fn generate(s: &mut Session, p: &Value) -> Result<Value> {
     validate(p)?;
     let settings = s.prefs().gen_studio.clone();
     settings.validate().map_err(error)?;
+    let loras: Vec<crate::genstudio_lora::Selection> = serde_json::from_value(p.get("loras").cloned().unwrap_or_else(|| json!([]))).map_err(error)?;
+    crate::genstudio_lora::validate(&loras).map_err(error)?;
+    let spec = crate::genstudio::model_spec(&settings.model).ok_or_else(|| error("Choose a supported preset"))?;
+    let reference_count = p["references"].as_array().map_or(0, Vec::len);
+    if reference_count > spec.reference_limit || (settings.model == "fibo-2-edit-turbo" && reference_count == 0) {
+        return Err(error("FIBO Edit Turbo needs 1 to 4 references; use a compatible reference count for the selected preset"));
+    }
     let source_prompt = p
         .get("sourcePrompt")
         .unwrap_or(&p["prompt"])
@@ -254,6 +264,7 @@ fn generate(s: &mut Session, p: &Value) -> Result<Value> {
         model: settings.model.clone(),
         width: p["width"].as_u64().unwrap_or(1024) as u32,
         height: p["height"].as_u64().unwrap_or(1024) as u32,
+        loras,
     };
     let target = s.active().map(|st| st.doc.id);
     let template = s.active().map(|st| (*st.doc).clone()).unwrap_or_else(|| {
@@ -322,6 +333,37 @@ fn import_results(s: &mut Session, target: Option<photocraft_doc::DocId>, prepar
     let id = s.documents().get(index).ok_or(crate::EngineError::NoDocument)?.doc.id.0;
     Ok(json!({"document":index,"documentId":id,"layers":ids,"count":count,"createdDocument":created}))
 }
+fn layer_source(s: &mut Session, p: &Value) -> Result<Value> {
+    let st = if let Some(id) = p.get("documentId") { s.documents().iter().find(|st| id.as_u64() == Some(st.doc.id.0)) } else { s.active() }
+        .ok_or(EngineError::NoDocument)?;
+    let id = p.get("layer").and_then(Value::as_u64).map(photocraft_doc::LayerId).or(st.active_layer).ok_or_else(|| error("Choose a layer"))?;
+    let layer = st.doc.layer(id).ok_or(EngineError::NoLayer(id))?;
+    let generation = layer_generation(layer)?;
+    let prompt = if let Some(ref meta) = generation { meta.prompt.clone() }
+        else if crate::genstudio_ai::is_layer(layer) { crate::genstudio_ai::gallery(layer)?.prompt }
+        else { String::new() };
+    let name = layer.name.clone();
+    let mut source = (*st.doc).clone();
+    let mut layer = layer.clone();
+    layer.visible = true;
+    source.layers = vec![layer];
+    let rect = photocraft_compose::layer_bounds(source.layers.first().ok_or_else(|| error("Layer is missing"))?, source.bounds()).intersect(&source.bounds());
+    let rect = if rect.is_empty() { source.bounds() } else { rect };
+    if u64::from(rect.width()) * u64::from(rect.height()) > 32 << 20 { return Err(error("Use a layer smaller than 32 million pixels")); }
+    crate::jobs::run(s, "Prepare layer for GenGate", false,
+        move |ctx| {
+            ctx.check()?;
+            let image = photocraft_compose::render(&source, rect);
+            let pixels: Vec<f32> = image.px.into_iter().flatten().collect();
+            let transform = Transform::new(&crate::color_cmds::composite_profile(&source), Builtin::Srgb.profile(), Intent::RelativeColorimetric, true).map_err(error)?;
+            let mut rgba = vec![0.0; pixels.len()];
+            transform.convert_f32(&pixels, 4, &mut rgba, 4, true);
+            ctx.check()?;
+            let image = Image::from_normalized(rect.width(), rect.height(), ChannelLayout::Rgba, SampleType::U8, &rgba).map_err(error)?;
+            encoded(&resized(&image, 1024)?)
+        }, move |_, image| Ok(json!({"image":image,"name":name,"source":"layer","prompt":prompt,"generation":generation})))
+}
+
 fn generated_layer<'a>(s: &'a Session, p: &Value) -> Result<(&'a photocraft_doc::Document, &'a photocraft_doc::Layer, Generation)> {
     let st = if let Some(id) = p.get("documentId") { s.documents().iter().find(|st| id.as_u64() == Some(st.doc.id.0)) } else { s.active() }
         .ok_or(crate::EngineError::NoDocument)?;
@@ -359,6 +401,8 @@ fn result_reference(s: &mut Session, p: &Value) -> Result<Value> {
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
+        CommandSpec { id: "genstudio.studio.layer.source", label: "Layer to GenGate", menu: &[], shortcut: None,
+            params: "{documentId?,layer?}", enabled: crate::commands::always, run: layer_source, journal: false },
         CommandSpec {
             id: "genstudio.studio.layer.inspect",
             label: "Generation prompt",
@@ -435,6 +479,7 @@ mod tests {
             model: "qwen-image-2.1-turbo".into(),
             width: 8,
             height: 8,
+            loras: vec![crate::genstudio_lora::Selection { path: "style/example.safetensors".into(), strength: 0.65 }],
         };
         let image = Image::from_u8(8, 8, ChannelLayout::Rgba, [20, 80, 120, 255].repeat(64)).unwrap();
         let template =
@@ -459,9 +504,11 @@ mod tests {
         let bytes = photocraft_format::save_to_bytes(doc, &Default::default()).unwrap();
         let loaded = photocraft_format::load_from_bytes(&bytes).unwrap();
         assert_eq!(layer_generation(loaded.layers.last().unwrap()).unwrap().unwrap().prompt, meta.prompt);
+        assert_eq!(layer_generation(loaded.layers.last().unwrap()).unwrap().unwrap().loras, meta.loras);
         let exported = photocraft_io::export(doc, "psd", &Default::default()).unwrap();
         let psd = photocraft_io::import("generated.psd", &exported.bytes).unwrap().document;
         assert_eq!(layer_generation(psd.layers.last().unwrap()).unwrap().unwrap().prompt, meta.prompt);
+        assert_eq!(layer_generation(psd.layers.last().unwrap()).unwrap().unwrap().loras, meta.loras);
         assert_eq!(result["createdDocument"], true);
     }
     #[test]
@@ -477,6 +524,7 @@ mod tests {
             model: "qwen-image-2.1-turbo".into(),
             width: 8,
             height: 8,
+            loras: Vec::new(),
         };
         let image = Image::from_u8(8, 8, ChannelLayout::Rgba, [20, 80, 120, 255].repeat(64)).unwrap();
         let prepared = prepare_results(vec![png(&image).unwrap()], template, &meta).unwrap();
