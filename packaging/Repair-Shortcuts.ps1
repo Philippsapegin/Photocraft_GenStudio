@@ -1,8 +1,8 @@
 param([Parameter(Mandatory=$true)][string]$Data)
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+. (Join-Path $PSScriptRoot 'Shell-Link.ps1')
 $v = Get-Content -LiteralPath $Data -Raw -Encoding UTF8 | ConvertFrom-Json
-$shell = New-Object -ComObject WScript.Shell
 if ($v.locations) {
     $locations = @($v.locations)
     $programs = $v.programs
@@ -19,7 +19,7 @@ $existing = @()
 foreach ($location in ($locations | Select-Object -Unique)) {
     if (-not $location -or -not (Test-Path -LiteralPath $location)) { continue }
     foreach ($file in (Get-ChildItem -LiteralPath $location -Filter '*.lnk' -Recurse -File)) {
-        $link = $shell.CreateShortcut($file.FullName)
+        try { $link = [GenGate.ShellLinks]::Read($file.FullName) } catch { continue }
         $name = [IO.Path]::GetFileNameWithoutExtension($link.TargetPath)
         $native = $link.TargetPath -like '*.exe' -and $name -match '^photocraft(?:[-.]|$)'
         $wrapper = $file.Name -match '^PhotoCraft(?: (?:GenGate|GenStudio))?\.lnk$' -and $link.Arguments -match '(?i)(GenGate|GenStudio).*Launch\.ps1'
@@ -38,13 +38,7 @@ $removed = @()
 try {
     foreach ($path in $canonical) {
         [void](New-Item -ItemType Directory -Path (Split-Path $path -Parent) -Force)
-        $link = $shell.CreateShortcut($path)
-        $link.TargetPath = $v.target
-        $link.Arguments = $v.arguments
-        $link.WorkingDirectory = $v.working
-        $link.IconLocation = $v.icon + ',0'
-        $link.Description = $v.description
-        $link.Save()
+        [GenGate.ShellLinks]::Write($path, $v.target, $v.arguments, $v.working, $v.icon, $v.description)
     }
     foreach ($path in $existing) {
         if ($canonical -notcontains $path) {

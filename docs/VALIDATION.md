@@ -414,11 +414,26 @@ unchanged. Installed editor SHA-256:
 
 The installed executable/CLI and installed runtime passed the same synthetic MCP
 LoRA/FIBO/layer-restore workflow: 24 MP capture 2.53 s, UI response 45 ms.
-The final ZIP is `GenGate-0.9.2-windows-x64-addon.zip` (299,591,908 bytes), SHA-256
+The locally installed candidate ZIP was `GenGate-0.9.2-windows-x64-addon.zip` (299,591,908 bytes), SHA-256
 `1fbde03d965bf345b262d12f97f2d7e8ead700e6838c6c6fcffb831655acc0e2`.
-These checks validate the Windows add-on published with the `v0.9.2` release.
+These checks validate the native editor patches retained in the `v0.9.2` release.
 Evidence: `.runtime/photocraft015-gates.json`, `.runtime/photocraft015-candidate.json`,
 `.runtime/photocraft015-installer-smoke.json`, `.runtime/photocraft015-lora-smoke.json`,
 `.runtime/photocraft015-previous-document.json`, `.runtime/photocraft015-parity-direct.json`
 `.runtime/photocraft015-python-final.log`, `.runtime/photocraft015-installed.json`
 and `.runtime/photocraft015-installed-mcp.json`.
+
+### 0.9.2 publication checks
+
+The first GitHub CI run exposed the Windows shortcut target setter using the
+system ANSI code page and a test comparing a short temporary path against its
+resolved spelling. Shortcut creation and repair now use `IShellLinkW` and
+`IPersistFile`; the regression covers mixed Cyrillic/Chinese paths, including
+consolidation, repeated setup and restoring the plain editor shortcuts. The same
+regression passed using the packaged embedded Python and packaged scripts. The
+FIBO test compares resolved paths. Native editor binaries and model code are
+unchanged.
+
+The final release ZIP contains 296504547 bytes; all manifest hashes and
+ZIP CRC checks pass. SHA-256:
+`cd9c00dcb9bec2d3afa353b53696747dc3c7fba5c9faf486e9b79de027693546`.

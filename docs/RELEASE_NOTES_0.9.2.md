@@ -6,6 +6,7 @@ GenGate is still beta software. This release installs as a separate add-on over 
 - Includes the user-tested FIBO 2.0 Edit Turbo preset, Studio LoRA explorer and layer recipe restoration.
 - Compact window headers, Preferences-style LoRA checkboxes, table dividers, left-aligned names and visible drag feedback. Only saved trigger words are inserted.
 - Setup preserves the selected FIBO preset, per-preset components and Constant LoRA strengths, segmentation and economy-mode settings.
+- Shortcut creation and repair use the Unicode Windows Shell API, including for installation paths outside the system code page.
 
 Install PhotoCraft separately, close it and run **Setup.cmd** from the extracted **GenGate-0.9.2-windows-x64-addon.zip**. Reuse the existing GenGate installation and Models folders. The add-on contains verified version-specific binary deltas and its local host, no complete editor or model weights. Earlier official 0.8.2 and 0.12.0 patch entries are retained. Unknown editor builds are never patched or downgraded.
 

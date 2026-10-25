@@ -202,7 +202,7 @@ def build(args):
                 "upstream": [entry["upstream"] for entry in catalog["patches"]],
                 "includes_model_weights": False, "files": {}}
     for path in sorted(target.rglob("*")):
-        if path.is_file():
+        if path.is_file() and "__pycache__" not in path.relative_to(target).parts and path.suffix.lower() not in (".pyc", ".pyo"):
             if path.suffix.lower() in (".safetensors", ".ckpt", ".gguf", ".pt"):
                 raise ValueError("A model weight was found in the package: " + str(path))
             manifest["files"][path.relative_to(target).as_posix()] = installer.sha256(path)
@@ -215,9 +215,8 @@ def build(args):
         str(runtime)], check=True, cwd=str(target))
     archive = target.parent / (target.name + ".zip")
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zipped:
-        for path in sorted(target.rglob("*")):
-            if path.is_file():
-                zipped.write(path, target.name + "/" + path.relative_to(target).as_posix())
+        for relative in sorted([*manifest["files"], "manifest.json"]):
+            zipped.write(target / relative, target.name + "/" + relative)
     checksum = archive.parent / "SHA256SUMS.txt"
     checksum.write_text(installer.sha256(archive) + "  " + archive.name + "\n", encoding="utf-8")
     print(json.dumps({"archive": str(archive), "bytes": archive.stat().st_size,

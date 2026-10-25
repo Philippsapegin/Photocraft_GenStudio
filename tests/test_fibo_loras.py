@@ -23,7 +23,7 @@ import base64
 class FiboTests(unittest.TestCase):
     def test_turbo_discovery_reuses_shared_encoder_and_vae_and_excludes_dev(self):
         with tempfile.TemporaryDirectory() as temporary:
-            root=Path(temporary)
+            root=Path(temporary).resolve()
             for name in ('diffusion_models/fibo2_dev_bf16.safetensors', 'diffusion_models/fibo2_edit_turbo_int8_convrot.safetensors',
                          'text_encoders/qwen3vl_4b_int8_convrot.safetensors', 'vae/flux2-vae.safetensors'):
                 p=root/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(b'synthetic')

@@ -18,7 +18,7 @@ spec.loader.exec_module(installer)
 class WindowsShortcutsTests(unittest.TestCase):
     def test_duplicate_editor_links_converge_and_uninstall_keeps_plain_editor(self):
         with tempfile.TemporaryDirectory(prefix="GenGate shortcuts ") as folder:
-            root = Path(folder) / "проверка"
+            root = Path(folder).resolve() / "проверка_测试"
             host, addon = root / "PhotoCraft", root / "GenGate"
             host.mkdir(parents=True)
             addon.mkdir()
@@ -48,10 +48,11 @@ class WindowsShortcutsTests(unittest.TestCase):
             repair(addon, host, installed=False, locations=locations)
             request = root / "inspect.json"
             request.write_text(json.dumps({"paths": [str(programs / "PhotoCraft.lnk"), str(desktop / "PhotoCraft.lnk")]}), encoding="utf-8")
-            script = "$v=Get-Content -LiteralPath $args[0] -Raw -Encoding UTF8|ConvertFrom-Json; $w=New-Object -ComObject WScript.Shell; @($v.paths|ForEach-Object {$s=$w.CreateShortcut($_); @{target=$s.TargetPath;arguments=$s.Arguments}})|ConvertTo-Json -Compress"
+            script = "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); . $env:GENGATE_SHORTCUT_TEST_HELPER; $v=Get-Content -LiteralPath $args[0] -Raw -Encoding UTF8|ConvertFrom-Json; @($v.paths|ForEach-Object {$s=[GenGate.ShellLinks]::Read($_); @{target=$s.TargetPath;arguments=$s.Arguments}})|ConvertTo-Json -Compress"
             # Pass the data filename through an environment variable, not shell interpolation.
             env = os.environ.copy()
             env["GENGATE_SHORTCUT_TEST_DATA"] = str(request)
+            env["GENGATE_SHORTCUT_TEST_HELPER"] = str(ROOT / "packaging/Shell-Link.ps1")
             script = script.replace("$args[0]", "$env:GENGATE_SHORTCUT_TEST_DATA")
             values = json.loads(subprocess.check_output([str(powershell), "-NoProfile", "-Command", script], env=env))
             self.assertTrue(all(Path(v["target"]) == exe and v["arguments"] == "" for v in values))

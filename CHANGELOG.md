@@ -8,6 +8,7 @@
 - Consistent compact window headers, LoRA table styling and visible drag feedback.
 - Floating-bar keyboard/layout-switch fixes and progressive economy mode for large AI editing crops.
 - Setup preserves preset components, Constant LoRAs, segmentation and economy settings across editor/add-on upgrades.
+- Shortcut creation and repair support Unicode installation paths independently of the Windows system code page.
 
 See [release notes](docs/RELEASE_NOTES_0.9.2.md) and [validation](docs/VALIDATION.md).
 
