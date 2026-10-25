@@ -13,7 +13,7 @@ if ($ValidateOnly) {
     Add-Type -ReferencedAssemblies System.Windows.Forms -TypeDefinition 'public class GenStudioSetupPreviewForm : System.Windows.Forms.Form { protected override bool ShowWithoutActivation { get { return true; } } }'
     $form = New-Object GenStudioSetupPreviewForm
 } else { $form = New-Object System.Windows.Forms.Form }
-$form.Text = 'GenGate 0.9.1 - Add-on Setup'
+$form.Text = 'GenGate 0.9.2 - Add-on Setup'
 $form.ClientSize = New-Object System.Drawing.Size(700, 655)
 $form.StartPosition = 'CenterScreen'
 $form.FormBorderStyle = 'FixedDialog'

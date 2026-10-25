@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.2 Beta
+
+- Separate GenGate add-on installer for official PhotoCraft 0.15.1 Windows x64; earlier 0.8.2 and 0.12.0 patch entries are retained.
+- FIBO 2.0 Edit Turbo preset, alongside Qwen Image 2.1 and FLUX 3.
+- Studio LoRA Explorer with strengths, aliases and saved trigger words; generated layers retain their prompt and LoRA recipe for drag-and-drop reuse.
+- Consistent compact window headers, LoRA table styling and visible drag feedback.
+- Floating-bar keyboard/layout-switch fixes and progressive economy mode for large AI editing crops.
+- Setup preserves preset components, Constant LoRAs, segmentation and economy settings across editor/add-on upgrades.
+
+See [release notes](docs/RELEASE_NOTES_0.9.2.md) and [validation](docs/VALIDATION.md).
+
 ## 0.6.1-alpha.1
 
 First public Gen Studio alpha, based on PhotoCraft 0.8.2.

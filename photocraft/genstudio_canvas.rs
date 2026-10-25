@@ -716,6 +716,10 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> Vec<(&'static str, Va
         let output = scroll.inner;
         let mut edit = output.state;
         let mut inserted = false;
+        if output.response.dnd_hover_payload::<crate::genstudio_lora_ui::Drag>().is_some() {
+            ui.painter().rect_stroke(prompt_rect, ui.visuals().widgets.inactive.corner_radius,
+                egui::Stroke::new(2.0, crate::theme::Tokens::get(ui.ctx()).accent), egui::StrokeKind::Inside);
+        }
         if egui::DragAndDrop::payload::<crate::genstudio_lora_ui::Drag>(ui.ctx()).is_some()
             && let Some(payload)=output.response.dnd_release_payload::<crate::genstudio_lora_ui::Drag>() {
             crate::genstudio_lora_ui::append(&mut state.prompt,&payload.triggers);
@@ -996,7 +1000,7 @@ mod tests {
         let from=pos2(10.0,10.0);
         harness.event(egui::Event::PointerMoved(from));
         harness.event(egui::Event::PointerButton{pos:from,button:egui::PointerButton::Primary,pressed:true,modifiers:egui::Modifiers::NONE});harness.run_steps(1);
-        egui::DragAndDrop::set_payload(&harness.ctx,crate::genstudio_lora_ui::Drag{triggers:"portrait, soft light".into()});
+        egui::DragAndDrop::set_payload(&harness.ctx,crate::genstudio_lora_ui::Drag{name:"Portrait helper".into(),triggers:"portrait, soft light".into()});
         harness.event(egui::Event::PointerMoved(to));harness.run_steps(2);
         harness.event(egui::Event::PointerButton{pos:to,button:egui::PointerButton::Primary,pressed:false,modifiers:egui::Modifiers::NONE});harness.run_steps(2);
         assert!(harness.state().ui.gen_studio.workspace.prompt.ends_with("portrait, soft light"));

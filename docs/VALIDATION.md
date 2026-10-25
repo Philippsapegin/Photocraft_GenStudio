@@ -324,3 +324,101 @@ Evidence: `.runtime/fibo-lora-gates.json`, `.runtime/fibo-lora-parity.log`,
 `.runtime/fibo-lora-package.json`, `.runtime/fibo-lora-installed.json`,
 `.runtime/lora-smoke-latest.json`, `.runtime/fibo-installed-readiness.json`
 and `.runtime/fibo2-download.json`.
+
+## 2026-10-23 - LoRA window and drag polish
+
+The working FIBO/LoRA implementation was committed as `9021127` before these UI
+changes; no push. LoRAs and LoRA settings now share GenGate's compact title-strip
+renderer, left-aligned headings and vector close icon. LoRAs keeps collapse and
+both windows use absolute pointer offsets for title dragging. The main GenGate
+window uses the same close icon while retaining its mixed-weight model caption.
+
+The table uses the Preferences checkbox widget, visible column boundaries and
+left-aligned clipped text. A stable whole-cell interaction replaces the label's
+drag target, so long, unrenamed filenames work independently of aliases. A themed
+name badge follows the pointer and the prompt highlights as a drop target.
+
+Thirty Studio UI tests and eight GenGate title/gesture tests passed, including a
+real pointer drag from a truncated filename with no alias into the Studio prompt,
+trigger insertion and preview state. All-target UI clippy with warnings denied
+passed. Model inference remains deliberately excluded.
+
+The final optimized build, dependency layers and WASM checks passed. Official MCP
+verified matching title-strip heights, all close controls, table editing and the
+unchanged generation/layer-restore transport with synthetic pixels. Screenshots
+were inspected. A live width check caught growth caused by a gear button wider
+than its column; the column now reserves the button's width and four successive
+measurements remain stable. Only saved trigger words are inserted, as confirmed
+by the user; an empty trigger string does not insert a filename.
+
+Final candidate SHA-256:
+`cb7c261c933be972294e3de338272874a03dd1e353eb2a5b2d5d3fba8d39d2d4`.
+Installed after the user saved and closed PhotoCraft. The editor and profile were
+backed up to `D:/Programs/GenGate/backups/lora-polish-1792780895106152600`.
+Preferences and appearance were preserved; Python, engines and shared models
+were unchanged. The installed executable and installed runtime passed the same
+synthetic MCP workflow (24 MP capture: 2.39 s, UI response: 22 ms), with no model
+inference. Launcher patch verification passed.
+Evidence: `.runtime/lora-polish-gates.json`, `.runtime/lora-polish-titles.json`,
+`.runtime/lora-polish-smoke.json`, `.runtime/lora-polish-package.json`,
+`.runtime/lora-polish-installed.json` and `.runtime/lora-polish-installed-smoke.json`.
+
+
+## 2026-10-24 - PhotoCraft 0.15.1 / GenGate 0.9.2
+
+Ported to the official PhotoCraft 0.15.1 source at
+`60c87b9884fdae0e464614d482a3bc435cbbc578`. Registered the SHA-256-verified
+Windows x64 portable archive and both original executables in `editor-bases.json`.
+The native build defaults and separate add-on packager now target this release;
+the pinned release fonts and their notices are retained.
+
+Setup now preserves FIBO selection and economy mode as well as per-preset
+components/Constant LoRA strengths and segmentation preferences. A real BSDIFF
+regression covers a host-version upgrade and restoring the new originals instead
+of downgrading the editor. Python: 138 tests, five tensor skips. All-target native
+clippy for engine, UI, desktop and CLI passed with warnings denied. The optimized
+production editor and CLI built successfully.
+
+Seven synthetic official-MCP scenarios passed: Studio LoRAs/FIBO and layer recipes,
+selection fill, remove/fill feedback and queues, segmentation, independent
+selection/generation workers, and full Qwen/FLUX workspaces. Updated the isolation
+fixture for the LoRA keyword added to the pipeline; no production inference
+change was needed. Inspected the LoRA/header screenshot. A 24 MP capture took
+2.71 s; UI response was 42 ms. A synthetic project saved in PhotoCraft 0.12.0
+opened, saved and reopened in 0.15.1 with identical prompt/LoRA metadata.
+
+The production library's exact `parity::compute` and `to_markdown` functions
+verified 633/633 live menu items and regenerated the native checklist. The separate
+0.9.2 ZIP contains no complete editor or model weights. Its extracted installer
+passed install, update, official-editor refresh/reapply, uninstall/restore and
+reinstall on 0.15.1, including non-ASCII paths and preserving native preferences.
+
+Full native suites passed: 2129 engine tests and 3712 UI tests, with 30 ignored.
+The adversarial command panic hunt also passed with the HEIF decoder enabled
+through `photocraft-io/heif`. The eight GenGate title/gesture tests are included in that full UI suite. A
+focused Windows native-adapter/input-language regression also passed. Dependency
+layers passed for 31 crates; WASM passed for 24 crates and the optional HEIF
+configuration (native-only unused-code warnings remain). The parity report uses
+the exact production-library functions above; a redundant debug-editor rebuild
+for the default parity command was stopped after this equivalent check passed.
+
+Installed the official update and separate GenGate add-on onto the existing
+`D:/Programs/PhotoCraft` and `D:/Programs/GenGate`. Recovery backup:
+`D:/Programs/GenGate/backups/photocraft015-1792867610165697200`.
+All validated GenGate settings were preserved except the new runtime location;
+unrelated native preferences, appearance and shared Models file sizes/timestamps
+were unchanged. The launcher recognizes the new patch. The old owned Direct
+worker was stopped; no model was started or downloaded and the GPU Python was
+unchanged. Installed editor SHA-256:
+`b1ffe89202b81c95d420725fdf0698201ea871e48fcdc97164f2c95ed2070e6c`.
+
+The installed executable/CLI and installed runtime passed the same synthetic MCP
+LoRA/FIBO/layer-restore workflow: 24 MP capture 2.53 s, UI response 45 ms.
+The final ZIP is `GenGate-0.9.2-windows-x64-addon.zip` (299,591,908 bytes), SHA-256
+`1fbde03d965bf345b262d12f97f2d7e8ead700e6838c6c6fcffb831655acc0e2`.
+These checks validate the Windows add-on published with the `v0.9.2` release.
+Evidence: `.runtime/photocraft015-gates.json`, `.runtime/photocraft015-candidate.json`,
+`.runtime/photocraft015-installer-smoke.json`, `.runtime/photocraft015-lora-smoke.json`,
+`.runtime/photocraft015-previous-document.json`, `.runtime/photocraft015-parity-direct.json`
+`.runtime/photocraft015-python-final.log`, `.runtime/photocraft015-installed.json`
+and `.runtime/photocraft015-installed-mcp.json`.

@@ -12,7 +12,7 @@ import subprocess
 import sys
 import uuid
 
-VERSION = "0.9.1"
+VERSION = "0.9.2"
 REPOSITORY = "https://github.com/Philippsapegin/Photocraft_GenStudio"
 
 
@@ -221,8 +221,11 @@ def install(request, bundle, *, shortcuts=True):
     for key in ("comfyStartup", "directStartup"):
         if old_settings.get(key) in ("off", "appStart", "firstRequest"):
             settings[key] = old_settings[key]
-    if old_settings.get("model") in ("qwen-image-2.1-turbo", "flux-3-image-klein"):
+    from genstudio.models import MODELS
+    if isinstance(old_settings.get("model"), str) and old_settings["model"] in MODELS:
         settings["model"] = old_settings["model"]
+    if isinstance(old_settings.get("reduceEditResolution"), bool):
+        settings["reduceEditResolution"] = old_settings["reduceEditResolution"]
     if os.path.normcase(str(Path(old_settings.get("modelsDir") or ".").resolve())) == os.path.normcase(settings["modelsDir"]):
         for key in ("textEncoder", "vae"):
             value=old_settings.get(key)

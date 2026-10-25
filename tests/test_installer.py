@@ -169,6 +169,24 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(list(self.models.iterdir()), [sentinel])
         self.assertFalse(list(self.destination.rglob("*.safetensors")))
 
+        # Updating the editor/add-on must keep the newest preset and economy
+        # choice, not silently fall back to the original two preset families.
+        from genstudio.models import FIBO
+        updated = installer.read_json(prefs_path)
+        presets[FIBO] = {**component_defaults(), "constantLora": "loras/fibo-edit.safetensors",
+                         "constantLoraStrength": .75}
+        updated["genStudio"].update(model=FIBO, presets=presets, reduceEditResolution=True)
+        installer.write_json(prefs_path, updated)
+        with patch.object(installer, "check_python", return_value="existing/python.exe"), \
+             patch("genstudio.models.resolve_components", return_value={}) as discover:
+            installer.install(request, self.bundle, shortcuts=False)
+            discover.assert_called_once_with(str(self.models.resolve()), presets[FIBO], FIBO)
+        kept = installer.read_json(prefs_path)["genStudio"]
+        self.assertEqual(kept["model"], FIBO)
+        self.assertEqual(kept["presets"], presets)
+        self.assertTrue(kept["reduceEditResolution"])
+        self.assertEqual(list(self.models.iterdir()), [sentinel])
+
 
 if __name__ == "__main__":
     unittest.main()

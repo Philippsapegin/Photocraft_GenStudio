@@ -67,6 +67,25 @@ class EditorPatchTests(unittest.TestCase):
         for name, data in self.outputs.items():
             self.assertEqual((self.host / name).read_bytes(), data)
 
+    def test_new_host_release_uses_its_own_delta_and_restores_the_new_originals(self):
+        self.apply()
+        package = self.root / "updated add-on"
+        original_host = self.root / "new official release"
+        originals, outputs, catalog = fixture(package, original_host,
+            base_suffix=b" release 0.15.1", host_version="0.15.1")
+        for name, content in originals.items():
+            (self.host / name).write_bytes(content)
+        state = self.apply(package)
+        self.assertEqual(state["hostVersion"], "0.15.1")
+        self.assertEqual(state["files"], catalog["patches"][0]["files"])
+        self.assertEqual(ep.ensure_current(self.host)["hostVersion"], "0.15.1")
+        for name, content in outputs.items():
+            self.assertEqual((self.host / name).read_bytes(), content)
+        ep.restore(self.host)
+        for name, content in originals.items():
+            self.assertEqual((self.host / name).read_bytes(), content)
+        self.assertEqual(ep.read(self.prefs), self.old_preferences)
+
     def test_unknown_update_is_never_patched_or_downgraded_even_on_uninstall(self):
         self.apply()
         for name in ep.FILES:

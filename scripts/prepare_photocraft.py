@@ -1,4 +1,4 @@
-"""Apply the small Gen Studio integration to pinned PhotoCraft v0.8.2 sources."""
+"""Apply GenGate integration to pinned PhotoCraft 0.8.2, 0.12.0 and 0.15.1 sources."""
 from pathlib import Path
 import argparse
 import json

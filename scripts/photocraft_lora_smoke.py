@@ -77,11 +77,13 @@ def main():
             until(lambda:studio().get('controls',{}).get('loras'))
             click(studio()['controls']['loras'])
             until(lambda:browser().get('rows'))
+            assert abs(browser()['window']['headerRect'][3]-studio()['window']['headerRect'][3])<1
             rows=browser()['rows'];assert len(rows)==1 and rows[0]['directory']
             click(rows[0]['nameRect']);until(lambda:browser().get('folder')=='style' and browser().get('rows'))
             row=browser()['rows'][0];assert row['path']=='style/portrait.safetensors'
             click(row['checkRect']);click(row['settingsRect'])
             until(lambda:browser().get('settings'))
+            assert abs(browser()['settings']['window']['headerRect'][3]-studio()['window']['headerRect'][3])<1
             assert not browser()['settings']['dirty']
             assert all(rect[2]>=300 for rect in browser()['settings']['fields']), 'Metadata fields collapsed'
             def type_field(rect,value):
@@ -95,13 +97,19 @@ def main():
             menu('genstudio.loras.append',{'path':'style/portrait.safetensors'})
             until(lambda:studio()['prompt']=='portrait, soft lighting')
             screenshot('lora-browser-settings.png')
+            widths=[]
+            for _ in range(4):
+                time.sleep(.12)
+                widths.append(browser()['window']['rect'][2])
+            assert max(widths)-min(widths)<1, ('Browser width keeps growing',widths,browser()['rows'][0])
             step('Folder navigation, alias/triggers, Save state and enabled adapter strength work without renaming files')
             try:menu('genstudio.loras.configure',{'folder':'..'})
             except RuntimeError:pass
             else:raise AssertionError('Folder escape accepted')
             assert browser()['folder']=='style'
-            menu('genstudio.loras.open',{'open':False})
-            # Closing the metadata window is cosmetic; the command path is independently checked.
+            click(browser()['settings']['window']['closeRect'])
+            click(browser()['window']['closeRect'])
+            until(lambda:not studio()['loras']['open'])
             image=base64.b64encode(png_bytes(Image.new('RGBA',(512,384),(60,80,120,255)))).decode()
             menu('genstudio.studio.reference.set',{'slot':'main','image':image,'name':'Source'})
             until(lambda:not studio()['loading'] and studio()['references'])
@@ -161,6 +169,9 @@ def main():
                 assert preview.size==(1024,683),preview.size
             report['layer_24mp']={'seconds':time.monotonic()-began,'ui_response_seconds':ui_seconds,'prepared_size':[1024,683]}
             step('A 24 MP layer is captured on a worker while the interface remains responsive')
+            click(studio()['window']['closeRect'])
+            until(lambda:not control('ui.inspect')['genStudio']['open'])
+            menu('genstudio.open')
             report['passed']=True
             with args.exe.open('rb') as f:report['editorSha256']=hashlib.file_digest(f,'sha256').hexdigest()
     finally:

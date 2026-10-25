@@ -8,3 +8,5 @@
 Model files remain in the user-selected source directory and are not redistributed by this project. Their license is provided by [Qwen](https://huggingface.co/Qwen/Qwen-Image-2.1-Turbo).
 
 The original GenGate menu catalogs `menu-locales.json`, `progress-locales.json` and `selection-locales.json` are by GenGate contributors, licensed MIT OR Apache-2.0 with the Rust integration. The preparer adds their entries to PhotoCraft's catalogs and records them in its `ATTRIBUTION.md`, retaining existing translation licenses.
+
+The current native build targets [PhotoCraft v0.15.1](https://github.com/storytold/photocraft/tree/60c87b9884fdae0e464614d482a3bc435cbbc578), under the same MIT OR Apache-2.0 licenses. Supported official release hashes are recorded in `editor-bases.json`; native source and font inputs remain outside the add-on archive.

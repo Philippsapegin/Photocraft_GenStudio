@@ -105,7 +105,7 @@ matching supported patch. Unknown updates remain untouched and are opened as
 ordinary PhotoCraft with a compatibility notice. Uninstall restores only files
 that still match our patched output and preserves newer upstream files.
 
-Supported bases: official PhotoCraft **0.8.2 and 0.12.0 Windows x64**, with hashes
+Supported bases: official PhotoCraft **0.8.2, 0.12.0 and 0.15.1 Windows x64**, with hashes
 and archive provenance in `photocraft/editor-bases.json`. Each has its own native
 integration and delta; no guessed cross-version binary patching is used.
 

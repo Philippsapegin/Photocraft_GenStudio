@@ -42,7 +42,8 @@ for name in ('models','text-encoder','vae','model','components','owner','port'):
 a=p.parse_args();root=Path(__file__).resolve().parents[1]
 w=Worker(a.models,a.text_encoder,a.vae,a.model,components=__import__('json').loads(a.components),owner=a.owner)
 w.pipeline.check=lambda:[]
-def generated(refs,seed,prompt,width,height,cancel,progress):
+def generated(refs,seed,prompt,width,height,cancel,progress,*,loras=None):
+ assert not loras
  (root/'generation-started').touch()
  while (root/'block-generation').exists():
   if cancel.wait(.05):raise __import__('genfill.comfy',fromlist=['Cancelled']).Cancelled()

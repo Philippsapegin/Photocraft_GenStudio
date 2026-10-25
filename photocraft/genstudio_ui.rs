@@ -145,45 +145,99 @@ fn text(ui: &mut egui::Ui, label: &str, value: &mut String) {
     ui.end_row();
 }
 
-fn workspace_header(ui: &mut egui::Ui, model: &str, collapsed: bool) -> (egui::Response, bool, bool) {
-    let size = egui::TextStyle::Heading.resolve(ui.style()).size;
-    let color = crate::theme::Tokens::get(ui.ctx()).text;
-    let mut title = egui::text::LayoutJob::default();
-    title.append("GenGate", 0.0, egui::TextFormat { font_id: crate::theme::semibold(size), color, ..Default::default() });
-    title.append(&format!(" | {model}"), 0.0, egui::TextFormat { font_id: egui::FontId::proportional(size), color, ..Default::default() });
+pub(crate) struct FloatingHeader {
+    pub drag: egui::Response,
+    pub close: egui::Response,
+    pub toggle: bool,
+    pub band: egui::Rect,
+}
+
+/// Shared compact title strip for the GenGate floating windows.
+pub(crate) fn floating_header(ui: &mut egui::Ui, key: &str, caption: &str, title: egui::text::LayoutJob, collapse: Option<bool>) -> FloatingHeader {
     let title = ui.fonts_mut(|f| f.layout_job(title));
     let button = ui.spacing().interact_size.y;
     let gap = ui.spacing().item_spacing.x;
+    let collapsed = collapse == Some(true);
     let height = button.max(title.size().y);
     let width = if collapsed { title.size().x + 2.0 * (button + gap) } else { ui.available_width() };
     let (header, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
     let band = header.expand2(egui::vec2(8.0, 4.0));
     let mut corners = ui.visuals().window_corner_radius;
-    if !collapsed {
-        corners.sw = 0;
-        corners.se = 0;
-    }
+    if !collapsed { corners.sw = 0; corners.se = 0; }
     ui.painter().rect_filled(band, corners, ui.visuals().widgets.open.weak_bg_fill);
-    if !collapsed {
-        ui.painter().hline(band.x_range(), band.bottom() + 0.5, ui.visuals().window_stroke);
+    if !collapsed { ui.painter().hline(band.x_range(), band.bottom() + 0.5, ui.visuals().window_stroke); }
+    let mut title_left = header.left();
+    let mut toggle = false;
+    if let Some(collapsed) = collapse {
+        let rect = egui::Rect::from_min_size(header.left_center() - egui::vec2(0.0, button / 2.0), egui::Vec2::splat(button));
+        let label = format!("{} {caption}", if collapsed { "Expand" } else { "Collapse" });
+        let response = ui.put(rect, egui::Button::new("").frame(false)).on_hover_text(&label);
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
+        let mut icon = response.clone();
+        icon.rect = egui::Rect::from_center_size(rect.center(), egui::Vec2::splat(ui.spacing().icon_width));
+        egui::collapsing_header::paint_default_icon(ui, if collapsed { 0.0 } else { 1.0 }, &icon);
+        title_left = rect.right() + gap;
+        toggle = response.clicked();
     }
-    let collapse_rect = egui::Rect::from_min_size(header.left_center() - egui::vec2(0.0, button / 2.0), egui::Vec2::splat(button));
-    let collapse = ui.put(collapse_rect, egui::Button::new("").frame(false)).on_hover_text(if collapsed { "Expand GenGate" } else { "Collapse GenGate" });
-    collapse.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, if collapsed { "Expand GenGate" } else { "Collapse GenGate" }));
-    let mut icon = collapse.clone();
-    icon.rect = egui::Rect::from_center_size(collapse.rect.center(), egui::Vec2::splat(ui.spacing().icon_width));
-    egui::collapsing_header::paint_default_icon(ui, if collapsed { 0.0 } else { 1.0 }, &icon);
     let close_rect = egui::Rect::from_min_size(header.right_center() - egui::vec2(button, button / 2.0), egui::Vec2::splat(button));
-    let close = ui.put(close_rect, egui::Button::new("\u{00d7}").frame(false)).on_hover_text("Close GenGate");
-    close.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Close GenGate"));
-    let title_rect = header.with_min_x(collapse_rect.right() + gap).with_max_x(close_rect.left() - gap);
-    let drag =
-        ui.interact(header.with_min_x(collapse_rect.right()).with_max_x(close_rect.left()), egui::Id::new("gengate-title-drag"), egui::Sense::click_and_drag());
+    let close_label = format!("Close {caption}");
+    let close = ui.interact(close_rect, ui.id().with((key, "close")), egui::Sense::click()).on_hover_text(&close_label);
+    close.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &close_label));
+    let visuals = ui.style().interact(&close);
+    let cross = egui::Rect::from_center_size(close_rect.center(), egui::Vec2::splat(12.0)).expand(visuals.expansion);
+    ui.painter().line_segment([cross.left_top(), cross.right_bottom()], visuals.fg_stroke);
+    ui.painter().line_segment([cross.right_top(), cross.left_bottom()], visuals.fg_stroke);
+    let title_rect = header.with_min_x(title_left).with_max_x(close_rect.left() - gap);
+    let drag = ui.interact(title_rect, ui.id().with((key, "title-drag")), egui::Sense::click_and_drag());
     ui.scope_builder(egui::UiBuilder::new().max_rect(title_rect).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
         ui.add(egui::Label::new(title).selectable(false));
     });
-    let toggle = collapse.clicked() || drag.double_clicked();
-    (drag, toggle, close.clicked())
+    toggle |= collapse.is_some() && drag.double_clicked();
+    FloatingHeader { drag, close, toggle, band }
+}
+
+pub(crate) fn floating_title(ui: &egui::Ui, text: &str) -> egui::text::LayoutJob {
+    let mut title = egui::text::LayoutJob::default();
+    title.append(text, 0.0, egui::TextFormat {
+        font_id: crate::theme::semibold(egui::TextStyle::Heading.resolve(ui.style()).size),
+        color: crate::theme::Tokens::get(ui.ctx()).text, ..Default::default()
+    });
+    title
+}
+
+/// Absolute pointer offset keeps custom title-strip dragging smooth.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct FloatingPosition {
+    pub position: Option<[f32; 2]>,
+    offset: Option<[f32; 2]>,
+}
+impl FloatingPosition {
+    pub fn prepare<'a>(&mut self, ctx: &egui::Context, mut window: egui::Window<'a>) -> egui::Window<'a> {
+        let (at, down) = ctx.input(|i| (i.pointer.interact_pos(), i.pointer.primary_down()));
+        if let (Some(at), Some([x, y])) = (at, self.offset) {
+            self.position = Some([at.x - x, at.y - y]);
+            if down { ctx.request_repaint(); }
+        }
+        if !down { self.offset = None; }
+        if let Some([x, y]) = self.position.take() { window = window.current_pos(egui::pos2(x, y)); }
+        window
+    }
+    pub fn finish(&mut self, ctx: &egui::Context, rect: egui::Rect, header: &FloatingHeader) {
+        if ctx.input(|i| i.pointer.primary_down()) && header.drag.is_pointer_button_down_on() && self.offset.is_none()
+            && let Some(origin) = ctx.input(|i| i.pointer.press_origin()) {
+            self.offset = Some([origin.x - rect.min.x, origin.y - rect.min.y]);
+        }
+        if header.toggle { self.position = Some([rect.min.x, rect.min.y]); self.offset = None; ctx.request_repaint(); }
+    }
+}
+
+fn workspace_header(ui: &mut egui::Ui, model: &str, collapsed: bool) -> FloatingHeader {
+    let mut title = floating_title(ui, "GenGate");
+    title.append(&format!(" | {model}"), 0.0, egui::TextFormat {
+        font_id: egui::FontId::proportional(egui::TextStyle::Heading.resolve(ui.style()).size),
+        color: crate::theme::Tokens::get(ui.ctx()).text, ..Default::default()
+    });
+    floating_header(ui, "gengate", "GenGate", title, Some(collapsed))
 }
 
 pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
@@ -294,7 +348,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         let mut header = None;
         let response = window.show(ctx, |ui| {
             let title = workspace_header(ui, model, collapsed);
-            open = !title.2;
+            open = !title.close.clicked();
             header = Some(title);
             if collapsed {
                 return;
@@ -320,7 +374,9 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 });
             });
         });
-        if let (Some(response), Some((drag, toggle, _))) = (response, header) {
+        if let (Some(response), Some(header)) = (response, header) {
+            let drag = &header.drag;
+            let toggle = header.toggle;
             let rect = response.response.rect;
             crate::genstudio_canvas::set_window_rect(app,rect);
             if down
@@ -337,7 +393,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 ctx.request_repaint();
             }
             if let Some(info) = app.studio.info.as_object_mut() {
-                info.insert("window".into(), json!({"collapsed":collapsed,"rect":[rect.min.x,rect.min.y,rect.width(),rect.height()],"titleRect":[drag.rect.min.x,drag.rect.min.y,drag.rect.width(),drag.rect.height()]}));
+                info.insert("window".into(), json!({"collapsed":collapsed,"rect":[rect.min.x,rect.min.y,rect.width(),rect.height()],"titleRect":[drag.rect.min.x,drag.rect.min.y,drag.rect.width(),drag.rect.height()],"headerRect":[header.band.min.x,header.band.min.y,header.band.width(),header.band.height()],"closeRect":[header.close.rect.min.x,header.close.rect.min.y,header.close.rect.width(),header.close.rect.height()]}));
             }
         }
         app.ui.gen_studio.open = open;

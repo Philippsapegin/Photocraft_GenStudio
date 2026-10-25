@@ -1,5 +1,5 @@
 param([switch]$SkipClone, [switch]$SkipBuild, [string]$Python = '',
-      [ValidateSet('0.8.2','0.12.0')][string]$HostVersion = '0.12.0', [string]$TargetDir = '')
+      [ValidateSet('0.8.2','0.12.0','0.15.1')][string]$HostVersion = '0.15.1', [string]$TargetDir = '')
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
 $sourceName = if ($HostVersion -eq '0.8.2') { 'photocraft-source' } else { 'photocraft-' + $HostVersion }
@@ -20,7 +20,7 @@ if ($revision -ne $expected) { throw ('Expected PhotoCraft ' + $HostVersion + ' 
 & $Python (Join-Path $PSScriptRoot 'prepare_photocraft.py') $source
 if ($LASTEXITCODE) { throw 'Could not apply Gen Studio integration.' }
 if (-not $SkipBuild) {
-    if ($HostVersion -eq '0.12.0') {
+    if ($HostVersion -ne '0.8.2') {
         $fontRootJson = & $Python -X utf8 (Join-Path $PSScriptRoot 'prepare_craft_fonts.py') --json
         if ($LASTEXITCODE) { throw 'Could not verify the official PhotoCraft release fonts.' }
         $fontRoot = $fontRootJson | ConvertFrom-Json

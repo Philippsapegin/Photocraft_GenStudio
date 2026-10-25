@@ -7,12 +7,12 @@ import bsdiff4
 from genstudio import editor_patch
 
 
-def fixture(bundle, host, suffix=b"new native GenGate UI"):
+def fixture(bundle, host, suffix=b"new native GenGate UI", *, base_suffix=b"", host_version="0.8.2"):
     bundle.mkdir(parents=True, exist_ok=True)
     host.mkdir(parents=True, exist_ok=True)
     originals, outputs, entries = {}, {}, {}
     for name in editor_patch.FILES:
-        original = (b"MZ synthetic PhotoCraft " + name.encode()) * 50
+        original = (b"MZ synthetic PhotoCraft " + name.encode() + base_suffix) * 50
         output = original[:120] + suffix + original[120:]
         (host / name).write_bytes(original)
         patch = bundle / "patches" / (name + ".bsdiff")
@@ -23,7 +23,7 @@ def fixture(bundle, host, suffix=b"new native GenGate UI"):
                          "patch": patch.relative_to(bundle).as_posix(), "patchSha256": editor_patch.sha256(patch)}
         originals[name], outputs[name] = original, output
     catalog = {"format": "gengate-editor-patches-v1", "patches": [
-        {"id": "fixture-0.8.2", "hostVersion": "0.8.2", "upstream": "fixture", "files": entries}]}
+        {"id": "fixture-" + host_version, "hostVersion": host_version, "upstream": "fixture", "files": entries}]}
     (bundle / "editor-patches.json").write_bytes(editor_patch.encoded(catalog))
     (host / "portable.txt").write_text("")
     return originals, outputs, catalog
