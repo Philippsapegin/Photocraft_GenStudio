@@ -103,6 +103,7 @@ def build(args):
     copy_tree(patches / "patches", target / "patches")
     for directory in ("genfill", "genstudio"):
         copy_tree(ROOT / directory, runtime / directory)
+    copy_tree(ROOT / "comfyui", runtime / "comfyui")
     for name in ("config.example.json", "requirements.txt", "LICENSE"):
         shutil.copyfile(ROOT / name, runtime / name)
     for name in ("run_direct.py", "run_segmentation.py", "download_segmentation.py", "prepare_qwen_core.py", "prepare_flux_core.py", "prepare_fibo_core.py", "download_flux3.py", "download_fibo2.py", "Setup-Direct.ps1"):

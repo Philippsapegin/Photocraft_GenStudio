@@ -57,7 +57,7 @@ def after(source):
                 path.write_text(new, encoding="utf-8")
     for path in (source / "crates/ui-egui/src/i18n").glob("*.tsv"):
         text = path.read_text(encoding="utf-8").replace("Gen Studio", "GenGate")
-        for label in ("GenGate Settings", "GenGate Settings…", "Choose Preset Component"):
+        for label in ("GenGate Settings", "GenGate Settings…", "Choose Preset Component", "Install GenGate ComfyUI nodes"):
             if "\t" + label + "\t" not in text:
                 text += "\n\t" + label + "\t" + label + "\n"
         seen = set()

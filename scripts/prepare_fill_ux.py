@@ -6,6 +6,26 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def prepare_remove_dispatch(text):
+    """Keep AI strokes in our queue across upstream retouch dispatcher changes."""
+    start = text.index("pub fn finish_stroke(")
+    end = text.index('\n    match result {', start) if '\n    match result {' in text[start:] else text.index('    match app.run(cmd, p) {', start)
+    if "queue_ai_fill(app, p);" in text[start:end]:
+        return text
+    anchors = ('    let result = app.run(cmd, p);', '    match app.run(cmd, p) {')
+    matches = [(text.find(anchor, start), anchor) for anchor in anchors]
+    matches = [(pos, anchor) for pos, anchor in matches if pos >= 0]
+    if len(matches) != 1:
+        raise RuntimeError("Unknown upstream Remove stroke dispatcher; refusing to bypass the AI queue")
+    pos, anchor = matches[0]
+    hook = '''    if tool == Tool::Remove && o.remove_ai_fill {
+        queue_ai_fill(app, p);
+        return true;
+    }
+'''
+    return text[:pos] + hook + text[pos:]
+
+
 def prepare(source, replace):
     engine, ui = source / "crates/engine/src", source / "crates/ui-egui/src"
     for src, dest in (("genstudio_queue.rs", engine / "genstudio_queue.rs"),
@@ -37,7 +57,9 @@ def prepare(source, replace):
     tests=text.find("\n#[cfg(test)]\nmod tests {")
     if helper>tests>=0:
         text=text[:tests]+text[helper:]+"\n"+text[tests:helper]
-        retouch_ui.write_text(text,encoding="utf-8")
+    # Also repair an already prepared 0.16 tree: its dispatch now records fromLive.
+    text=prepare_remove_dispatch(text)
+    retouch_ui.write_text(text,encoding="utf-8")
     stamp = source / ".genstudio-fill-ux-v1"
     if stamp.exists():
         return
@@ -70,12 +92,7 @@ def prepare(source, replace):
     line = '            crate::widgets::checkbox(ui, &mut o.remove_after_each_stroke, tl!("Remove after each stroke"));'
     text = text.replace(line,line+'\n            crate::widgets::checkbox(ui, &mut o.remove_ai_fill, "Ai Fill");')
     text = text.replace('"useQwen": o.remove_ai_fill','"useAiFill": o.remove_ai_fill')
-    marker = '    match app.run(cmd, p) {'
-    text = text.replace(marker, '''    if tool == Tool::Remove && o.remove_ai_fill {
-        queue_ai_fill(app, p);
-        return true;
-    }
-''' + marker, 1)
+    text = prepare_remove_dispatch(text)
     marker = '    if let Err(e) = app.run("paint.remove", p) {'
     text = text.replace(marker, '''    if app.ui.tool_options.remove_ai_fill {
         queue_ai_fill(app, p);

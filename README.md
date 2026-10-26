@@ -5,7 +5,8 @@ A work-in-progress suite for [PhotoCraft](https://github.com/storytold/photocraf
 
 ## Features
 
-- **Two engines:** Direct for users without ComfyUI, and experimental ComfyUI startup and connection for future workflow integrations.
+- **Two engines:** Direct for users without ComfyUI, and ComfyUI for preset editing and custom Studio workflows.
+- **ComfyUI workflows:** the Studio can run your API workflow between widget-free **GenGate IN / OUT** nodes. Return images, batches and layer masks; keep the workflow, prompt and adapter recipe with the generated layer. [Setup and ports](docs/COMFY_WORKFLOWS.md).
 - **Preset-based setup:** compatible model components are selected automatically. Advanced settings let you choose your own model, text encoder, VAE and FLUX prompt upsampler, including INT8 and other supported formats.
 - **Native tools, uncluttered workspace:** editing tools stay inside PhotoCraft; configuration lives in **Edit → Preferences → GenGate Settings**.
 - **Constant LoRA:** an optional adapter with adjustable strength for Ai Fill and Remove Brush. It is separate from full image generation.
@@ -30,7 +31,7 @@ Planned:
 
 - More presets for leading open-source image models.
 - Custom providers.
-- ComfyUI nodes for experimenting with node spaghetti.
+- More ComfyUI workflow conveniences.
 - Many UX improvements.
 
 ## Installation
@@ -45,6 +46,8 @@ Download **[GenGate 0.9.2 Beta](https://github.com/Philippsapegin/Photocraft_Gen
 4. Save and close PhotoCraft before installing. Open **PhotoCraft** from Start or the desktop and choose a **Preset** in **Preferences → GenGate Settings**. Setup consolidates the editor shortcuts and removes old GenStudio/GenGate launcher duplicates. Engine startup can be off, on application launch, or on the first AI request.
 
 **Development build 0.9.3 adds PhotoCraft 0.16.0 support.** The published 0.9.2 beta supports the earlier builds below.
+
+The new Studio workflow UI requires the PhotoCraft 0.16.0 integration. Earlier patch entries retain their previous UI.
 
 **Compatibility (current source):** official **PhotoCraft 0.8.2, 0.12.0, 0.15.1 and 0.16.0 Windows x64** binaries. Other builds need separate patch adaptation. Setup checks file hashes and refuses unknown builds. It never downgrades an updated editor. The previous 0.9.0 download is a legacy standalone editor distribution, not this add-on.
 

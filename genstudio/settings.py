@@ -18,6 +18,7 @@ def defaults():
     from .segmentation_models import DEFAULTS
     return {"segmentation": dict(DEFAULTS), "reduceEditResolution": False,
             "model": MODEL, "textEncoder": "", "vae": "", "presets": {},
+            "studioMode": "preset", "studioWorkflow": "",
             "engine": "comfy", "comfyStartup": "firstRequest", "directStartup": "firstRequest",
             "comfyUrl": old["comfy_url"], "comfyDir": old.get("comfy_dir", ""),
             "comfyPython": old.get("comfy_python", ""),
@@ -60,6 +61,8 @@ def validate(value):
             raise ValueError("Invalid engine setting: " + key)
     if result["engine"] not in ENGINES:
         raise ValueError("Unknown engine.")
+    if result["studioMode"] not in ("preset", "workflow"):
+        raise ValueError("Unknown Studio processing mode.")
     from .models import specification
     specification(result["model"])
     if any(result[key] not in POLICIES for key in ("comfyStartup", "directStartup")):

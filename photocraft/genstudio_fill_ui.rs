@@ -159,6 +159,22 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
+    fn individual_ai_remove_strokes_queue_instead_of_starting_native_remove_jobs() {
+        let mut app=PhotocraftApp::new(photocraft_engine::Session::new(),crate::Services::default());
+        app.run("file.new",json!({"width":384,"height":256})).unwrap();
+        app.ui.tool_options.remove_ai_fill=true;
+        app.ui.tool_options.remove_after_each_stroke=true;
+        for x in [100.0,200.0] {
+            assert!(crate::retouch_ui::finish_stroke(&mut app,crate::state::Tool::Remove,
+                &[[x,100.0,1.0],[x,130.0,1.0]],egui::Modifiers::NONE));
+            assert!(!app.ui.status_error,"{}",app.ui.status);
+        }
+        let fills=photocraft_engine::genstudio_queue::views(&app.session);
+        assert_eq!(fills.len(),2,"Every released stroke must enter the cancellable AI queue");
+        assert!(fills.iter().all(|fill|fill.job.is_none()));
+    }
+
+    #[test]
     fn ai_fill_mask_stays_visible_with_progress_disabled_and_its_cross_cancels_only_the_queue() {
         let mut app=PhotocraftApp::new(photocraft_engine::Session::new(),crate::Services::default());
         app.run("file.new",json!({"width":384,"height":256})).unwrap();

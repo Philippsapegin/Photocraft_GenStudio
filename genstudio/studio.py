@@ -14,24 +14,24 @@ from genfill.progress import sampling_fraction
 from genfill.server import Job, TERMINAL
 
 
-def request(value, model="qwen-image-2.1-turbo"):
+def request(value, model="qwen-image-2.1-turbo", *, workflow=False):
     from .models import specification
     spec = specification(model)
     if not isinstance(value, dict):
         raise ValueError("Expected a generation request.")
     prompt = value.get("prompt", "")
-    if not isinstance(prompt, str) or not prompt.strip() or len(prompt.encode("utf-8")) > 12000 or "\0" in prompt:
+    if not isinstance(prompt, str) or not workflow and not prompt.strip() or len(prompt.encode("utf-8")) > 12000 or "\0" in prompt:
         raise ValueError("Enter a prompt (up to 12000 UTF-8 bytes).")
     refs = value.get("references", [])
-    if not isinstance(refs, list) or len(refs) > spec["references"]:
+    if not isinstance(refs, list) or len(refs) > (10 if workflow else spec["references"]):
         raise ValueError(f"{spec['label']} supports up to {spec['references']} reference images.")
-    if spec.get('edit_only') and not refs:
+    if not workflow and spec.get('edit_only') and not refs:
         raise ValueError('Add a source image to edit with FIBO 2.0 Edit Turbo.')
     from .lora import validate_studio
     loras = validate_studio(value.get('loras', []))
     width = bounded_int(value.get("width", 1024), 256, 2048, "Width")
     height = bounded_int(value.get("height", 1024), 256, 2048, "Height")
-    grid = spec["grid"]
+    grid = 1 if workflow else spec["grid"]
     if width % grid or height % grid:
         raise ValueError(f"Generation dimensions must be multiples of {grid}.")
     count = bounded_int(value.get("batch", 1), 1, 8, "Batch size")
@@ -40,12 +40,33 @@ def request(value, model="qwen-image-2.1-turbo"):
     from PIL import Image
     for encoded in refs:
         image = decode_png(encoded, 16 << 20).convert("RGBA")
+        if workflow:
+            images.append(image)
+            continue
         image.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
         # Follow the selected model's reference grid; do not distort its ratio
         # by resizing every image to the output canvas dimensions.
         w, h = (max(grid, round(side / grid) * grid) for side in image.size)
         images.append(image.resize((w, h), Image.Resampling.LANCZOS))
-    return {"prompt": prompt, "references": images, "width": width, "height": height, "batch": count, "seed": seed, "loras": loras}
+    data = {"prompt": prompt, "references": images, "width": width, "height": height, "batch": count, "seed": seed, "loras": loras}
+    if workflow:
+        source_prompt = value.get("sourcePrompt", prompt)
+        if not isinstance(source_prompt, str) or len(source_prompt.encode()) > 12000 or "\0" in source_prompt:
+            raise ValueError("Invalid source prompt.")
+        data["sourcePrompt"] = source_prompt
+        context = value.get("context", {})
+        if not isinstance(context, dict) or context.keys() - {"document", "layer", "selection", "metadata"}:
+            raise ValueError("Invalid PhotoCraft workflow context.")
+        if len(json.dumps(context.get("metadata", {}))) > 64 << 10 or not isinstance(context.get("metadata", {}), dict):
+            raise ValueError("Invalid PhotoCraft document metadata.")
+        for key in ("document", "layer", "selection"):
+            encoded = context.get(key)
+            if encoded is not None:
+                if not isinstance(encoded, str) or len(encoded) > 88 << 20:
+                    raise ValueError("The workflow source image is too large.")
+                decode_png(encoded, 32 << 20)
+        data["context"] = context
+    return data
 
 
 class StudioJobs:
@@ -57,15 +78,21 @@ class StudioJobs:
 
     def submit(self, body):
         model = self.host.settings["model"]
-        data = request(body, model)
+        from .comfy_workflow import enabled, parse_workflow, read_workflow
+        workflow = enabled(self.host.settings)
+        mode = (self.host.settings.get("studioMode", "preset"), self.host.settings.get("studioWorkflow", ""), self.host.settings.get("engine", "direct"))
+        data = request(body, model, workflow=True) if workflow else request(body, model)
+        if workflow:
+            data["workflow"] = parse_workflow(body["workflowGraph"]) if "workflowGraph" in body else read_workflow(mode[1])
+            data["workflowPath"] = mode[1]
         from .lora import validate_studio
-        if data['loras']:
+        if data['loras'] and not workflow:
             validate_studio(data['loras'], self.host.settings['modelsDir'])
         # Publish the queued job under the same lock used by /engine changes.
         # Validation may decode large images, so do it before taking that lock,
         # then reject a concurrent model change rather than using the wrong one.
         with self.host.lock, self.lock:
-            if self.host.settings["model"] != model:
+            if self.host.settings["model"] != model or mode != (self.host.settings.get("studioMode", "preset"), self.host.settings.get("studioWorkflow", ""), self.host.settings.get("engine", "direct")):
                 raise ValueError("The selected model changed. Submit the generation again.")
             active = [job for job in self.jobs.values() if job.state not in TERMINAL]
             if len(active) >= 4:
@@ -87,11 +114,19 @@ class StudioJobs:
                 job.message = message
                 fraction = sampling_fraction(message)
                 if fraction is not None:
-                    job.progress = (len(images) + fraction) / data["batch"]
+                    job.progress = fraction if "workflow" in data else (len(images) + fraction) / data["batch"]
         try:
             if job.cancel.is_set():
                 raise Cancelled()
             job.state = "running"
+            if "workflow" in data:
+                result = self.host.generate_workflow(data["workflow"], data, job.cancel, progress)
+                if job.cancel.is_set():
+                    raise Cancelled()
+                with self.lock:
+                    job.result = result
+                    job.state, job.message, job.progress = "done", "Done", 1.0
+                return
             for index in range(data["batch"]):
                 if job.cancel.is_set():
                     raise Cancelled()
@@ -127,7 +162,7 @@ def dispatch(handler):
             if handler.headers.get("Content-Type", "").split(";")[0] != "application/json":
                 raise ValueError("Content-Type: application/json required.")
             length = int(handler.headers.get("Content-Length", "0"))
-            if not 0 < length <= 96 << 20:
+            if not 0 < length <= 256 << 20:
                 raise ValueError("Generation request is too large.")
             job = manager.submit(json.loads(handler.rfile.read(length)))
             handler.send_json(202, job.public())

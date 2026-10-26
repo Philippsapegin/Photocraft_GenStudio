@@ -92,3 +92,14 @@ The packager refuses to reuse an existing staging directory. Move a previous sta
 4. Verify the public release metadata and asset names. Record tests and actual limitations in release notes.
 
 GitHub Actions runs Python tests for source changes. Release packaging is currently performed on Windows with the documented pinned build; the repository does not claim a fully automated or signed release pipeline.
+
+## Workflow bridge checks
+
+`tests/test_comfy_workflow.py` checks the graph/file/provenance contract. Its three pixel tests use NumPy from an existing ComfyUI Python; the lightweight host skips those tests without adding NumPy to its runtime. They use synthetic tensors and PNGs, without importing torch.
+
+```powershell
+.venv\Scripts\python.exe scripts/comfy_workflow_smoke.py --comfy '<ComfyUI>' --python '<ComfyUI Python>\python.exe'
+.venv\Scripts\python.exe scripts/photocraft_workflow_smoke.py --exe '<patched PhotoCraft>\photocraft.exe' --cli '<patched PhotoCraft>\photocraft-cli.exe'
+```
+
+The first is explicitly CPU-only, installs the managed bridge and runs core ImageInvert/EmptyImage nodes on a dedicated server with isolated I/O/user folders. The second uses official PhotoCraft MCP and a synthetic host, including variable output sizes/batches, masks, recipe restore and connected source capture. Both exclude checkpoint inference. See [COMFY_WORKFLOWS.md](COMFY_WORKFLOWS.md) for the user-facing protocol and limits.

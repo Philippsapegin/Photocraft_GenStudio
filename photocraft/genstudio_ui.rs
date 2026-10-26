@@ -310,7 +310,9 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         app.ui.gen_studio.advanced_were_open = false;
     }
     if app.ui.gen_studio.open {
-        let model = photocraft_engine::genstudio::model_spec(&app.session.prefs().gen_studio.model).map_or("Choose model", |m| m.label);
+        let settings=&app.session.prefs().gen_studio;
+        let model = if settings.workflow_mode(){std::path::Path::new(&settings.studio_workflow).file_stem().and_then(|v|v.to_str()).unwrap_or("ComfyUI workflow").to_owned()}
+            else{photocraft_engine::genstudio::model_spec(&settings.model).map_or("Choose model",|m|m.label).to_owned()};
         let caption = format!("GenGate | {model}");
         // The custom header owns collapse; migrate the old invisible native body.
         let mut expanded = egui::collapsing_header::CollapsingState::load_with_default_open(ctx, egui::Id::new("genstudio-workspace").with("collapsing"), true);
@@ -347,7 +349,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         }
         let mut header = None;
         let response = window.show(ctx, |ui| {
-            let title = workspace_header(ui, model, collapsed);
+            let title = workspace_header(ui, &model, collapsed);
             open = !title.close.clicked();
             header = Some(title);
             if collapsed {
@@ -356,9 +358,8 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             egui::Frame::NONE.inner_margin(egui::Margin::symmetric(8, 12)).show(ui, |ui| {
                 let body_height = (ui.available_height() - 38.0).max(340.0);
                 ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), body_height), egui::Layout::top_down(egui::Align::Min), |ui| {
-                    // Reserved for upcoming tools; the model belongs in the left-aligned title.
-                    ui.allocate_space(egui::vec2(ui.available_width(), 24.0));
-                    workspace_actions = crate::genstudio_canvas::show(app, ui);
+                    workspace_actions = crate::genstudio_canvas::workflow_controls(app,ui);
+                    workspace_actions.extend(crate::genstudio_canvas::show(app, ui));
                 });
                 ui.separator();
                 ui.horizontal(|ui| {
@@ -534,6 +535,16 @@ fn settings(app: &mut PhotocraftApp, ui: &mut egui::Ui, draft: &mut Settings, st
                     }
                     text(ui, "Runtime folder", &mut draft.runtime_root);
                 });
+                if draft.engine==Engine::Comfy {
+                    ui.horizontal(|ui|{
+                        let current=&app.session.prefs().gen_studio;
+                        let applied=!draft.comfy_dir.trim().is_empty() && draft.comfy_dir==current.comfy_dir && draft.runtime_root==current.runtime_root;
+                        if ui.add_enabled(applied,egui::Button::new("Install / Update nodes")).on_hover_text("Install widget-free GenGate IN / OUT into this ComfyUI. Apply connection changes first; restart an already running ComfyUI afterwards.").clicked(){
+                            action=Some(("genstudio.comfy.install",json!({})));
+                        }
+                        ui.small("GenGate IN / OUT for Studio workflows");
+                    });
+                }
             });
         if response.header_response.clicked() {
             app.ui.gen_studio.advanced_open = !app.ui.gen_studio.advanced_open;

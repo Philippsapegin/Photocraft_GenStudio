@@ -1,0 +1,28 @@
+{
+  "1": {
+    "class_type": "GenGateIN",
+    "inputs": {}
+  },
+  "2": {
+    "class_type": "ImageInvert",
+    "inputs": {
+      "image": [
+        "1",
+        0
+      ]
+    }
+  },
+  "3": {
+    "class_type": "GenGateOUT",
+    "inputs": {
+      "images": [
+        "2",
+        0
+      ],
+      "prompt": [
+        "1",
+        5
+      ]
+    }
+  }
+}

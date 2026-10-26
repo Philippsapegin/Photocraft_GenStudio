@@ -74,6 +74,19 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(settings["directStartup"], "firstRequest")
         self.assertEqual(list(self.models.iterdir()), [])
 
+    def test_comfy_setup_installs_bridge_without_starting_a_process_or_downloading_models(self):
+        comfy = self.root / "ComfyUI"
+        (comfy / "custom_nodes/LanPaint").mkdir(parents=True)
+        (comfy / "main.py").write_text("# fixture, never execute")
+        request = {"installDir": str(self.destination), "photocraftDir": str(self.host), "modelsDir": str(self.models),
+                   "engine": "comfy", "comfyDir": str(comfy), "python": "existing/python.exe"}
+        with patch.object(installer, "check_python", return_value="existing/python.exe"), patch("subprocess.Popen", side_effect=AssertionError("Setup must not start a process")) as spawn, patch("urllib.request.urlopen", side_effect=AssertionError("No downloads")):
+            installer.install(request, self.bundle, shortcuts=False)
+            spawn.assert_not_called()
+        marker = json.loads((comfy / "custom_nodes/GenGate/gengate-nodes.json").read_text())
+        self.assertIn("nodes.py", marker["files"])
+        self.assertEqual(list(self.models.iterdir()), [])
+
     def test_unknown_editor_and_legacy_bundle_are_rejected_before_install_or_download(self):
         (self.host / "photocraft.exe").write_bytes(b"new official editor version")
         request = {"installDir": str(self.destination), "photocraftDir": str(self.host),
@@ -175,7 +188,7 @@ class InstallerTests(unittest.TestCase):
         updated = installer.read_json(prefs_path)
         presets[FIBO] = {**component_defaults(), "constantLora": "loras/fibo-edit.safetensors",
                          "constantLoraStrength": .75}
-        updated["genStudio"].update(model=FIBO, presets=presets, reduceEditResolution=True)
+        updated["genStudio"].update(model=FIBO, presets=presets, reduceEditResolution=True, studioMode="workflow", studioWorkflow="C:/Work/my workflow.json")
         installer.write_json(prefs_path, updated)
         with patch.object(installer, "check_python", return_value="existing/python.exe"), \
              patch("genstudio.models.resolve_components", return_value={}) as discover:
@@ -185,6 +198,8 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(kept["model"], FIBO)
         self.assertEqual(kept["presets"], presets)
         self.assertTrue(kept["reduceEditResolution"])
+        self.assertEqual(kept["studioMode"], "workflow")
+        self.assertEqual(kept["studioWorkflow"], "C:/Work/my workflow.json")
         self.assertEqual(list(self.models.iterdir()), [sentinel])
 
 

@@ -226,6 +226,11 @@ def install(request, bundle, *, shortcuts=True):
         settings["model"] = old_settings["model"]
     if isinstance(old_settings.get("reduceEditResolution"), bool):
         settings["reduceEditResolution"] = old_settings["reduceEditResolution"]
+    if old_settings.get("studioMode") in ("preset", "workflow"):
+        settings["studioMode"] = old_settings["studioMode"]
+    path = old_settings.get("studioWorkflow")
+    if isinstance(path, str) and len(path) <= 4096 and "\0" not in path:
+        settings["studioWorkflow"] = path
     if os.path.normcase(str(Path(old_settings.get("modelsDir") or ".").resolve())) == os.path.normcase(settings["modelsDir"]):
         for key in ("textEncoder", "vae"):
             value=old_settings.get(key)
@@ -247,6 +252,10 @@ def install(request, bundle, *, shortcuts=True):
     if engine == "comfy" and not lanpaint.exists():
         report("Installing the bundled, pinned LanPaint extension into the selected ComfyUI...")
         shutil.copytree(runtime / "third_party/LanPaint", lanpaint)
+    if engine == "comfy":
+        report("Installing GenGate IN / OUT nodes into the selected ComfyUI (no models)...")
+        from genstudio.comfy_workflow import install_nodes
+        install_nodes(request["comfyDir"])
     preferences["genStudio"] = settings
     report("Applying the verified PhotoCraft patch and keeping original files for restore...")
     installed = editor_patch.apply(version_dir, host, settings, preferences, profile, VERSION)

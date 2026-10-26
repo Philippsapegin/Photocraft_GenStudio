@@ -87,17 +87,19 @@ class ComfyClient:
                             "Start-Comfy.ps1 to disable dynamic VRAM.")
         return info, problems
 
-    def upload(self, name: str, data: bytes) -> str:
+    def upload(self, name: str, data: bytes, *, image_type="input") -> str:
+        if image_type not in ("input", "temp"):
+            raise ValueError("Unsupported upload location.")
         boundary = "genfill" + uuid.uuid4().hex
         body = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"image\"; "
                 f"filename=\"{name}\"\r\nContent-Type: image/png\r\n\r\n").encode()
-        body += data + f"\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"type\"\r\n\r\ninput\r\n--{boundary}--\r\n".encode()
+        body += data + f"\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"type\"\r\n\r\n{image_type}\r\n--{boundary}--\r\n".encode()
         request = Request(self.base + "/upload/image", data=body,
                           headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
         with urlopen(request, timeout=90) as response:
             result = json.loads(response.read())
         folder = result.get("subfolder", "")
-        return (folder + "/" if folder else "") + result["name"]
+        return (folder + "/" if folder else "") + result["name"] + (" [temp]" if image_type == "temp" else "")
 
     def generate(self, image: Image.Image, mask: Image.Image, seed: int, prompt: str,
                  cancel, progress) -> Image.Image:
@@ -161,12 +163,15 @@ class ComfyClient:
             workflow['7' if self.config.get('model') == 'flux-3-image-klein' else '8']['inputs']['clip'] = clip
         return self.run_workflow(workflow, cancel, progress, uid)
 
-    def run_workflow(self, workflow, cancel, progress, uid):
+    def run_workflow(self, workflow, cancel, progress, uid, *, extra_data=None, return_history=False):
         if cancel.is_set():
             raise Cancelled()
         client_id = "photocraft-genstudio-" + uid
         with ComfyProgress(self.base, client_id, progress) as stream:
-            result = self.request("/prompt", {"prompt": workflow, "client_id": client_id})
+            body = {"prompt": workflow, "client_id": client_id}
+            if extra_data is not None:
+                body["extra_data"] = extra_data
+            result = self.request("/prompt", body)
             if result.get("node_errors"):
                 raise RuntimeError("ComfyUI rejected the workflow: " + json.dumps(result["node_errors"]))
             prompt_id = result["prompt_id"]
@@ -185,6 +190,8 @@ class ComfyClient:
                             detail = next((m[1].get("exception_message", "Model error")
                                            for m in reversed(messages) if m[0] == "execution_error"), "ComfyUI error")
                             raise RuntimeError(detail)
+                        if return_history:
+                            return item
                         images = item.get("outputs", {}).get("14", {}).get("images", [])
                         if images:
                             data = self.request("/view?" + urlencode(images[0]), raw=True, timeout=60)

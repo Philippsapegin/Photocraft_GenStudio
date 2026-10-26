@@ -7,6 +7,25 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("prepare_selection_fill", ROOT / "scripts/prepare_selection_fill.py")
 preparer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(preparer)
+queue_spec = importlib.util.spec_from_file_location("prepare_fill_ux", ROOT / "scripts/prepare_fill_ux.py")
+queue_preparer = importlib.util.module_from_spec(queue_spec)
+queue_spec.loader.exec_module(queue_preparer)
+
+
+class RemoveDispatchTests(unittest.TestCase):
+    def test_current_and_legacy_dispatch_queue_before_starting_a_native_job(self):
+        for dispatch in ('    let result = app.run(cmd, p);\n    match result {',
+                         '    match app.run(cmd, p) {'):
+            with self.subTest(dispatch=dispatch):
+                source = 'pub fn finish_stroke(\n    p["target"] = target;\n' + dispatch + '\n}\n'
+                changed = queue_preparer.prepare_remove_dispatch(source)
+                self.assertLess(changed.index('queue_ai_fill(app, p);'), changed.index(dispatch))
+                self.assertLess(changed.index('p["target"]'), changed.index('queue_ai_fill(app, p);'))
+                self.assertEqual(queue_preparer.prepare_remove_dispatch(changed), changed)
+
+    def test_unknown_dispatch_is_refused(self):
+        with self.assertRaises((RuntimeError, ValueError)):
+            queue_preparer.prepare_remove_dispatch('pub fn finish_stroke(\n    new_dispatch(p);\n}')
 
 
 class ClearDispatchTests(unittest.TestCase):

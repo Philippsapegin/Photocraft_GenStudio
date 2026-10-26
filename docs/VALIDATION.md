@@ -452,5 +452,23 @@ autorepeat flag through dispatch. Three synthetic preparer regressions cover
 current/earlier dispatch, idempotence and rejecting changed integration points.
 The larger control snapshot needs a macro expansion limit of 256; this changes
 no runtime input bounds or protocol fields. Python: 141 tests, five tensor skips.
-Native and installer results are recorded below when the development build is
-complete. No checkpoint inference is part of these checks.
+Native and installer results for the complete development build are recorded
+below. No checkpoint inference is part of these checks.
+
+## 0.9.3 development: Studio ComfyUI workflows — 2026-10-26
+
+- **155 Python tests: 147 passed, eight skipped** in the lightweight host. The three new pixel/tensor cases also passed in the existing ComfyUI Python with NumPy-backed test tensors, without importing torch; five existing model-tensor tests remain skipped in the host.
+- Native validation passed **2,221 engine and 3,841 UI tests**, with 14 and 18 ignored respectively. The final UI run was interrupted by the turn limit; its remaining unreported cases passed on 2026-10-27 using the same compiled test executable. This includes the new retouch-queue regression. No upstream translation tests were excluded.
+- Final optimized release build and all-target clippy with warnings denied passed. Dependency layering passed for 31 crates; WASM passed for 24 crates and HEIF codecs. The adversarial-command panic hunt and Windows input-layout regression passed. Exact production `parity::compute`/`to_markdown`, the functions used by the upstream parity example, produced **633/633** live menu entries and regenerated the native checklist.
+- Actual ComfyUI ran on a dedicated CPU-only server with isolated input, output, temporary, user and database folders. IN → ImageInvert → OUT returned exact expected pixels and dimensions; alpha-mask polarity, fresh data on repeated graphs, empty-prompt/text-only graphs, batches and multiple OUT nodes passed. Only core image operations ran: no checkpoints, diffusion models or CUDA initialization. Workflow execution succeeds without editing-preset components; quick editing still validates its own preset.
+- Official PhotoCraft MCP checked the final workflow UI with synthetic server results: empty-prompt/no-document generation, variable output sizes and counts, layer masks/names, prompt/seed/LoRA/workflow metadata, native save/reopen, layer restoration and lazy document/layer/selection capture. The same workflow check passed against the installed editor and bundled runtime. The Studio screenshot was inspected in the Studio theme.
+- Existing LoRA, selection fill, queue/progress, segmentation, process isolation and Qwen/FLUX workspace checks passed with synthetic workers. The 0.16 retouch dispatcher now enters the shared queue before launching a native Remove job, including individual strokes; its native paint-target field is retained. The preparer handles both old and new dispatch shapes idempotently and rejects unknown integration points.
+- The ZIP's CRC and **2,511 manifest files** passed verification. Its embedded Python installed onto an isolated official 0.16 editor in a Unicode path; repeat install, editor refresh/reapply, uninstall/original restore and reinstall passed. The archive contains binary deltas, its host and bridge nodes, **no complete PhotoCraft editor or model weights**. The lightweight host contains no torch.
+- Updated the local official editor to **PhotoCraft 0.16.0** and its separate add-on to **GenGate 0.9.3**, with a prior program/profile backup. Native preferences and layout hashes are preserved, all **329 shared model files** retain their sizes/timestamps, and the user's **Direct / Qwen** choice remains selected. The installer refreshed the canonical PhotoCraft shortcuts without starting an engine.
+
+Archive: `GenGate-0.9.3-windows-x64-addon.zip`, **343,472,789 bytes**, SHA-256 `e4708f1c07d2fb565dfa607f051ad37b43a7810d4de3cd6a8b60a4e285609a08`.
+
+Installed editor SHA-256: `c5624037ab749363d97822aa1e62d953d9e812a709319318652aa7e1d7900c43`.
+Installed CLI SHA-256: `e6096b2eaea495cfe530b8a27af8466a275ed1112b6bd31259efde60a8de96af`.
+
+Evidence: `.runtime/workflow-native-gates.json`, `.runtime/workflow-final-ui-gates.json`, `.runtime/workflow-compat-mcp.json`, `.runtime/comfy-workflow-cpu-latest.json`, `.runtime/workflow-mcp-latest.json`, `.runtime/workflow-delivery.json`, `.runtime/addon-validation.json`, `.runtime/workflow-parity.json` and `.runtime/workflow-installed.json`. Real model quality, GPU memory use and custom third-party workflow dependencies were not tested. No push, tag or release publication is part of this update.

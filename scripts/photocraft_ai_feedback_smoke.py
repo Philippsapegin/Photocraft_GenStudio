@@ -146,7 +146,12 @@ def main():
             stroke(150)
             assert host.generation_started.wait(10)
             stroke(210);stroke(270)
-            until(lambda:len(queue())==3)
+            try:
+                until(lambda:len(queue())==3)
+            except TimeoutError:
+                report["queue_failure"]={"fills":queue(),"ui":inspect(),"calls":host.calls}
+                screenshot("queue-failure.png")
+                raise
             fills=queue()
             assert [fill["state"] for fill in fills]==["running","queued","queued"]
             assert len(host.calls)==1

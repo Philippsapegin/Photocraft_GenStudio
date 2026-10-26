@@ -91,7 +91,9 @@ class EngineHost:
                 raise ValueError("Wait for the current AI request before changing the engine.")
             # Policy-only changes do not restart a running engine.
             operational = ("model", "engine", "comfyUrl", "comfyDir", "comfyPython", "directPython", "modelsDir")
-            if any(settings[k] != self.settings[k] for k in operational) or active_components(settings) != active_components(self.settings):
+            from .comfy_workflow import enabled
+            if (any(settings[k] != self.settings[k] for k in operational) or active_components(settings) != active_components(self.settings)
+                    or enabled(settings) != enabled(self.settings)):
                 self.stop()
             self.settings = settings
 
@@ -133,7 +135,7 @@ class EngineHost:
         finally:
             self.lock.release()
 
-    def ensure(self, event="request", progress=lambda message: None, cancel=None, studio=False):
+    def ensure(self, event="request", progress=lambda message: None, cancel=None, studio=False, workflow=None):
         if event not in ("manual", "request", "appStart"):
             raise ValueError("Unknown start event.")
         with self.lock:
@@ -141,15 +143,22 @@ class EngineHost:
                 from genfill.comfy import Cancelled
                 raise Cancelled()
             from .models import resolve_components, resolve_lora, extra_paths
+            from .comfy_workflow import enabled, read_workflow, inspect as inspect_workflow
+            custom = enabled(self.settings) and (studio or event in ("manual", "appStart"))
+            definition = (workflow or read_workflow(self.settings["studioWorkflow"])) if custom else None
             components = active_components(self.settings)
-            resolve_components(self.settings["modelsDir"], components, self.settings["model"])
-            if not studio and event == "request":
+            if not custom:
+                resolve_components(self.settings["modelsDir"], components, self.settings["model"])
+            if not studio and event == "request" and not custom:
                 resolve_lora(self.settings["modelsDir"], components)
             if self.probe():
                 if self.engine == "comfy":
-                    _, problems = ComfyClient(self.config()).inspect(studio=True) if studio else ComfyClient(self.config()).inspect()
-                    if problems:
-                        raise ValueError("\n".join(problems))
+                    if custom:
+                        inspect_workflow(ComfyClient(self.config()), definition)
+                    else:
+                        _, problems = ComfyClient(self.config()).inspect(studio=True) if studio else ComfyClient(self.config()).inspect()
+                        if problems:
+                            raise ValueError("\n".join(problems))
                 return self.status()
             allowed = event == "manual" or self.policy() == "firstRequest" and event == "request" or self.policy() == "appStart"
             if not allowed:
@@ -161,16 +170,20 @@ class EngineHost:
                 folder = Path(self.settings["comfyDir"])
                 if not python.is_file() or not (folder / "main.py").is_file():
                     raise ValueError("Set the ComfyUI folder and Python executable in GenGate.")
+                if enabled(self.settings):
+                    from .comfy_workflow import install_nodes
+                    install_nodes(str(folder))
                 self.runtime.mkdir(parents=True, exist_ok=True)
                 paths_file = self.runtime / "model-paths.yaml"
-                paths_file.write_text(json.dumps(extra_paths(self.settings["modelsDir"], components, self.settings["model"])), encoding="utf-8")
+                paths_file.write_text(json.dumps(extra_paths(self.settings["modelsDir"], None if custom else components, self.settings["model"])), encoding="utf-8")
                 command = [str(python), "-s", "main.py", "--listen", "127.0.0.1", "--port",
                            str(urlparse(self.settings["comfyUrl"]).port),
-                           "--disable-all-custom-nodes", "--whitelist-custom-nodes", "LanPaint",
                            "--disable-comfy-compiler", "--reserve-vram", "1", "--preview-method", "none",
                            "--disable-dynamic-vram", "--disable-async-offload", "--disable-pinned-memory",
                            "--database-url", "sqlite:///" + str(self.runtime / "comfy.db").replace("\\", "/"),
                            "--extra-model-paths-config", str(paths_file)]
+                if not enabled(self.settings):
+                    command += ["--disable-all-custom-nodes", "--whitelist-custom-nodes", "LanPaint", "GenGate"]
                 cwd = folder
             else:
                 python = Path(self.settings["directPython"])
@@ -202,9 +215,12 @@ class EngineHost:
                     raise Cancelled()
                 if self.probe():
                     if self.engine == "comfy":
-                        _, problems = ComfyClient(self.config()).inspect(studio=True) if studio else ComfyClient(self.config()).inspect()
-                        if problems:
-                            raise ValueError("\n".join(problems))
+                        if custom:
+                            inspect_workflow(ComfyClient(self.config()), definition)
+                        else:
+                            _, problems = ComfyClient(self.config()).inspect(studio=True) if studio else ComfyClient(self.config()).inspect()
+                            if problems:
+                                raise ValueError("\n".join(problems))
                     self.message = "Ready"
                     return self.status()
                 if self.process.poll() is not None:
@@ -268,6 +284,20 @@ class EngineHost:
                     return ComfyClient(self.config()).generate_studio(references, seed, prompt, width, height, cancel, progress, loras=loras)
                 from .direct_client import generate_studio
                 return generate_studio(references, seed, prompt, width, height, cancel, progress, base=self.direct_url, loras=loras)
+            finally:
+                with self.lock:
+                    self.busy = False
+
+    def generate_workflow(self, definition, data, cancel, progress):
+        from .comfy_workflow import enabled, generate
+        if not enabled(self.settings):
+            raise ValueError("Select ComfyUI workflow mode in the GenGate studio.")
+        with self.work_lock:
+            with self.lock:
+                self.busy = True
+            try:
+                self.ensure("request", progress, cancel, studio=True, workflow=definition)
+                return generate(ComfyClient(self.config()), definition, data, self.config(), cancel, progress)
             finally:
                 with self.lock:
                     self.busy = False

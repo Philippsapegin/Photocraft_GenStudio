@@ -58,6 +58,10 @@ def health():
 
 
 def run(action, settings=None, event="manual"):
+    if action == "install_nodes":
+        from .comfy_workflow import install_nodes
+        from .settings import validate
+        return install_nodes(validate(settings)["comfyDir"])
     if action == "models":
         from .models import catalog
         from .settings import validate

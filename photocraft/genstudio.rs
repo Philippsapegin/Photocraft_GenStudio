@@ -95,6 +95,8 @@ pub struct Settings {
     pub vae: String,
     pub presets: std::collections::BTreeMap<String, PresetComponents>,
     pub engine: Engine,
+    pub studio_mode: String,
+    pub studio_workflow: String,
     pub comfy_startup: Startup,
     pub direct_startup: Startup,
     pub comfy_url: String,
@@ -126,6 +128,8 @@ impl Default for Settings {
             vae: string("vae"),
             presets: v.get("presets").and_then(|value| serde_json::from_value(value.clone()).ok()).unwrap_or_default(),
             engine: if v.get("engine").and_then(Value::as_str) == Some("direct") { Engine::Direct } else { Engine::Comfy },
+            studio_mode: v.get("studioMode").and_then(Value::as_str).unwrap_or("preset").to_owned(),
+            studio_workflow: string("studioWorkflow"),
             comfy_startup: Startup::FirstRequest,
             direct_startup: Startup::FirstRequest,
             comfy_url: string("comfyUrl"),
@@ -155,6 +159,9 @@ fn read_installed_defaults(path: &std::path::Path) -> Option<Value> {
 }
 
 impl Settings {
+    pub fn workflow_mode(&self) -> bool {
+        self.engine == Engine::Comfy && self.studio_mode == "workflow"
+    }
     pub fn components(&self) -> PresetComponents {
         self.presets.get(&self.model).cloned().unwrap_or_else(|| {
             if self.presets.is_empty() {
@@ -190,6 +197,7 @@ impl Settings {
         }
         for s in [
             &self.model,
+            &self.studio_workflow,
             &self.text_encoder,
             &self.vae,
             &self.comfy_url,
@@ -205,6 +213,9 @@ impl Settings {
         }
         if model_spec(&self.model).is_none() {
             return Err("Unsupported model".into());
+        }
+        if !matches!(self.studio_mode.as_str(), "preset" | "workflow") {
+            return Err("Choose Preset or ComfyUI workflow for Studio".into());
         }
         if self.runtime_root.trim().is_empty() {
             return Err("GenGate runtime folder is required".into());
@@ -422,6 +433,7 @@ pub fn specs() -> Vec<CommandSpec> {
         make("genstudio.engine.refresh", "Refresh GenGate Engine", "{}", |s, _| begin(s, "status", "manual")),
         make("genstudio.engine.start", "Start GenGate Engine", "{}", |s, _| begin(s, "start", "manual")),
         make("genstudio.engine.stop", "Stop GenGate Engine", "{}", |s, _| begin(s, "stop", "manual")),
+        make("genstudio.comfy.install", "Install GenGate ComfyUI nodes", "{}", |s, _| begin(s, "install_nodes", "manual")),
         make("genstudio.engine.ensure", "Ensure GenGate Engine", "{\"event\":\"request|appStart\"}", ensure),
         make(
             "genstudio.engine.configure",

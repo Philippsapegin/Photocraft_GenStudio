@@ -30,11 +30,18 @@ def generate(folder, settings, body, emit, *, configure=None, request=http_json,
             if state["state"] == "done":
                 result = poll(route + "/result",request=request,cancelled=cancelled,pause=time.sleep,timeout=30)
                 images = result.get("images", [])
-                if len(images) != body.get("batch", 1):
+                from .comfy_workflow import enabled
+                custom = enabled(settings)
+                if not 1 <= len(images) <= 8 or not custom and len(images) != body.get("batch", 1):
                     raise RuntimeError("The engine returned an incomplete batch.")
                 for index, image in enumerate(images):
                     (folder / f"result-{index}.png").write_bytes(base64.b64decode(image["image"], validate=True))
-                (folder / "results.json").write_text(json.dumps({"count": len(images)}))
+                    if custom and image.get("mask"):
+                        (folder / f"result-{index}-mask.png").write_bytes(base64.b64decode(image["mask"], validate=True))
+                metadata = {"count": len(images)}
+                if custom:
+                    metadata.update(workflow=result.get("workflow", {}), images=[{k: v for k, v in row.items() if k not in ("image", "mask")} | {"hasMask": bool(row.get("mask"))} for row in images])
+                (folder / "results.json").write_text(json.dumps(metadata), encoding="utf-8")
                 complete=True
                 emit({"done": True})
                 return

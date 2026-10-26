@@ -10,6 +10,7 @@ def prepare(source,replace):
     engine=source/"crates/engine/src"
     ui=source/"crates/ui-egui/src"
     shutil.copyfile(ROOT/"photocraft/genstudio_generate.rs",engine/"genstudio_generate.rs")
+    shutil.copyfile(ROOT/"photocraft/genstudio_workflow.rs",engine/"genstudio_workflow.rs")
     shutil.copyfile(ROOT/"photocraft/genstudio_canvas.rs",ui/"genstudio_canvas.rs")
     shutil.copyfile(ROOT/"photocraft/genstudio_lora.rs",engine/"genstudio_lora.rs")
     shutil.copyfile(ROOT/"photocraft/genstudio_lora_ui.rs",ui/"genstudio_lora_ui.rs")
@@ -41,6 +42,7 @@ def prepare(source,replace):
         path.write_text("".join(lines),encoding="utf-8")
         if not seen:replace(path,anchor,anchor+"\n"+addition)
     module(engine/"lib.rs","pub mod genstudio;","pub mod genstudio_generate;")
+    module(engine/"lib.rs","pub mod genstudio;","pub mod genstudio_workflow;")
     module(engine/"lib.rs","pub mod genstudio;","pub mod genstudio_lora;")
     if 'v.extend(crate::genstudio_lora::specs());' not in (engine/"commands.rs").read_text(encoding="utf-8"):
         replace(engine/"commands.rs","v.extend(crate::genstudio::specs());","v.extend(crate::genstudio::specs());\n    v.extend(crate::genstudio_lora::specs());")
@@ -68,10 +70,10 @@ def prepare(source,replace):
     jobs_ui=ui/'jobs_ui.rs'
     if 'j.command.starts_with("genstudio.loras.")' not in jobs_ui.read_text(encoding='utf-8'):
         replace(jobs_ui,'j.command.starts_with("genstudio.reference.")','j.command.starts_with("genstudio.reference.") || j.command.starts_with("genstudio.loras.")')
-    commands=("inspect","configure","submit","reference.browse","reference.set","reference.remove","reference.selection","layer.restore")
+    commands=("inspect","configure","submit","reference.browse","reference.set","reference.remove","reference.selection","layer.restore","workflow.browse","workflow.set")
     # These hidden automation actions still participate in PhotoCraft's command
     # catalog. Reuse the editor's translated action words beside the suite name.
-    words=("Properties","Settings","Generate","Open","Add","Remove","Selection","Open")
+    words=("Properties","Settings","Generate","Open","Add","Remove","Selection","Open","Open","Settings")
     for catalog in (ui/"i18n").glob("*.tsv"):
         text=catalog.read_text(encoding="utf-8")
         plain={cells[1]:cells[2] for line in text.splitlines() if len(cells:=line.split("\t"))==3 and not cells[0]}

@@ -69,6 +69,7 @@ pub struct Cache {
     inbox: Arc<Mutex<Vec<Loaded>>>,
     rects: Vec<(Slot, Rect)>,
     pub info: Value,
+    workflow_controls:Value,
     prompt_rect: Option<Rect>,
     file_hover: Option<Slot>,
     capture: Option<(JobId, u64)>,
@@ -168,7 +169,9 @@ fn insert(text: &mut String, at: usize, number: usize) -> usize {
     insert_for(text, at, number, MODELS[0])
 }
 fn sync_model(app: &mut PhotocraftApp) -> ModelSpec {
-    let model = model_spec(&app.session.prefs().gen_studio.model).unwrap_or(MODELS[0]);
+    let model = if app.session.prefs().gen_studio.workflow_mode() {
+        ModelSpec{id:"workflow",label:"ComfyUI workflow",reference_limit:10,zero_based:false}
+    } else {model_spec(&app.session.prefs().gen_studio.model).unwrap_or(MODELS[0])};
     if app.studio.model != model.id {
         let prompt = &mut app.ui.gen_studio.workspace.prompt;
         *prompt = rewrite(prompt, false, |ordinal, _| Ok(model.chip(ordinal))).unwrap_or_else(|_| prompt.clone());
@@ -290,6 +293,32 @@ fn capture_result(cache: &mut Cache, result: &Value, ticket: u64) -> Result<(), 
     start_load(cache, Slot::Main, result["name"].as_str().unwrap_or("Selection").into(), result["source"] != "generated", move || Ok(bytes))
 }
 pub fn menu(app: &mut PhotocraftApp, id: &str, p: &Value) -> Option<Result<Value, String>> {
+    if id=="genstudio.studio.workflow.set" {
+        return Some((||{
+            if photocraft_engine::genstudio_queue::has_pending(&app.session) || app.session.jobs().iter().any(|j|j.state=="running" && j.command=="genstudio.studio.generate") {
+                return Err("Wait for the current AI request before changing its workflow".into());
+            }
+            let mut settings=app.session.prefs().gen_studio.clone();
+            if let Some(mode)=p.get("mode") {settings.studio_mode=mode.as_str().ok_or("Workflow mode must be text")?.into();}
+            if let Some(path)=p.get("path") {settings.studio_workflow=path.as_str().ok_or("Workflow path must be text")?.into();}
+            if settings.studio_mode=="workflow" && settings.engine!=photocraft_engine::genstudio::Engine::Comfy {
+                return Err("Choose ComfyUI in Preferences > GenGate Settings to use workflows".into());
+            }
+            settings.validate()?;
+            app.run("genstudio.engine.configure",serde_json::to_value(settings).map_err(err)?)
+        })());
+    }
+    if id=="genstudio.studio.workflow.browse" {
+        let settings=&app.session.prefs().gen_studio;
+        if settings.engine!=photocraft_engine::genstudio::Engine::Comfy {return Some(Err("Choose the ComfyUI engine in GenGate Settings".into()));}
+        let initial_dir=if settings.studio_workflow.is_empty(){Some(std::path::Path::new(&settings.comfy_dir).join("user/default/workflows").to_string_lossy().into_owned())}
+            else {std::path::Path::new(&settings.studio_workflow).parent().map(|p|p.to_string_lossy().into_owned())};
+        return Some(app.ask_file(crate::file_dialog::FileDialogRequest::Open{multiple:false,initial_dir,extensions:Some(vec!["json".into()])},|app,answer|{
+            let crate::file_dialog::FileDialogAnswer::Paths(paths)=answer else{return Err("Choose a ComfyUI API workflow JSON file".into())};
+            let path=paths.first().ok_or("No workflow selected")?;
+            menu(app,"genstudio.studio.workflow.set",&json!({"mode":"workflow","path":path})).ok_or("Workflow action is missing")?
+        }));
+    }
     if let Some(result) = crate::genstudio_lora_ui::menu(app,id,p) { return Some(result); }
     match id {
         "genstudio.studio.layer.restore" => Some((|| {
@@ -373,9 +402,11 @@ pub fn menu(app: &mut PhotocraftApp, id: &str, p: &Value) -> Option<Result<Value
                 return Err("Wait for references to finish loading".into());
             }
             let state = &app.ui.gen_studio.workspace;
-            let model = model_spec(&app.session.prefs().gen_studio.model).ok_or("Choose a supported model")?;
+            let workflow=app.session.prefs().gen_studio.workflow_mode();
+            let model = if workflow {ModelSpec{id:"workflow",label:"ComfyUI workflow",reference_limit:10,zero_based:false}}
+                else {model_spec(&app.session.prefs().gen_studio.model).ok_or("Choose a supported model")?};
             let references: Vec<_> = app.studio.main.iter().chain(app.studio.extras.iter().take(model.reference_limit.saturating_sub(1)).filter_map(Option::as_ref)).collect();
-            let prompt = compiled_for(&state.prompt, references.len(), model)?;
+            let prompt = if workflow {state.prompt.clone()}else{compiled_for(&state.prompt, references.len(), model)?};
             let (width, height) = dimensions(state.resolution, app.studio.main.as_ref().map(|r| r.image.dimensions()), &state.aspect_ratio);
             let references: Vec<_> = references.into_iter().map(|r| r.png.clone()).collect();
             let result = app.run(
@@ -438,6 +469,9 @@ fn apply_layer(app: &mut PhotocraftApp, target: Slot, restore: bool, result: &Va
         if let Some(model)=result["generation"]["model"].as_str().filter(|id|model_spec(id).is_some()) {
             app.session.edit_prefs(|p|p.gen_studio.model=model.into());
         }
+        if let Some(path)=result["generation"]["workflow"]["path"].as_str().filter(|v|v.len()<=4096 && !v.contains('\0')) {
+            app.session.edit_prefs(|p|{p.gen_studio.engine=photocraft_engine::genstudio::Engine::Comfy;p.gen_studio.studio_mode="workflow".into();p.gen_studio.studio_workflow=path.into();});
+        } else if result["generation"].is_object() {app.session.edit_prefs(|p|p.gen_studio.studio_mode="preset".into());}
         for slot in app.studio.extras.iter_mut(){*slot=None;}
         app.studio.loading.retain(|slot,_|*slot==target);
         app.studio.main=None;
@@ -643,6 +677,38 @@ fn accent_label(tokens: &crate::theme::Tokens) -> egui::Color32 {
     color
 }
 
+pub fn workflow_controls(app:&mut PhotocraftApp,ui:&mut egui::Ui)->Vec<(&'static str,Value)>{
+    let settings=app.session.prefs().gen_studio.clone();
+    let available=settings.engine==photocraft_engine::genstudio::Engine::Comfy;
+    let mut mode=if settings.workflow_mode(){"workflow"}else{"preset"};
+    let mut actions=Vec::new();let mut info=json!({"mode":mode,"path":settings.studio_workflow,"available":available});
+    ui.horizontal(|ui|{
+        ui.spacing_mut().item_spacing.x=8.0;
+        ui.label("Processing");
+        let combo=egui::ComboBox::from_id_salt("gengate-studio-processing").width(170.0)
+            .selected_text(if mode=="workflow"{"ComfyUI workflow"}else{"Preset"}).show_ui(ui,|ui|{
+                ui.selectable_value(&mut mode,"preset","Preset");
+                ui.add_enabled_ui(available,|ui|ui.selectable_value(&mut mode,"workflow","ComfyUI workflow"));
+            });
+        info["selector"]=rect_json(combo.response.rect);
+        if mode!=if settings.workflow_mode(){"workflow"}else{"preset"} {
+            if mode=="workflow" && settings.studio_workflow.is_empty(){actions.push(("genstudio.studio.workflow.browse",json!({})));}
+            else{actions.push(("genstudio.studio.workflow.set",json!({"mode":mode})));}
+        }
+        if available {
+            let button=ui.button("Open workflow…").on_hover_text("Choose JSON exported with Export (API) in ComfyUI");
+            info["browse"]=rect_json(button.rect);
+            if button.clicked(){actions.push(("genstudio.studio.workflow.browse",json!({})));}
+            if !settings.studio_workflow.is_empty(){
+                let label=std::path::Path::new(&settings.studio_workflow).file_stem().and_then(|n|n.to_str()).unwrap_or("Workflow");
+                ui.add(egui::Label::new(label).truncate()).on_hover_text(&settings.studio_workflow);
+            }
+        } else {ui.add(egui::Label::new("Choose ComfyUI in GenGate Settings to use workflows").truncate());}
+    });
+    app.studio.workflow_controls=info;
+    actions
+}
+
 pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> Vec<(&'static str, Value)> {
     let model = sync_model(app);
     let mut cache = std::mem::take(&mut app.studio);
@@ -797,8 +863,10 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> Vec<(&'static str, Va
         if loras.clicked(){actions.push(("genstudio.loras.open",json!({})));}
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let running = app.session.jobs().iter().any(|j| j.command == "genstudio.studio.generate" && j.state == "running");
-            let ready = !running && cache.loading.is_empty() && !state.prompt.trim().is_empty()
-                && (model.id!="fibo-2-edit-turbo" || !ids(&cache).is_empty());
+            let custom=app.session.prefs().gen_studio.workflow_mode();
+            let ready = !running && cache.loading.is_empty() && (custom || !state.prompt.trim().is_empty())
+                && (custom || model.id!="fibo-2-edit-turbo" || !ids(&cache).is_empty())
+                && (!custom || !app.session.prefs().gen_studio.studio_workflow.is_empty());
             let generate = ui.add_enabled(
                 ready,
                 egui::Button::new(egui::RichText::new("Generate").color(accent_label(&tokens))).min_size(vec2(72.0, control_height)).fill(tokens.accent),
@@ -840,6 +908,7 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> Vec<(&'static str, Va
             "loading":!cache.loading.is_empty(),"promptRect":cache.prompt_rect.map(|r|[r.min.x,r.min.y,r.width(),r.height()]),
         "slots":cache.rects.iter().map(|(s,r)|json!({"slot":match s {Slot::Main=>json!("main"),Slot::Extra(i)=>json!(i)},"rect":[r.min.x,r.min.y,r.width(),r.height()]})).collect::<Vec<_>>()});
     app.studio = cache;
+    app.studio.info["workflow"]=app.studio.workflow_controls.clone();
     app.studio.info["loras"]=crate::genstudio_lora_ui::info(app);
     actions
 }

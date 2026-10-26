@@ -1,0 +1,386 @@
+{
+  "last_node_id": 3,
+  "last_link_id": 3,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "GenGateIN",
+      "pos": [
+        50,
+        50
+      ],
+      "size": [
+        290,
+        850
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "links": [
+            1
+          ],
+          "slot_index": 0
+        },
+        {
+          "name": "mask",
+          "type": "MASK",
+          "links": null,
+          "slot_index": 1
+        },
+        {
+          "name": "document",
+          "type": "IMAGE",
+          "links": null,
+          "slot_index": 2
+        },
+        {
+          "name": "layer",
+          "type": "IMAGE",
+          "links": null,
+          "slot_index": 3
+        },
+        {
+          "name": "selection",
+          "type": "MASK",
+          "links": null,
+          "slot_index": 4
+        },
+        {
+          "name": "prompt",
+          "type": "STRING",
+          "links": [
+            3
+          ],
+          "slot_index": 5
+        },
+        {
+          "name": "width",
+          "type": "INT",
+          "links": null,
+          "slot_index": 6
+        },
+        {
+          "name": "height",
+          "type": "INT",
+          "links": null,
+          "slot_index": 7
+        },
+        {
+          "name": "seed",
+          "type": "INT",
+          "links": null,
+          "slot_index": 8
+        },
+        {
+          "name": "batch",
+          "type": "INT",
+          "links": null,
+          "slot_index": 9
+        },
+        {
+          "name": "source_prompt",
+          "type": "STRING",
+          "links": null,
+          "slot_index": 10
+        },
+        {
+          "name": "reference_count",
+          "type": "INT",
+          "links": null,
+          "slot_index": 11
+        },
+        {
+          "name": "references",
+          "type": "IMAGE",
+          "links": null,
+          "slot_index": 12
+        },
+        {
+          "name": "reference_masks",
+          "type": "MASK",
+          "links": null,
+          "slot_index": 13
+        },
+        {
+          "name": "preset",
+          "type": "STRING",
+          "links": null,
+          "slot_index": 14
+        },
+        {
+          "name": "model",
+          "type": "STRING",
+          "links": null,
+          "slot_index": 15
+        },
+        {
+          "name": "text_encoder",
+          "type": "STRING",
+          "links": null,
+          "slot_index": 16
+        },
+        {
+          "name": "vae",
+          "type": "STRING",
+          "links": null,
+          "slot_index": 17
+        },
+        {
+          "name": "prompt_upsampler",
+          "type": "STRING",
+          "links": null,
+          "slot_index": 18
+        },
+        {
+          "name": "loras",
+          "type": "STRING",
+          "links": null,
+          "slot_index": 19
+        },
+        {
+          "name": "metadata",
+          "type": "STRING",
+          "links": null,
+          "slot_index": 20
+        },
+        {
+          "name": "reference_2",
+          "type": "IMAGE",
+          "links": null,
+          "slot_index": 21
+        },
+        {
+          "name": "reference_2_mask",
+          "type": "MASK",
+          "links": null,
+          "slot_index": 22
+        },
+        {
+          "name": "reference_3",
+          "type": "IMAGE",
+          "links": null,
+          "slot_index": 23
+        },
+        {
+          "name": "reference_3_mask",
+          "type": "MASK",
+          "links": null,
+          "slot_index": 24
+        },
+        {
+          "name": "reference_4",
+          "type": "IMAGE",
+          "links": null,
+          "slot_index": 25
+        },
+        {
+          "name": "reference_4_mask",
+          "type": "MASK",
+          "links": null,
+          "slot_index": 26
+        },
+        {
+          "name": "reference_5",
+          "type": "IMAGE",
+          "links": null,
+          "slot_index": 27
+        },
+        {
+          "name": "reference_5_mask",
+          "type": "MASK",
+          "links": null,
+          "slot_index": 28
+        },
+        {
+          "name": "reference_6",
+          "type": "IMAGE",
+          "links": null,
+          "slot_index": 29
+        },
+        {
+          "name": "reference_6_mask",
+          "type": "MASK",
+          "links": null,
+          "slot_index": 30
+        },
+        {
+          "name": "reference_7",
+          "type": "IMAGE",
+          "links": null,
+          "slot_index": 31
+        },
+        {
+          "name": "reference_7_mask",
+          "type": "MASK",
+          "links": null,
+          "slot_index": 32
+        },
+        {
+          "name": "reference_8",
+          "type": "IMAGE",
+          "links": null,
+          "slot_index": 33
+        },
+        {
+          "name": "reference_8_mask",
+          "type": "MASK",
+          "links": null,
+          "slot_index": 34
+        },
+        {
+          "name": "reference_9",
+          "type": "IMAGE",
+          "links": null,
+          "slot_index": 35
+        },
+        {
+          "name": "reference_9_mask",
+          "type": "MASK",
+          "links": null,
+          "slot_index": 36
+        },
+        {
+          "name": "reference_10",
+          "type": "IMAGE",
+          "links": null,
+          "slot_index": 37
+        },
+        {
+          "name": "reference_10_mask",
+          "type": "MASK",
+          "links": null,
+          "slot_index": 38
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "GenGateIN"
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 2,
+      "type": "ImageInvert",
+      "pos": [
+        690,
+        50
+      ],
+      "size": [
+        220,
+        60
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 1
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            2
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "ImageInvert"
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 3,
+      "type": "GenGateOUT",
+      "pos": [
+        1120,
+        50
+      ],
+      "size": [
+        260,
+        170
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 2
+        },
+        {
+          "name": "mask",
+          "type": "MASK",
+          "link": null
+        },
+        {
+          "name": "prompt",
+          "type": "STRING",
+          "link": 3
+        },
+        {
+          "name": "layer_name",
+          "type": "STRING",
+          "link": null
+        },
+        {
+          "name": "seed",
+          "type": "INT",
+          "link": null
+        },
+        {
+          "name": "loras",
+          "type": "STRING",
+          "link": null
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "GenGateOUT"
+      },
+      "widgets_values": []
+    }
+  ],
+  "links": [
+    [
+      1,
+      1,
+      0,
+      2,
+      0,
+      "IMAGE"
+    ],
+    [
+      2,
+      2,
+      0,
+      3,
+      0,
+      "IMAGE"
+    ],
+    [
+      3,
+      1,
+      5,
+      3,
+      2,
+      "STRING"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "info": "Connection test only: inverts an input image; no model inference."
+  },
+  "version": 0.4
+}

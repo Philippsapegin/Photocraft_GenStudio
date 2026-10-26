@@ -4,6 +4,10 @@
 
 - PhotoCraft 0.16.0 compatibility, keeping earlier verified patch bases.
 - Retains floating-prompt Backspace protection alongside the new native adjustment shortcuts.
+- Keeps individual AI Remove strokes in the shared cancellable queue after PhotoCraft's retouch dispatcher update.
+- Studio processing selector for custom ComfyUI API workflows, with widget-free GenGate IN / OUT nodes and automatic/one-click node installation.
+- Workflow images, batches and layer masks become new layers, with per-result prompt, name, seed, LoRAs and workflow path/hash metadata. Generated-layer restore reinstates the workflow choice.
+- Workflow-controlled dimensions, full-size connected document/layer/selection sources and ten reference sockets; quick Ai Fill and Remove Brush keep their preset ComfyUI path.
 
 ## 0.9.2 Beta
 
