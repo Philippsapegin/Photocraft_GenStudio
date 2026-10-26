@@ -44,7 +44,9 @@ Download **[GenGate 0.9.2 Beta](https://github.com/Philippsapegin/Photocraft_Gen
 3. Choose **Direct** or **ComfyUI**. Direct can install a separate CUDA runtime or reuse an existing compatible CUDA Python. A fresh runtime downloads several GB of software.
 4. Save and close PhotoCraft before installing. Open **PhotoCraft** from Start or the desktop and choose a **Preset** in **Preferences → GenGate Settings**. Setup consolidates the editor shortcuts and removes old GenStudio/GenGate launcher duplicates. Engine startup can be off, on application launch, or on the first AI request.
 
-**Compatibility:** official **PhotoCraft 0.8.2, 0.12.0 and 0.15.1 Windows x64** binaries. Other builds need separate patch adaptation. Setup checks file hashes and refuses unknown builds. It never downgrades an updated editor. The previous 0.9.0 download is a legacy standalone editor distribution, not this add-on.
+**Development build 0.9.3 adds PhotoCraft 0.16.0 support.** The published 0.9.2 beta supports the earlier builds below.
+
+**Compatibility (current source):** official **PhotoCraft 0.8.2, 0.12.0, 0.15.1 and 0.16.0 Windows x64** binaries. Other builds need separate patch adaptation. Setup checks file hashes and refuses unknown builds. It never downgrades an updated editor. The previous 0.9.0 download is a legacy standalone editor distribution, not this add-on.
 
 To update GenGate, close PhotoCraft and run Setup into the same **GenGate** folder. The editor's existing profile is preserved. The PhotoCraft shortcut checks for replaced editor files and reapplies a compatible patch; an unknown PhotoCraft update opens normally with a compatibility notice and requires an updated GenGate patch.
 

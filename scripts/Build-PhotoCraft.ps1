@@ -1,5 +1,5 @@
 param([switch]$SkipClone, [switch]$SkipBuild, [string]$Python = '',
-      [ValidateSet('0.8.2','0.12.0','0.15.1')][string]$HostVersion = '0.15.1', [string]$TargetDir = '')
+      [ValidateSet('0.8.2','0.12.0','0.15.1','0.16.0')][string]$HostVersion = '0.16.0', [string]$TargetDir = '')
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
 $sourceName = if ($HostVersion -eq '0.8.2') { 'photocraft-source' } else { 'photocraft-' + $HostVersion }

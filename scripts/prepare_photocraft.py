@@ -1,4 +1,4 @@
-"""Apply GenGate integration to pinned PhotoCraft 0.8.2, 0.12.0 and 0.15.1 sources."""
+"""Apply GenGate integration to pinned PhotoCraft 0.8.2, 0.12.0, 0.15.1 and 0.16.0 sources."""
 from pathlib import Path
 import argparse
 import json
@@ -30,6 +30,12 @@ def prepare(source):
     prepare_photocraft_012.before(source)
     prepare_gengate.before(source)
     engine, ui = source / "crates/engine/src", source / "crates/ui-egui/src"
+    # 0.16's larger control snapshot plus extension fields exceeds json!'s
+    # default macro recursion limit. This affects expansion only, not input depth.
+    library = ui / "lib.rs"
+    contents = library.read_text(encoding="utf-8")
+    if '#![recursion_limit = ' not in contents:
+        library.write_text('#![recursion_limit = "256"]\n' + contents, encoding="utf-8")
     shutil.copyfile(ROOT / "photocraft/genstudio.rs", engine / "genstudio.rs")
     shutil.copyfile(ROOT / "photocraft/genstudio_ui.rs", ui / "genstudio_ui.rs")
     (engine / "genstudio-defaults.json").write_text(json.dumps({

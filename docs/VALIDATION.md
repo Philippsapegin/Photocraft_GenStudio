@@ -437,3 +437,20 @@ unchanged.
 The final release ZIP contains 296504547 bytes; all manifest hashes and
 ZIP CRC checks pass. SHA-256:
 `cd9c00dcb9bec2d3afa353b53696747dc3c7fba5c9faf486e9b79de027693546`.
+
+## 2026-10-26: PhotoCraft 0.16.0 compatibility
+
+Pinned the official `v0.16.0` source at
+`b1794c6e0608ccfc887213dcf58398977c5cb75e`. The official Windows x64
+archive SHA-256 is
+`3e634f7e3cc95476c369d59ef0cfed3d1dd6fafd3c351ad81a4ddf3bd792e99d`;
+both executable hashes are registered in `editor-bases.json`. The official
+release retains the same pinned craft-fonts revision.
+
+The new last-adjustment-settings shortcut flag is preserved while carrying the
+autorepeat flag through dispatch. Three synthetic preparer regressions cover
+current/earlier dispatch, idempotence and rejecting changed integration points.
+The larger control snapshot needs a macro expansion limit of 256; this changes
+no runtime input bounds or protocol fields. Python: 141 tests, five tensor skips.
+Native and installer results are recorded below when the development build is
+complete. No checkpoint inference is part of these checks.

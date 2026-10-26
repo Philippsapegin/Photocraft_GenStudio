@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.3 Beta (development)
+
+- PhotoCraft 0.16.0 compatibility, keeping earlier verified patch bases.
+- Retains floating-prompt Backspace protection alongside the new native adjustment shortcuts.
+
 ## 0.9.2 Beta
 
 - Separate GenGate add-on installer for official PhotoCraft 0.15.1 Windows x64; earlier 0.8.2 and 0.12.0 patch entries are retained.

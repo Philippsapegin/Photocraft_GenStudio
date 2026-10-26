@@ -5,6 +5,40 @@ from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
 
+def prepare_clear_dispatch(text):
+    if 'let mut cleared_this_frame = false;' in text:
+        return text
+    start=text.index('pub fn dispatch_pressed(')
+    end=text.index("/// Clear's key",start)
+    block=text[start:end]
+    last_settings = '(id.clone(), *key == Key::Tab, false)' in block
+    tuple_edits = (
+        ('(id.clone(), *key == Key::Tab, false)', '(id.clone(), *key == Key::Tab, false, *repeat)'),
+        ('(id.clone(), false, true)', '(id.clone(), false, true, *repeat)'),
+        ('let Some((id, tab, last)) = next else { break };', 'let Some((id, tab, last, repeat)) = next else { break };'),
+    ) if last_settings else (
+        ('(id.clone(), *key == Key::Tab)', '(id.clone(), *key == Key::Tab, *repeat)'),
+        ('let Some((id, tab)) = next else { break };', 'let Some((id, tab, repeat)) = next else { break };'),
+    )
+    edits=(
+        ('egui::Event::Key { key, physical_key, pressed: true, modifiers, .. }',
+         'egui::Event::Key { key, physical_key, pressed: true, modifiers, repeat, .. }'),
+        *tuple_edits,
+        ('let mut ran = false;', 'let mut ran = false;\n    let mut cleared_this_frame = false;'),
+        ('let owner = key_owner(app, ctx);',
+         '// Coalesce only autorepeated Clear in this frame. A delayed frame\n'
+         '        // must not replay a long queue of full-resolution pixel edits.\n'
+         '        // Separate presses and commands between clears retain their order.\n'
+         '        if id == "edit.clear" && repeat && cleared_this_frame { continue; }\n'
+         '        cleared_this_frame = id == "edit.clear";\n'
+         '        let owner = key_owner(app, ctx);'),
+    )
+    for old,new in edits:
+        if block.count(old)!=1:raise RuntimeError("Changed Clear autorepeat integration point: "+old)
+        block=block.replace(old,new,1)
+    return text[:start]+block+text[end:]
+
+
 def prepare(source,replace):
     engine,ui=source/"crates/engine/src",source/"crates/ui-egui/src"
     shutil.copyfile(ROOT/"photocraft/genstudio_ai.rs",engine/"genstudio_ai.rs")
@@ -18,28 +52,7 @@ def prepare(source,replace):
         shortcuts.write_text(text.replace(anchor,anchor+'\n'+guard,1),encoding="utf-8")
     dispatch=ui/"shortcut_dispatch.rs"
     text=dispatch.read_text(encoding="utf-8")
-    if 'let mut cleared_this_frame = false;' not in text:
-        start=text.index('pub fn dispatch_pressed(')
-        end=text.index("/// Clear's key",start)
-        block=text[start:end]
-        edits=(
-            ('egui::Event::Key { key, physical_key, pressed: true, modifiers, .. }',
-             'egui::Event::Key { key, physical_key, pressed: true, modifiers, repeat, .. }'),
-            ('(id.clone(), *key == Key::Tab)', '(id.clone(), *key == Key::Tab, *repeat)'),
-            ('let mut ran = false;', 'let mut ran = false;\n    let mut cleared_this_frame = false;'),
-            ('let Some((id, tab)) = next else { break };', 'let Some((id, tab, repeat)) = next else { break };'),
-            ('let owner = key_owner(app, ctx);',
-             '// Coalesce only autorepeated Clear in this frame. A delayed frame\n'
-             '        // must not replay a long queue of full-resolution pixel edits.\n'
-             '        // Separate presses and commands between clears retain their order.\n'
-             '        if id == "edit.clear" && repeat && cleared_this_frame { continue; }\n'
-             '        cleared_this_frame = id == "edit.clear";\n'
-             '        let owner = key_owner(app, ctx);'),
-        )
-        for old,new in edits:
-            if block.count(old)!=1:raise RuntimeError("Changed Clear autorepeat integration point: "+old)
-            block=block.replace(old,new,1)
-        dispatch.write_text(text[:start]+block+text[end:],encoding="utf-8")
+    dispatch.write_text(prepare_clear_dispatch(text),encoding="utf-8")
     labels=json.loads((ROOT/"photocraft/selection-locales.json").read_text(encoding="utf-8"))
     for code,values in labels.items():
         path=ui/"i18n"/(code+".tsv")

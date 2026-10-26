@@ -188,7 +188,7 @@ def build(args):
         shutil.copyfile(path, destination)
     shutil.copyfile(ROOT / "LICENSE", licenses / "GenGate-GPL-3.0.txt")
     shutil.copyfile(ROOT / "THIRD_PARTY.md", licenses / "THIRD_PARTY.md")
-    if any(entry["hostVersion"] in ("0.12.0", "0.15.1") for entry in catalog["patches"]):
+    if any(entry["hostVersion"] in ("0.12.0", "0.15.1", "0.16.0") for entry in catalog["patches"]):
         from prepare_craft_fonts import prepare as prepare_fonts
         fonts = prepare_fonts()
         for path in (fonts / "fonts").rglob("OFL.txt"):
@@ -225,7 +225,7 @@ def build(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    base = ROOT / ".runtime/photocraft-0.15.1"
+    base = ROOT / ".runtime/photocraft-0.16.0"
     parser.add_argument("--upstream", type=Path, default=base)
     parser.add_argument("--patches", type=Path, required=True, help="Verified editor-patches.json and binary deltas")
     parser.add_argument("--core", type=Path)

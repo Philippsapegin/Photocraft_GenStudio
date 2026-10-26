@@ -82,7 +82,7 @@ def main():
     assert not list(models.iterdir())
 
     run("host", [runtime / ".venv/Scripts/python.exe", "-c",
-        "import importlib.util; import genstudio,genstudio.editor_patch; assert genstudio.VERSION=='0.9.2'; assert importlib.util.find_spec('torch') is None"])
+        "import importlib.util; import genstudio,genstudio.editor_patch; assert genstudio.VERSION=='0.9.3'; assert importlib.util.find_spec('torch') is None"])
     print("Update, editor refresh, restore and reinstall", flush=True)
     run("update", install)
     updated = ep.read(destination / "genstudio-install.json")
