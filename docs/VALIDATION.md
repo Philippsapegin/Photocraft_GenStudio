@@ -1,5 +1,17 @@
 # Release validation
 
+## 0.9.4 release packaging — 2026-10-28
+
+- Host, installer and Setup title report **0.9.4**. The add-on smoke checks the current source version rather than a hard-coded previous release.
+- **157 Python tests: 149 passed, 8 dependency skips.** All installer PowerShell files parse. Native editor/CLI outputs are byte-identical to the build validated below; no Rust behavior changed for the version bump.
+- The release ZIP passed CRC, its exact file list and all **2,505 manifest hashes**. Bundled host sources match the release source tree. No complete editor or model weights are included.
+- The actual embedded interpreter passed the isolated official-0.16.0 install, update, editor-refresh/reapply, original restore and reinstall cycle, including paths with spaces and Cyrillic characters. Installed runtime/version and reconstructed native hashes were checked. No model inference or GPU dependency changes were performed.
+- The 0.9.4 package contains only the freshly rebuilt and validated PhotoCraft 0.16.0 delta. Older-base packages remain in the 0.9.3 release; the README and release notes state this compatibility explicitly.
+
+Archive: `GenGate-0.9.4-windows-x64-addon.zip`, **215,974,948 bytes**, SHA-256 `ca80e5cf49adb3891ea26d643c81b8172ee18b37b2b71cc47c1b90f3aa8432bb`.
+
+Evidence: `.runtime/release094-python.log`, `.runtime/release094-package.json` and `.runtime/addon-validation-1793137336182019700/report.json`.
+
 ## Studio workflow controls and minimal IN contract — 2026-10-28
 
 - Rechecked the official upstream release: PhotoCraft **0.16.0** remains latest. Rebuilt the editor and CLI against its pinned `b1794c6` source. This unpublished local package contains the newly rebuilt 0.16.0 delta; earlier published packages are retained separately.

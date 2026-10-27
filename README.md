@@ -38,18 +38,18 @@ Planned:
 
 **Windows x64 · NVIDIA CUDA GPU for local AI processing.**
 
-Download **[GenGate 0.9.3 Beta](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/tag/v0.9.3)** · [Windows add-on ZIP](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/download/v0.9.3/GenGate-0.9.3-windows-x64-addon.zip) · [SHA-256](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/download/v0.9.3/SHA256SUMS.txt).
+Download **[GenGate 0.9.4 Beta](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/tag/v0.9.4)** · [Windows add-on ZIP](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/download/v0.9.4/GenGate-0.9.4-windows-x64-addon.zip) · [SHA-256](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/download/v0.9.4/SHA256SUMS.txt).
 
-1. Install PhotoCraft separately. Extract **GenGate-0.9.3-windows-x64-addon.zip** and run **Setup.cmd**. This add-on contains binary patches and its local host, **no complete PhotoCraft editor**.
+1. Install PhotoCraft separately. Extract **GenGate-0.9.4-windows-x64-addon.zip** and run **Setup.cmd**. This add-on contains binary patches and its local host, **no complete PhotoCraft editor**.
 2. Select your existing **PhotoCraft folder**, a separate GenGate installation folder and a **Models folder**. Reuse your `ComfyUI/models` directory or create a separate one. Models are used in place, without duplicate downloads.
 3. Choose **Direct** or **ComfyUI**. Direct can install a separate CUDA runtime or reuse an existing compatible CUDA Python. A fresh runtime downloads several GB of software.
 4. Save and close PhotoCraft before installing. Open **PhotoCraft** from Start or the desktop and choose a **Preset** in **Preferences → GenGate Settings**. Setup consolidates the editor shortcuts and removes old GenStudio/GenGate launcher duplicates. Engine startup can be off, on application launch, or on the first AI request.
 
-**GenGate 0.9.3 adds PhotoCraft 0.16.0 support and Studio ComfyUI workflows.**
+**GenGate 0.9.4 simplifies Studio workflows, adds Explorer LoRA application and polishes native tool controls.**
 
-The new Studio workflow UI requires the PhotoCraft 0.16.0 integration. Earlier patch entries retain their previous UI.
+The ComfyUI Studio has one workflow file field. IN exposes Studio values and individual references; the graph owns its model, encoders and VAE. Update the nodes and restart ComfyUI. Recreate IN in old canvas workflows before exporting their API JSON again. [Setup, migration and LoRA wiring](docs/COMFY_WORKFLOWS.md).
 
-**Compatibility (current source):** official **PhotoCraft 0.8.2, 0.12.0, 0.15.1 and 0.16.0 Windows x64** binaries. Other builds need separate patch adaptation. Setup checks file hashes and refuses unknown builds. It never downgrades an updated editor. The previous 0.9.0 download is a legacy standalone editor distribution, not this add-on.
+**Compatibility (0.9.4 package):** official **PhotoCraft 0.16.0 Windows x64** binaries. The package includes the rebuilt and validated 0.16.0 patch. Earlier official bases remain available in the [0.9.3 release](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/tag/v0.9.3). Other builds need separate patch adaptation. Setup checks file hashes and refuses unknown builds. It never downgrades an updated editor. The previous 0.9.0 download is a legacy standalone editor distribution, not this add-on.
 
 To update GenGate, close PhotoCraft and run Setup into the same **GenGate** folder. The editor's existing profile is preserved. The PhotoCraft shortcut checks for replaced editor files and reapplies a compatible patch; an unknown PhotoCraft update opens normally with a compatibility notice and requires an updated GenGate patch.
 

@@ -12,7 +12,7 @@ import subprocess
 import sys
 import uuid
 
-VERSION = "0.9.3"
+VERSION = "0.9.4"
 REPOSITORY = "https://github.com/Philippsapegin/Photocraft_GenStudio"
 
 
