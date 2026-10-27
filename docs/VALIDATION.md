@@ -466,9 +466,15 @@ below. No checkpoint inference is part of these checks.
 - The ZIP's CRC and **2,511 manifest files** passed verification. Its embedded Python installed onto an isolated official 0.16 editor in a Unicode path; repeat install, editor refresh/reapply, uninstall/original restore and reinstall passed. The archive contains binary deltas, its host and bridge nodes, **no complete PhotoCraft editor or model weights**. The lightweight host contains no torch.
 - Updated the local official editor to **PhotoCraft 0.16.0** and its separate add-on to **GenGate 0.9.3**, with a prior program/profile backup. Native preferences and layout hashes are preserved, all **329 shared model files** retain their sizes/timestamps, and the user's **Direct / Qwen** choice remains selected. The installer refreshed the canonical PhotoCraft shortcuts without starting an engine.
 
-Archive: `GenGate-0.9.3-windows-x64-addon.zip`, **343,472,789 bytes**, SHA-256 `e4708f1c07d2fb565dfa607f051ad37b43a7810d4de3cd6a8b60a4e285609a08`.
+Development archive used for installer validation, before the release README refresh: `GenGate-0.9.3-windows-x64-addon.zip`, **343,472,789 bytes**, SHA-256 `e4708f1c07d2fb565dfa607f051ad37b43a7810d4de3cd6a8b60a4e285609a08`.
 
 Installed editor SHA-256: `c5624037ab749363d97822aa1e62d953d9e812a709319318652aa7e1d7900c43`.
 Installed CLI SHA-256: `e6096b2eaea495cfe530b8a27af8466a275ed1112b6bd31259efde60a8de96af`.
 
 Evidence: `.runtime/workflow-native-gates.json`, `.runtime/workflow-final-ui-gates.json`, `.runtime/workflow-compat-mcp.json`, `.runtime/comfy-workflow-cpu-latest.json`, `.runtime/workflow-mcp-latest.json`, `.runtime/workflow-delivery.json`, `.runtime/addon-validation.json`, `.runtime/workflow-parity.json` and `.runtime/workflow-installed.json`. Real model quality, GPU memory use and custom third-party workflow dependencies were not tested. No push, tag or release publication is part of this update.
+
+## 0.9.3 release packaging — 2026-10-27
+
+The release README and download links now point to v0.9.3. Only the bundled README and its manifest entry changed; every runtime file and editor delta is byte-identical to the installed, validated development package. The refreshed ZIP passed CRC and all **2,511 file hashes**. It contains no complete PhotoCraft editor or model weights. No additional inference or software installation was performed for publication.
+
+Release archive: `GenGate-0.9.3-windows-x64-addon.zip`, **343,472,767 bytes**, SHA-256 `4036b795e5a7b94969f13ff9f56d9b83f8bcb06c83649e0b4db54d17aa176aac`. Evidence: `.runtime/release093-package.json`.
