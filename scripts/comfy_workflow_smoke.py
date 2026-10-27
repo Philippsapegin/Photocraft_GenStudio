@@ -57,9 +57,9 @@ def main():
                 except OSError:pass
                 time.sleep(.25)
             else:raise TimeoutError('CPU Comfy startup timed out')
-            graph={'in':{'class_type':'GenGateIN','inputs':{}},
+            graph={'in':{'class_type':'GenGateIN2','inputs':{}},
                    'invert':{'class_type':'ImageInvert','inputs':{'image':['in',0]}},
-                   'out':{'class_type':'GenGateOUT','inputs':{'images':['invert',0],'mask':['in',1],'prompt':['in',5]}}}
+                   'out':{'class_type':'GenGateOUT','inputs':{'images':['invert',0],'mask':['in',1],'prompt':['in',2]}}}
             path=folder/'invert-api.json';path.write_text(json.dumps(graph),encoding='utf-8')
             settings={**defaults(),'engine':'comfy','model':'fibo-2-edit-turbo','studioMode':'workflow','studioWorkflow':str(path),
                       'comfyUrl':base,'comfyDir':str(args.comfy.resolve()),'comfyPython':str(args.python.resolve()),
@@ -86,11 +86,11 @@ def main():
             with Image.open(BytesIO(base64.b64decode(second['images'][0]['image']))) as image:
                 check(image.convert('RGB').getpixel((0,0))==(0,255,255) and second['images'][0]['prompt']=='Second','A repeated graph receives new pixels and prompt, without stale caching')
             # Text-only/multi-output/batch uses only core EmptyImage, not a model.
-            graph={'in':{'class_type':'GenGateIN','inputs':{}},
-                   'blank':{'class_type':'EmptyImage','inputs':{'width':['in',6],'height':['in',7],'batch_size':['in',9],'color':123}},
+            graph={'in':{'class_type':'GenGateIN2','inputs':{}},
+                   'blank':{'class_type':'EmptyImage','inputs':{'width':['in',3],'height':['in',4],'batch_size':['in',6],'color':123}},
                    'one':{'class_type':'GenGateOUT','inputs':{'images':['blank',0]}},
                    'two':{'class_type':'GenGateOUT','inputs':{'images':['blank',0]}}}
-            assert {n['class_type'] for n in graph.values()}<={'GenGateIN','GenGateOUT','EmptyImage'}
+            assert {n['class_type'] for n in graph.values()}<={'GenGateIN2','GenGateOUT','EmptyImage'}
             path.write_text(json.dumps(graph),encoding='utf-8')
             data=request({'prompt':'','references':[],'width':256,'height':320,'batch':2},settings['model'],workflow=True);data['workflowPath']=str(path)
             result=host.generate_workflow(read_workflow(str(path)),data,threading.Event(),lambda m:None)

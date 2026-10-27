@@ -34,6 +34,7 @@ def prepare(source, replace):
         replace(ui / "state.rs", "            sample_all_layers: false,", "            sample_all_layers: false,\n            object_ai_select: false,")
     path = ui / "retouch_ui.rs"
     text = path.read_text(encoding="utf-8")
+    text = text.replace('            opt(ui, tl!("Drag a rectangle around the object"));\n', '')
     start, end = text.index("pub fn finish_object_selection"), text.index("/// Reports a smart-selection", text.index("pub fn finish_object_selection"))
     part = text[start:end]
     if 'let ai_select' not in part:

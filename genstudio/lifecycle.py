@@ -144,7 +144,7 @@ class EngineHost:
                 raise Cancelled()
             from .models import resolve_components, resolve_lora, extra_paths
             from .comfy_workflow import enabled, read_workflow, inspect as inspect_workflow
-            custom = enabled(self.settings) and (studio or event in ("manual", "appStart"))
+            custom = enabled(self.settings) and (studio or event in ("manual", "appStart") and bool(self.settings["studioWorkflow"]))
             definition = (workflow or read_workflow(self.settings["studioWorkflow"])) if custom else None
             components = active_components(self.settings)
             if not custom:

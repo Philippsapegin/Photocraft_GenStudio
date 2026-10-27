@@ -35,11 +35,11 @@ def main():
     parser.add_argument('--exe',type=Path,required=True);parser.add_argument('--cli',type=Path,required=True);parser.add_argument('--runtime',type=Path,default=ROOT)
     args=parser.parse_args();folder=ROOT/'.runtime'/('workflow-mcp-'+str(time.time_ns()));folder.mkdir()
     models=folder/'models';(models/'loras').mkdir(parents=True);(models/'loras/style.safetensors').write_bytes(b'synthetic fixture, never open as weights')
-    graph={'in':{'class_type':'GenGateIN','inputs':{}},
+    graph={'in':{'class_type':'GenGateIN2','inputs':{}},
            'a':{'class_type':'EmptyImage','inputs':{'width':320,'height':256,'batch_size':1,'color':0}},
            'b':{'class_type':'EmptyImage','inputs':{'width':256,'height':256,'batch_size':1,'color':0}},
-           'outA':{'class_type':'GenGateOUT','inputs':{'images':['a',0],'prompt':['in',5]}},
-           'outB':{'class_type':'GenGateOUT','inputs':{'images':['b',0],'prompt':['in',5]}}}
+           'outA':{'class_type':'GenGateOUT','inputs':{'images':['a',0],'prompt':['in',2]}},
+           'outB':{'class_type':'GenGateOUT','inputs':{'images':['b',0],'prompt':['in',2]}}}
     path=folder/'My workflow.json';path.write_text(json.dumps(graph))
     settings={**defaults(),'runtimeRoot':str(args.runtime.resolve()),'modelsDir':str(models),'engine':'comfy','studioMode':'preset','directStartup':'off','comfyStartup':'off'}
     host=Host(settings);server=create_server(settings,port=0,host=host);threading.Thread(target=server.serve_forever,daemon=True).start()
@@ -82,7 +82,19 @@ def main():
                 return pending[-1]
             control('ui.resize',{'width':1600,'height':1000});menu('genstudio.open')
             until(lambda:studio().get('workflow',{}).get('browse'))
+            assert studio()['workflow']['placeholder'] and 'selector' not in studio()['workflow']
+            screenshot('workflow-empty.png')
+            for theme in ('pro','proMedium','proLightGray','proLight','studio','studioLight','classic','adwaita','adwaitaDark','solarizedDark','breezeLight','breezeDark','softDark','softLight'):
+                control('ui.set',{'theme':theme})
+                for width in (1100,1600):
+                    control('ui.resize',{'width':width,'height':1000})
+                    until(lambda:studio().get('workflow',{}).get('browse'))
+                    assert studio()['workflow']['placeholder']
+                    screenshot(f'workflow-empty-{theme}-{width}.png')
+            control('ui.set',{'theme':'studio'})
             menu('genstudio.studio.workflow.set',{'mode':'workflow','path':str(path)});mcp.await_engine()
+            until(lambda:not studio()['workflow']['placeholder'])
+            screenshot('workflow-selected.png')
             until(lambda:studio().get('model')=='workflow')
             assert studio()['referenceLimit']==10
             menu('genstudio.studio.configure',{'prompt':'','batch':3})
@@ -98,24 +110,28 @@ def main():
             control('app.save',{'path':'workflow.pcraft'});control('app.open',{'path':'workflow.pcraft'})
             meta=mcp.run('genstudio.studio.layer.inspect')['generation']
             assert meta['workflow']['sha256']==host.calls[-1]['hash'] and meta['prompt']=='Returned prompt 2'
-            menu('genstudio.studio.workflow.set',{'mode':'preset'});mcp.await_engine()
+            menu('genstudio.studio.workflow.set',{'mode':'preset','path':''});mcp.await_engine()
             menu('genstudio.studio.layer.restore',{'layer':generated})
             until(lambda:studio().get('model')=='workflow' and studio()['prompt']=='Returned prompt 2' and not studio()['loading'])
             assert studio()['workflow']['path']==str(path) and studio()['loras']['selected']==[{'path':'style.safetensors','strength':.7}]
             step('Native save/reopen and layer restore retain the workflow choice, result prompt and adapter recipe')
             screenshot('workflow-studio.png')
             mcp.run('select.all')
-            graph={'in':{'class_type':'GenGateIN','inputs':{}},
-                   'blend':{'class_type':'ImageBlend','inputs':{'image1':['in',2],'image2':['in',3],'blend_factor':.5,'blend_mode':'normal'}},
-                   'out':{'class_type':'GenGateOUT','inputs':{'images':['blend',0],'mask':['in',4]}}}
+            menu('genstudio.studio.reference.selection');mcp.await_engine()
+            until(lambda:not studio()['loading'])
+            graph={'in':{'class_type':'GenGateIN2','inputs':{}},
+                   'out':{'class_type':'GenGateOUT','inputs':{'images':['in',0],'mask':['in',1]}}}
             path.write_text(json.dumps(graph))
-            menu('genstudio.studio.configure',{'prompt':'Capture connected sockets'})
+            menu('genstudio.studio.configure',{'prompt':'Use the Studio selection reference'})
             control('ui.menu.invoke',{'id':'genstudio.studio.submit','params':{},'wait':False})
             until(lambda:len(host.calls)==2);until(finished)
-            context=host.calls[-1]['context']
-            assert all(context.get(name) for name in ('document','layer','selection'))
-            assert context['metadata']['hasSelection'] and context['metadata']['width']==320
-            step('Connected document, active layer and selection sockets are captured without changing their coordinates')
+            assert host.calls[-1]['references']==1 and not host.calls[-1]['context']
+            step('Use selection supplies the Studio image/mask without hidden document, layer or selection sockets')
+            mcp.run('prefs.set',{'path':'genStudio.engine','value':'direct'})
+            until(lambda:not studio()['workflow'].get('browse'))
+            assert studio()['workflow']['path']==str(path)
+            screenshot('workflow-direct.png')
+            step('One workflow field replaces the placeholder with the filename, retains its path in Direct and disappears there')
             report['passed']=True
     finally:
         if mcp:mcp.process.terminate();mcp.process.wait(5)

@@ -24,7 +24,7 @@ from genstudio.studio_edit import generate as transport
 
 class Host:
     def __init__(self):
-        self.settings=defaults();self.lock=threading.RLock();self.busy=False;self.calls=[]
+        self.settings={**defaults(),"engine":"direct"};self.lock=threading.RLock();self.busy=False;self.calls=[]
     def config(self):return load_config()
     def generate_studio(self,references,seed,prompt,width,height,cancel,progress):
         self.calls.append((len(references),seed,prompt,width,height))

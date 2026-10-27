@@ -15,12 +15,18 @@ from genfill.comfy import Cancelled
 from genfill.image_ops import png_bytes
 from .lora import validate_studio
 
-PROTOCOL = "gengate-comfy-v1"
+PROTOCOL = "gengate-comfy-v2"
+IN_NODE = "GenGateIN2"
+PORT_NAMES = ["image", "mask", "prompt", "width", "height", "seed", "batch", "loras"] + [
+    name for i in range(2, 11) for name in (f"reference_{i}", f"reference_{i}_mask")]
+LEGACY_PORT_NAMES = ["image", "mask", "document", "layer", "selection", "prompt", "width", "height",
+                     "seed", "batch", "source_prompt", "reference_count", "references", "reference_masks",
+                     "preset", "model", "text_encoder", "vae", "prompt_upsampler", "loras", "metadata"] + PORT_NAMES[8:]
 NODE_SOURCE = Path(__file__).resolve().parents[1] / "comfyui/GenGate"
 
 
 def enabled(settings):
-    return settings.get("engine") == "comfy" and settings.get("studioMode", "preset") == "workflow"
+    return settings.get("engine") == "comfy"
 
 
 def read_workflow(path):
@@ -50,7 +56,20 @@ def parse_workflow(value):
         if (not isinstance(key, str) or not key or len(key) > 128 or not isinstance(node, dict)
                 or not isinstance(node.get("class_type"), str) or not isinstance(node.get("inputs"), dict)):
             raise ValueError("Invalid ComfyUI API workflow node.")
-    inputs = [key for key, node in graph.items() if node["class_type"] == "GenGateIN"]
+    legacy = {key for key, node in graph.items() if node["class_type"] == "GenGateIN"}
+    # API links use numeric socket positions. Migrate retained v1 sockets by name;
+    # a different class id prevents old canvas links silently changing meaning.
+    for node in graph.values():
+        for item in node["inputs"].values():
+            if isinstance(item, list) and len(item) == 2 and str(item[0]) in legacy and isinstance(item[1], int):
+                name = LEGACY_PORT_NAMES[item[1]] if 0 <= item[1] < len(LEGACY_PORT_NAMES) else "unknown"
+                if name == "source_prompt": name = "prompt"
+                if name not in PORT_NAMES:
+                    raise ValueError(f"The old GenGate IN socket '{name}' was removed. Recreate IN in ComfyUI, reconnect Studio values and Export (API) again.")
+                item[1] = PORT_NAMES.index(name)
+    for key in legacy:
+        graph[key]["class_type"] = IN_NODE
+    inputs = [key for key, node in graph.items() if node["class_type"] == IN_NODE]
     outputs = [key for key, node in graph.items() if node["class_type"] == "GenGateOUT"]
     if not inputs or not outputs:
         raise ValueError("Add GenGate IN and GenGate OUT to the workflow, then export its API JSON.")
@@ -143,22 +162,12 @@ def generate(client, definition, data, config, cancel, progress):
     uid = uuid.uuid4().hex
     envelope = {"protocol": PROTOCOL, "request_id": uid, "prompt": data["prompt"],
                 "source_prompt": data.get("sourcePrompt", data["prompt"]), "width": data["width"], "height": data["height"],
-                "seed": data["seed"], "batch": data["batch"], "preset": config.get("model", ""),
-                "model": config.get("diffusion_model", ""), "text_encoder": config.get("text_encoder", ""),
-                "vae": config.get("vae", ""), "prompt_upsampler": config.get("prompt_upsampler", ""),
-                "loras": data["loras"], "references": [], "document_info": data.get("context", {}).get("metadata", {})}
+                "seed": data["seed"], "batch": data["batch"],
+                "loras": data["loras"], "references": []}
     for index, image in enumerate(data["references"]):
         if cancel.is_set(): raise Cancelled()
         progress(f"Sending reference {index + 1} to ComfyUI…")
         envelope["references"].append(client.upload(f"GenGate-{uid}-ref-{index}.png", png_bytes(image), image_type="temp"))
-    for key in ("document", "layer", "selection"):
-        encoded = data.get("context", {}).get(key)
-        if encoded:
-            if cancel.is_set(): raise Cancelled()
-            raw = base64.b64decode(encoded, validate=True)
-            # Context images may retain full document resolution; references use
-            # the Studio's existing bounded reference size.
-            envelope[key] = client.upload(f"GenGate-{uid}-{key}.png", raw, image_type="temp")
     history = client.run_workflow(definition["graph"], cancel, progress, uid,
                                   extra_data={"extra_pnginfo": {"gengate": envelope}}, return_history=True)
     rows, pixels = [], 0

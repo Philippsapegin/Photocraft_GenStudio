@@ -71,6 +71,7 @@ fn workspace_title_is_left_aligned_and_follows_the_selected_model() {
     use egui_kittest::kittest::Queryable;
     let mut app = PhotocraftApp::new(Session::new(), crate::Services::default());
     app.ui.gen_studio.open = true;
+    app.session.edit_prefs(|p| p.gen_studio.engine=photocraft_engine::genstudio::Engine::Direct);
     app.ui.gen_studio.initialized = true;
     let mut ready = false;
     let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 900.0)).build_ui_state(
@@ -97,6 +98,7 @@ fn workspace_title_is_left_aligned_and_follows_the_selected_model() {
 fn opening_workspace_restores_a_previously_collapsed_window() {
     use egui_kittest::kittest::Queryable;
     let mut app = PhotocraftApp::new(Session::new(), crate::Services::default());
+    app.session.edit_prefs(|p| p.gen_studio.engine=photocraft_engine::genstudio::Engine::Direct);
     app.ui.gen_studio.initialized = true;
     let mut ready = false;
     let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 900.0)).build_ui_state(
@@ -126,6 +128,7 @@ fn opening_workspace_restores_a_previously_collapsed_window() {
 fn workspace_harness() -> egui_kittest::Harness<'static, PhotocraftApp> {
     let mut app = PhotocraftApp::new(Session::new(), crate::Services::default());
     app.ui.gen_studio.open = true;
+    app.session.edit_prefs(|p| p.gen_studio.engine=photocraft_engine::genstudio::Engine::Direct);
     app.ui.gen_studio.initialized = true;
     app.ui.gen_studio.window_position = Some([120.0, 100.0]);
     let mut ready = false;
@@ -219,4 +222,24 @@ fn workspace_and_chip_follow_every_pointer_frame_without_lag_or_release_jump() {
         assert!(h.state().ui.gen_studio.drag_offset.is_none());
         assert_eq!(h.state().ui.gen_studio.collapsed, collapsed);
     }
+}
+
+#[test]
+fn workflow_picker_is_one_field_only_for_comfy_and_retains_choice_in_direct() {
+    use photocraft_engine::genstudio::Engine;
+    let mut h=workspace_harness();
+    for engine in [Engine::Comfy,Engine::Direct] {
+        for path in ["","D:/Workflows/My workflow.json"] {
+            h.state_mut().session.edit_prefs(|p| {p.gen_studio.engine=engine;p.gen_studio.studio_workflow=path.into();p.gen_studio.studio_mode="preset".into();});
+            h.run_steps(8);
+            let info=&h.state().studio.info["workflow"];
+            assert_eq!(info["available"],engine==Engine::Comfy);
+            assert_eq!(info.get("browse").is_some(),engine==Engine::Comfy);
+            assert!(info.get("selector").is_none());
+            assert_eq!(h.state().session.prefs().gen_studio.workflow_mode(),engine==Engine::Comfy);
+            assert_eq!(info["path"],path);
+            if engine==Engine::Comfy {assert_eq!(info["placeholder"],path.is_empty());}
+        }
+    }
+    assert!(crate::icons::exists("folder"));
 }

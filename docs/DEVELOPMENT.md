@@ -102,4 +102,4 @@ GitHub Actions runs Python tests for source changes. Release packaging is curren
 .venv\Scripts\python.exe scripts/photocraft_workflow_smoke.py --exe '<patched PhotoCraft>\photocraft.exe' --cli '<patched PhotoCraft>\photocraft-cli.exe'
 ```
 
-The first is explicitly CPU-only, installs the managed bridge and runs core ImageInvert/EmptyImage nodes on a dedicated server with isolated I/O/user folders. The second uses official PhotoCraft MCP and a synthetic host, including variable output sizes/batches, masks, recipe restore and connected source capture. Both exclude checkpoint inference. See [COMFY_WORKFLOWS.md](COMFY_WORKFLOWS.md) for the user-facing protocol and limits.
+The first is explicitly CPU-only, installs the managed bridge and runs core ImageInvert/EmptyImage nodes on a dedicated server with isolated I/O/user folders. The second uses official PhotoCraft MCP and a synthetic host, including variable output sizes/batches, masks, recipe restore and main selection references. Both exclude checkpoint inference. See [COMFY_WORKFLOWS.md](COMFY_WORKFLOWS.md) for the user-facing protocol and limits.

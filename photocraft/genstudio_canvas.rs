@@ -680,31 +680,20 @@ fn accent_label(tokens: &crate::theme::Tokens) -> egui::Color32 {
 pub fn workflow_controls(app:&mut PhotocraftApp,ui:&mut egui::Ui)->Vec<(&'static str,Value)>{
     let settings=app.session.prefs().gen_studio.clone();
     let available=settings.engine==photocraft_engine::genstudio::Engine::Comfy;
-    let mut mode=if settings.workflow_mode(){"workflow"}else{"preset"};
-    let mut actions=Vec::new();let mut info=json!({"mode":mode,"path":settings.studio_workflow,"available":available});
-    ui.horizontal(|ui|{
-        ui.spacing_mut().item_spacing.x=8.0;
-        ui.label("Processing");
-        let combo=egui::ComboBox::from_id_salt("gengate-studio-processing").width(170.0)
-            .selected_text(if mode=="workflow"{"ComfyUI workflow"}else{"Preset"}).show_ui(ui,|ui|{
-                ui.selectable_value(&mut mode,"preset","Preset");
-                ui.add_enabled_ui(available,|ui|ui.selectable_value(&mut mode,"workflow","ComfyUI workflow"));
-            });
-        info["selector"]=rect_json(combo.response.rect);
-        if mode!=if settings.workflow_mode(){"workflow"}else{"preset"} {
-            if mode=="workflow" && settings.studio_workflow.is_empty(){actions.push(("genstudio.studio.workflow.browse",json!({})));}
-            else{actions.push(("genstudio.studio.workflow.set",json!({"mode":mode})));}
-        }
-        if available {
-            let button=ui.button("Open workflow…").on_hover_text("Choose JSON exported with Export (API) in ComfyUI");
-            info["browse"]=rect_json(button.rect);
-            if button.clicked(){actions.push(("genstudio.studio.workflow.browse",json!({})));}
-            if !settings.studio_workflow.is_empty(){
-                let label=std::path::Path::new(&settings.studio_workflow).file_stem().and_then(|n|n.to_str()).unwrap_or("Workflow");
-                ui.add(egui::Label::new(label).truncate()).on_hover_text(&settings.studio_workflow);
-            }
-        } else {ui.add(egui::Label::new("Choose ComfyUI in GenGate Settings to use workflows").truncate());}
-    });
+    let mut actions=Vec::new();let mut info=json!({"mode":if available{"workflow"}else{"preset"},"path":settings.studio_workflow,"available":available});
+    if available {
+        let tokens=crate::theme::Tokens::get(ui.ctx());
+        let empty=settings.studio_workflow.is_empty();
+        let label=if empty {"workflow goes here"} else {
+            std::path::Path::new(&settings.studio_workflow).file_name().and_then(|n|n.to_str()).unwrap_or("Workflow")
+        };
+        let text=egui::RichText::new(label).color(if empty {tokens.text_faint}else{tokens.text});
+        let button=ui.add_sized([ui.available_width(),26.0],egui::Button::new(text).truncate())
+            .on_hover_text(if empty {"Choose JSON exported with Export (API) in ComfyUI"}else{&settings.studio_workflow});
+        info["browse"]=rect_json(button.rect);
+        info["placeholder"]=json!(empty);
+        if button.clicked(){actions.push(("genstudio.studio.workflow.browse",json!({})));}
+    }
     app.studio.workflow_controls=info;
     actions
 }
@@ -996,6 +985,7 @@ mod tests {
     #[test]
     fn model_switch_migrates_chips_without_rewriting_json_or_losing_references() {
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.session.edit_prefs(|p| p.gen_studio.engine=photocraft_engine::genstudio::Engine::Direct);
         app.ui.gen_studio.workspace.prompt = "[Image 1] <ref_image_1> {\"from\":\"ref_image_0\",\"bbox\":[1,2,3,4]}".into();
         app.session.edit_prefs(|p| p.gen_studio.model = MODELS[1].id.into());
         sync_model(&mut app);

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Remove the Object Selection options-bar instruction and use PhotoCraft's SVG folder icon in LoRA Explorer.
+- ComfyUI Studio uses one clickable workflow file field with a muted `workflow goes here` placeholder; Direct shows no workflow controls.
+- Simplify IN to Studio values and individual image/mask reference sockets. Models, encoders and VAE stay in the graph; remove hidden document/layer/selection data and duplicate reference lists/counts.
+- Add GenGate Apply LoRAs for applying Explorer selections and strengths to the graph's model and optional CLIP.
+- Migrate retained old API sockets by name; require re-export for removed sockets and a new IN node in old canvas workflows, avoiding shifted numeric connections.
+- Rechecked upstream: PhotoCraft 0.16.0 remains the latest official release.
+
 ## 0.9.3 Beta
 
 - PhotoCraft 0.16.0 compatibility, keeping earlier verified patch bases.

@@ -115,11 +115,18 @@ fn header_info(rect: egui::Rect, header: &crate::genstudio_ui::FloatingHeader) -
 
 /// The whole cell is a stable drag target, independent of aliases and truncation.
 fn name_cell(ui: &mut egui::Ui, width: f32, key: &str, text: &str, sense: egui::Sense) -> egui::Response {
+    name_cell_icon(ui,width,key,text,sense,None)
+}
+fn name_cell_icon(ui: &mut egui::Ui, width:f32, key:&str, text:&str, sense:egui::Sense, icon:Option<&str>) -> egui::Response {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width,26.0),egui::Sense::hover());
     let response=ui.interact(rect,ui.id().with(("gengate-lora-cell",key)),sense);
-    let galley=egui::WidgetText::from(text).into_galley(ui,Some(egui::TextWrapMode::Truncate),(width-8.0).max(0.0),egui::TextStyle::Body);
-    let at=egui::pos2(rect.left()+4.0,rect.center().y-galley.size().y*0.5);
+    let inset=if icon.is_some(){24.0}else{4.0};
+    let galley=egui::WidgetText::from(text).into_galley(ui,Some(egui::TextWrapMode::Truncate),(width-inset-4.0).max(0.0),egui::TextStyle::Body);
+    let at=egui::pos2(rect.left()+inset,rect.center().y-galley.size().y*0.5);
     ui.painter().with_clip_rect(rect).galley(at,galley,crate::theme::Tokens::get(ui.ctx()).text);
+    if let Some(icon)=icon {
+        crate::icons::paint(ui,egui::Rect::from_center_size(egui::pos2(rect.left()+11.0,rect.center().y),egui::Vec2::splat(16.0)),icon,16.0,crate::theme::Tokens::get(ui.ctx()).icon);
+    }
     response.widget_info(||egui::WidgetInfo::labeled(egui::WidgetType::Button,true,text));
     response
 }
@@ -144,7 +151,7 @@ fn files(ui: &mut egui::Ui, lib: &mut Library, entries: &[Entry], actions: &mut 
                 if entry.directory {
                     let a=name_cell(ui,24.0,"folder-enabled","",egui::Sense::hover());
                     let b=name_cell(ui,64.0,"folder-strength","",egui::Sense::hover());
-                    let r=name_cell(ui,name_width,&entry.path,&format!("\u{25b8} {}",entry.name),egui::Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+                    let r=name_cell_icon(ui,name_width,&entry.path,&entry.name,egui::Sense::click(),Some("folder")).on_hover_cursor(egui::CursorIcon::PointingHand);
                     name_cell(ui,settings_width,"folder-settings","",egui::Sense::hover());
                     divisions=Some([a.rect.right()+gap*0.5,b.rect.right()+gap*0.5,r.rect.right()+gap*0.5]);
                     rows.push(json!({"path":entry.path,"directory":true,"nameRect":rect_value(r.rect)}));

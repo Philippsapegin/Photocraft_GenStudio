@@ -276,7 +276,6 @@ fn generate(s: &mut Session, p: &Value) -> Result<Value> {
         seed:None,
     };
     let target = s.active().map(|st| st.doc.id);
-    let source_layer=s.active().and_then(|st|st.active_layer);
     let template = s.active().map(|st| (*st.doc).clone()).unwrap_or_else(|| {
         photocraft_doc::Document::new(
             "GenGate",
@@ -292,7 +291,7 @@ fn generate(s: &mut Session, p: &Value) -> Result<Value> {
         false,
         move |ctx| {
             if settings.workflow_mode() {
-                let payload=crate::genstudio_workflow::request(&settings,target.map(|_|&template),source_layer,&payload,ctx)?;
+                let payload=crate::genstudio_workflow::request(&settings,&payload,ctx)?;
                 let output=crate::genstudio_workflow::run(&settings,&payload,ctx)?;
                 ctx.check()?;
                 return prepare_workflow_results(output,template,&metadata);

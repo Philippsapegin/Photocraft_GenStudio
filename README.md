@@ -6,7 +6,7 @@ A work-in-progress suite for [PhotoCraft](https://github.com/storytold/photocraf
 ## Features
 
 - **Two engines:** Direct for users without ComfyUI, and ComfyUI for preset editing and custom Studio workflows.
-- **ComfyUI workflows:** the Studio can run your API workflow between widget-free **GenGate IN / OUT** nodes. Return images, batches and layer masks; keep the workflow, prompt and adapter recipe with the generated layer. [Setup and ports](docs/COMFY_WORKFLOWS.md).
+- **ComfyUI workflows:** the Studio has one workflow file field and runs your API workflow between widget-free **GenGate IN / OUT** nodes. The optional **GenGate Apply LoRAs** node applies Explorer selections and strengths to your graph's model/CLIP. Return images, batches and layer masks; keep the workflow, prompt and adapter recipe with the generated layer. [Setup and ports](docs/COMFY_WORKFLOWS.md).
 - **Preset-based setup:** compatible model components are selected automatically. Advanced settings let you choose your own model, text encoder, VAE and FLUX prompt upsampler, including INT8 and other supported formats.
 - **Native tools, uncluttered workspace:** editing tools stay inside PhotoCraft; configuration lives in **Edit → Preferences → GenGate Settings**.
 - **Constant LoRA:** an optional adapter with adjustable strength for Ai Fill and Remove Brush. It is separate from full image generation.

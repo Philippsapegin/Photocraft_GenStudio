@@ -160,7 +160,7 @@ fn read_installed_defaults(path: &std::path::Path) -> Option<Value> {
 
 impl Settings {
     pub fn workflow_mode(&self) -> bool {
-        self.engine == Engine::Comfy && self.studio_mode == "workflow"
+        self.engine == Engine::Comfy
     }
     pub fn components(&self) -> PresetComponents {
         self.presets.get(&self.model).cloned().unwrap_or_else(|| {

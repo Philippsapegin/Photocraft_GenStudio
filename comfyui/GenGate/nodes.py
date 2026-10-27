@@ -4,18 +4,15 @@ SPDX-License-Identifier: GPL-3.0-or-later
 """
 import hashlib
 import json
+import math
 from pathlib import Path
 import re
 import uuid
 
-PROTOCOL = "gengate-comfy-v1"
+PROTOCOL = "gengate-comfy-v2"
 PORTS = [
-    ("image", "IMAGE"), ("mask", "MASK"), ("document", "IMAGE"), ("layer", "IMAGE"),
-    ("selection", "MASK"), ("prompt", "STRING"), ("width", "INT"), ("height", "INT"),
-    ("seed", "INT"), ("batch", "INT"), ("source_prompt", "STRING"), ("reference_count", "INT"),
-    ("references", "IMAGE"), ("reference_masks", "MASK"), ("preset", "STRING"),
-    ("model", "STRING"), ("text_encoder", "STRING"), ("vae", "STRING"),
-    ("prompt_upsampler", "STRING"), ("loras", "STRING"), ("metadata", "STRING"),
+    ("image", "IMAGE"), ("mask", "MASK"), ("prompt", "STRING"),
+    ("width", "INT"), ("height", "INT"), ("seed", "INT"), ("batch", "INT"), ("loras", "STRING"),
 ] + [(name, kind) for i in range(2, 11) for name, kind in ((f"reference_{i}", "IMAGE"), (f"reference_{i}_mask", "MASK"))]
 
 
@@ -62,8 +59,7 @@ class GenGateIN:
     FUNCTION = "receive"
     RETURN_TYPES = tuple(kind for _, kind in PORTS)
     RETURN_NAMES = tuple(name for name, _ in PORTS)
-    OUTPUT_IS_LIST = tuple(name in ("references", "reference_masks") for name, _ in PORTS)
-    DESCRIPTION = "Inputs supplied by the GenGate studio in PhotoCraft. Connect only the sockets your workflow needs."
+    DESCRIPTION = "Studio image/mask, prompt, dimensions, seed, batch and individual references. 'loras' is a JSON recipe with file paths and strengths; connect it to GenGate Apply LoRAs. Models, CLIP and VAE come from your workflow."
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -88,36 +84,66 @@ class GenGateIN:
         needed = {PORTS[i][0] for i in used if 0 <= i < len(PORTS)}
         images, masks = [], []
         for index, name in enumerate(refs):
-            # All-reference outputs preserve different reference dimensions as a
-            # Comfy list, rather than resizing them into an invented batch.
             names = {"image", "mask"} if index == 0 else {f"reference_{index + 1}", f"reference_{index + 1}_mask"}
-            if not used or needed & (names | {"references", "reference_masks"}):
+            if not used or needed & names:
                 image, mask = load_image(name, value["request_id"])
             else:
                 image, mask = None, None
             images.append(image); masks.append(mask)
         result = {"image": images[0] if images else None, "mask": masks[0] if masks else None,
-                  "references": images, "reference_masks": masks, "reference_count": len(refs),
-                  "prompt": value.get("prompt", ""), "source_prompt": value.get("source_prompt", value.get("prompt", "")),
+                  "prompt": value.get("prompt", ""),
                   "width": value.get("width", 1024), "height": value.get("height", 1024),
                   "seed": value.get("seed", 0), "batch": value.get("batch", 1),
-                  "loras": json.dumps(value.get("loras", []), ensure_ascii=False),
-                  "metadata": json.dumps(value.get("document_info", {}), ensure_ascii=False)}
-        for key in ("preset", "model", "text_encoder", "vae", "prompt_upsampler"):
-            result[key] = value.get(key, "")
-        for key in ("document", "layer", "selection"):
-            name = value.get(key)
-            result[key] = None
-            if name and (not used or key in needed):
-                loaded = load_image(name, value["request_id"], key == "selection")
-                result[key] = loaded if key == "selection" else loaded[0]
+                  "loras": json.dumps(value.get("loras", []), ensure_ascii=False)}
         for i in range(2, 11):
             result[f"reference_{i}"] = images[i - 1] if len(images) >= i else None
             result[f"reference_{i}_mask"] = masks[i - 1] if len(masks) >= i else None
         for key in needed:
-            if result.get(key) is None or key in ("references", "reference_masks") and not refs:
+            if result.get(key) is None:
                 raise ValueError("GenGate input '" + key + "' is not available. Load its image or selection in PhotoCraft.")
         return tuple(result.get(name) for name, _ in PORTS)
+
+
+class GenGateApplyLoRAs:
+    CATEGORY = "GenGate"
+    FUNCTION = "apply"
+    RETURN_TYPES = ("MODEL", "CLIP")
+    RETURN_NAMES = ("model", "clip")
+    DESCRIPTION = "Apply the LoRAs selected in PhotoCraft's Explorer, in order, with their strengths. Connect IN.loras and your workflow's model; CLIP is optional. ComfyUI must see the same relative files under its loras folders. An empty selection passes the model/CLIP through."
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"model": ("MODEL",), "loras": ("STRING", {"forceInput": True})},
+                "optional": {"clip": ("CLIP",)}}
+
+    def apply(self, model, loras, clip=None):
+        import folder_paths
+        from nodes import LoraLoader
+        if not isinstance(loras, str) or len(loras) > 200 << 10:
+            raise ValueError("Connect GenGate IN's loras recipe to GenGate Apply LoRAs.")
+        selected = json.loads(loras)
+        if not isinstance(selected, list) or len(selected) > 64:
+            raise ValueError("Choose up to 64 LoRAs in PhotoCraft.")
+        available = {name.replace("\\", "/"): name for name in folder_paths.get_filename_list("loras")}
+        checked, seen = [], set()
+        for item in selected:
+            path = item.get("path") if isinstance(item, dict) else None
+            strength = item.get("strength", 1.0) if isinstance(item, dict) else None
+            if (not isinstance(path, str) or not path or len(path) > 2048 or any(c in path for c in ("\\", ":", "\0"))
+                    or any(p in ("", ".", "..") for p in path.split("/")) or not path.lower().endswith(".safetensors")
+                    or path.casefold() in seen):
+                raise ValueError("Invalid or duplicate GenGate LoRA path.")
+            if isinstance(strength, bool) or not isinstance(strength, (int, float)) or not math.isfinite(strength) or not -20 <= strength <= 20:
+                raise ValueError("LoRA strength must be between -20 and 20.")
+            seen.add(path.casefold())
+            if strength:
+                if path not in available:
+                    raise ValueError("ComfyUI cannot find LoRA '" + path + "'. Share the Models/loras folder with ComfyUI.")
+                checked.append((available[path], strength))
+        loader = LoraLoader()
+        for path, strength in checked:
+            model, clip = loader.load_lora(model, clip, path, strength, strength)
+        return model, clip
 
 
 class GenGateOUT:

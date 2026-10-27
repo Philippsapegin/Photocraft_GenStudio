@@ -1,35 +1,39 @@
 # Studio workflows
 
-GenGate 0.9.3's PhotoCraft 0.16.0 integration adds **Processing → ComfyUI workflow** above the Studio canvas. The workflow controls models, sampling, transformations, LoRA loading and result dimensions. Direct and preset generation remain available. Quick selection Ai Fill and Remove Brush use the selected editing preset through the existing ComfyUI path.
+With the ComfyUI engine selected, Studio shows one clickable workflow field above the canvas. Its empty placeholder is **workflow goes here**; choosing a file shows its name. Direct has no workflow field. The workflow controls models, sampling, transformations, LoRA loading and result dimensions. Direct Studio uses the selected preset. Quick selection Ai Fill and Remove Brush use the selected editing preset through the existing ComfyUI path.
 
 ## Set up
 
 1. Choose **ComfyUI** in **Edit → Preferences → GenGate Settings**. Set its folder, Python and local server address in Advanced, then Apply.
 2. Click **Install / Update nodes**. Setup also installs the nodes when ComfyUI is selected. Restart an already running ComfyUI after changing node files. A server started by GenGate loads the bridge automatically for workflow mode.
 3. Add **GenGate IN** and **GenGate OUT** from the **GenGate** category in ComfyUI. Both have sockets only. Connect the data your graph uses and its final image/batch to OUT.
-4. Choose **Export (API)** in ComfyUI. In GenGate choose **ComfyUI workflow → Open workflow…**, select that JSON, and Generate. API JSON with arbitrary processing nodes is supported. Ordinary canvas JSON first needs the API export; GenGate gives an explanatory error for it.
+4. Choose **Export (API)** in ComfyUI. In GenGate click the workflow field, select that JSON, and Generate. Click the same field to replace the file. API JSON with arbitrary processing nodes is supported. Ordinary canvas JSON first needs the API export; GenGate gives an explanatory error for it.
 
 For a connection check without any model, load `custom_nodes/GenGate/examples/Connection-test.json` in ComfyUI. Open its companion `Connection-test-api.json` in GenGate and add a reference image. The graph simply inverts its colours.
 
-An existing external ComfyUI server stays under its owner's control. Install any nodes used by the graph and restart that server yourself when necessary. A GenGate-owned server follows the existing automatic-start selector. Workflow mode loads user custom nodes; preset mode retains its existing whitelist. Switching processing modes restarts only a server owned by GenGate.
+An existing external ComfyUI server stays under its owner's control. Install any nodes used by the graph and restart that server yourself when necessary. A GenGate-owned server follows the existing automatic-start selector. A GenGate-owned ComfyUI loads user custom nodes for Studio workflows. Quick editing continues to validate its selected preset separately.
 
 ## IN ports
 
 | Ports | Type | Data |
 | --- | --- | --- |
 | `image`, `mask` | IMAGE, MASK | Main Studio reference and its inpainting mask: transparent pixels are white. |
-| `document`, `layer` | IMAGE | Document composite and rendered active layer, at document coordinates and full resolution. Captured only when connected. |
-| `selection` | MASK | Current document selection: white is selected. Captured only when connected. |
-| `prompt`, `source_prompt` | STRING | Studio text, including reference chips as written. Workflow mode applies no preset-specific prompt syntax. |
+| `prompt` | STRING | Studio text, including reference chips as written. No preset-specific prompt syntax is applied. |
 | `width`, `height`, `seed`, `batch` | INT | Requested target dimensions, request seed and Studio batch control. Connect `batch` to the graph's latent/image batch size if desired. |
-| `references`, `reference_masks` | IMAGE/MASK lists | All loaded references, in order, retaining their different dimensions. |
 | `reference_2` … `reference_10` and `_mask` partners | IMAGE, MASK | Individual additional references. The main `image` is reference 1. |
-| `reference_count` | INT | Number of available references. |
-| `preset`, `model`, `text_encoder`, `vae`, `prompt_upsampler` | STRING | Current editing preset/component names, available to graphs that choose to use them. |
-| `loras` | STRING (JSON) | Selected Studio adapters: `[{"path":"style.safetensors","strength":0.7}]`. Connect to appropriate adapter processing in your graph. |
-| `metadata` | STRING (JSON) | Document identity, name, dimensions, colour mode/depth, resolution, active layer and selection availability. |
+| `loras` | STRING (JSON) | Selected Studio adapters: `[{"path":"style.safetensors","strength":0.7}]`. Connect to **GenGate Apply LoRAs.loras**. |
 
-Text-to-image graphs can use prompt/dimensions/seed without an image or open document. A connected image/selection socket with no available source produces a clear error. Reference preparation follows the Studio's existing reference-size limit; document/layer sockets retain full source pixels. Source captures support up to 32 million pixels. The graph receives colour-managed sRGB; imported results are converted into the target document's colour/depth.
+Text-to-image graphs can use prompt/dimensions/seed without an image or open document. A connected image socket with no available source produces a clear error. Use **Use selection** in the main Studio slot to send selected document pixels as `image`, with its editable alpha/inpainting `mask`. Extra image slots supply individual reference/mask pairs. Masks preserve transparency: white marks transparent pixels for inpainting. Reference preparation follows the Studio's existing reference-size limit. The graph receives colour-managed sRGB; imported results are converted into the target document's colour/depth.
+
+## Studio LoRAs
+
+Connect **IN.loras** to **GenGate Apply LoRAs.loras**, your graph's model to `model`, and optionally its CLIP to `clip`. Use the returned model/CLIP in the rest of the graph. The helper applies enabled Explorer entries in order, using each strength for both model and CLIP. An empty selection passes through; zero strength skips that adapter. It loads no base model or VAE.
+
+The socket carries JSON such as `[{"path":"styles/ink.safetensors","strength":0.7}]`, so custom nodes can also consume it. ComfyUI must see the same relative LoRA filenames in its configured `loras` folders; share the model folder or configure ComfyUI's extra model paths. Missing files produce a named error. Studio selection alone does not apply adapters to an arbitrary graph: wire the helper where you want them applied.
+
+## Updating older workflows
+
+The simplified IN uses a new internal class id (`GenGateIN2`) to prevent old numeric links from silently acquiring another meaning. Recreate IN in old ComfyUI canvas workflows, reconnect the retained sockets and Export (API) again. GenGate automatically migrates existing API JSON links for retained values by name, including `source_prompt` to `prompt`. If the graph used a removed socket, it asks for re-export. No preset/component, document/layer/selection, metadata, reference-list or reference-count sockets are exposed. OUT's contract is unchanged.
 
 ## OUT ports
 
@@ -52,4 +56,4 @@ Generated-layer metadata records the returned prompt, seed, adapter strengths an
 
 The bridge uses standard ComfyUI upload/prompt/history/view APIs. Request data reaches IN through hidden execution metadata. OUT writes request-scoped temporary PNGs and history records. Only matching GenGate OUT results are imported; another SaveImage node or cached request cannot substitute a result. ComfyUI clears temporary storage when restarted. Cancellation drains only this request's pending queue entry; it never sends a global interrupt against another client's work.
 
-Validation: `scripts/comfy_workflow_smoke.py` runs actual IN → ImageInvert → OUT and EmptyImage batches on a dedicated CPU-only ComfyUI with isolated user/input/output folders, without checkpoints. `scripts/photocraft_workflow_smoke.py` checks the native UI, layer masks/metadata, save/reopen and source capture through official PhotoCraft MCP using synthetic responses.
+Validation: `scripts/comfy_workflow_smoke.py` runs actual IN → ImageInvert → OUT and EmptyImage batches on a dedicated CPU-only ComfyUI with isolated user/input/output folders, without checkpoints. `scripts/photocraft_workflow_smoke.py` checks the native UI, layer masks/metadata, save/reopen and selection references through official PhotoCraft MCP using synthetic responses.

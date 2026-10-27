@@ -1,6 +1,6 @@
 {
   "1": {
-    "class_type": "GenGateIN",
+    "class_type": "GenGateIN2",
     "inputs": {}
   },
   "2": {
@@ -21,7 +21,7 @@
       ],
       "prompt": [
         "1",
-        5
+        2
       ]
     }
   }

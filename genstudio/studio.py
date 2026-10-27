@@ -54,18 +54,6 @@ def request(value, model="qwen-image-2.1-turbo", *, workflow=False):
         if not isinstance(source_prompt, str) or len(source_prompt.encode()) > 12000 or "\0" in source_prompt:
             raise ValueError("Invalid source prompt.")
         data["sourcePrompt"] = source_prompt
-        context = value.get("context", {})
-        if not isinstance(context, dict) or context.keys() - {"document", "layer", "selection", "metadata"}:
-            raise ValueError("Invalid PhotoCraft workflow context.")
-        if len(json.dumps(context.get("metadata", {}))) > 64 << 10 or not isinstance(context.get("metadata", {}), dict):
-            raise ValueError("Invalid PhotoCraft document metadata.")
-        for key in ("document", "layer", "selection"):
-            encoded = context.get(key)
-            if encoded is not None:
-                if not isinstance(encoded, str) or len(encoded) > 88 << 20:
-                    raise ValueError("The workflow source image is too large.")
-                decode_png(encoded, 32 << 20)
-        data["context"] = context
     return data
 
 

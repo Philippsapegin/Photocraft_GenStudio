@@ -79,6 +79,13 @@ def main():
             until(lambda:browser().get('rows'))
             assert abs(browser()['window']['headerRect'][3]-studio()['window']['headerRect'][3])<1
             rows=browser()['rows'];assert len(rows)==1 and rows[0]['directory']
+            screenshot('lora-folder-icon.png')
+            for theme in ('pro','proMedium','proLightGray','proLight','studio','studioLight','classic','adwaita','adwaitaDark','solarizedDark','breezeLight','breezeDark','softDark','softLight'):
+                control('ui.set',{'theme':theme})
+                for width in (1100,1600):
+                    control('ui.resize',{'width':width,'height':1000})
+                    screenshot(f'lora-folder-{theme}-{width}.png')
+            control('ui.set',{'theme':'studio'})
             click(rows[0]['nameRect']);until(lambda:browser().get('folder')=='style' and browser().get('rows'))
             row=browser()['rows'][0];assert row['path']=='style/portrait.safetensors'
             click(row['checkRect']);click(row['settingsRect'])
@@ -169,9 +176,10 @@ def main():
                 assert preview.size==(1024,683),preview.size
             report['layer_24mp']={'seconds':time.monotonic()-began,'ui_response_seconds':ui_seconds,'prepared_size':[1024,683]}
             step('A 24 MP layer is captured on a worker while the interface remains responsive')
-            click(studio()['window']['closeRect'])
+            menu('genstudio.open',{'open':False})
             until(lambda:not control('ui.inspect')['genStudio']['open'])
-            menu('genstudio.open')
+            control('ui.set',{'tool':'ObjectSelection'})
+            screenshot('object-selection-toolbar.png')
             report['passed']=True
             with args.exe.open('rb') as f:report['editorSha256']=hashlib.file_digest(f,'sha256').hexdigest()
     finally:
