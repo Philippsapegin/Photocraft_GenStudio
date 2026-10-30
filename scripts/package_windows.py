@@ -77,7 +77,7 @@ def lanpaint_source(source):
         if revision != LANPAINT_REV:
             raise ValueError("Expected the pinned LanPaint revision.")
         return source
-    target = ROOT / ".runtime/LanPaint"
+    target = ROOT / ".runtime" / ("LanPaint-" + LANPAINT_REV[:12])
     if not (target / "LICENSE").is_file():
         archive = ROOT / ".runtime/downloads" / ("LanPaint-" + LANPAINT_REV + ".zip")
         archive.parent.mkdir(parents=True, exist_ok=True)
@@ -189,9 +189,9 @@ def build(args):
         shutil.copyfile(path, destination)
     shutil.copyfile(ROOT / "LICENSE", licenses / "GenGate-GPL-3.0.txt")
     shutil.copyfile(ROOT / "THIRD_PARTY.md", licenses / "THIRD_PARTY.md")
-    if any(entry["hostVersion"] in ("0.12.0", "0.15.1", "0.16.0") for entry in catalog["patches"]):
+    if any(entry["hostVersion"] in ("0.12.0", "0.15.1", "0.16.0", "0.17.0") for entry in catalog["patches"]):
         from prepare_craft_fonts import prepare as prepare_fonts
-        fonts = prepare_fonts()
+        fonts = prepare_fonts("0.17.0" if any(entry["hostVersion"]=="0.17.0" for entry in catalog["patches"]) else "0.16.0")
         for path in (fonts / "fonts").rglob("OFL.txt"):
             destination = licenses / "craft-fonts" / path.relative_to(fonts)
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -226,7 +226,7 @@ def build(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    base = ROOT / ".runtime/photocraft-0.16.0"
+    base = ROOT / ".runtime/photocraft-0.17.0"
     parser.add_argument("--upstream", type=Path, default=base)
     parser.add_argument("--patches", type=Path, required=True, help="Verified editor-patches.json and binary deltas")
     parser.add_argument("--core", type=Path)

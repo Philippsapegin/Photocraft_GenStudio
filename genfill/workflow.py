@@ -5,6 +5,21 @@ from __future__ import annotations
 TURBO_SIGMAS = (1.0, 0.978453, 0.95418, 0.926626, 0.89508,
                 0.845148, 0.704534, 0.414568, 0.0)
 
+
+def turbo_sigmas(steps=None):
+    """Resample the preset schedule while preserving its endpoints and defaults."""
+    if steps is None:
+        return TURBO_SIGMAS
+    if isinstance(steps, bool) or not isinstance(steps, int) or not 1 <= steps <= 200:
+        raise ValueError("Edit steps must be between 1 and 200.")
+    result = []
+    for i in range(steps):
+        at = i * (len(TURBO_SIGMAS) - 1) / steps
+        left = int(at)
+        fraction = at - left
+        result.append(TURBO_SIGMAS[left] * (1 - fraction) + TURBO_SIGMAS[left + 1] * fraction)
+    return tuple(result) + (0.0,)
+
 REQUIRED_NODES = (
     "UNETLoader", "CLIPLoader", "VAELoader", "LoadImage", "LoadImageMask",
     "JoinImageWithAlpha", "TextEncodeQwenImage21", "QwenImage21Cache",

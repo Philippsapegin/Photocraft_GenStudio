@@ -22,6 +22,8 @@ pub struct ImageRecord {
     pub width: u32,
     pub height: u32,
     pub prompt: String,
+    #[serde(default)]
+    pub negative_prompt: String,
     pub name: String,
     pub seed: u64,
     pub loras: Vec<crate::genstudio_lora::Selection>,
@@ -43,17 +45,10 @@ fn bytes(path: &std::path::Path, limit: u64) -> Result<Vec<u8>> {
 
 /// Forward the Studio payload and graph; images/masks come from reference slots.
 #[cfg(not(target_arch="wasm32"))]
-pub fn request(settings:&Settings, payload:&Value, ctx:&JobCtx)->Result<Value> {
+pub fn request(_settings:&Settings, payload:&Value, ctx:&JobCtx)->Result<Value> {
     ctx.check()?;
-    if settings.studio_workflow.is_empty() { return Err(error("Choose a workflow in GenGate first")); }
-    let raw=bytes(std::path::Path::new(&settings.studio_workflow),8<<20)?;
-    let value:Value=serde_json::from_slice(raw.strip_prefix(&[0xef,0xbb,0xbf]).unwrap_or(&raw)).map_err(error)?;
-    let graph=value.get("prompt").filter(|v|v.is_object() && v.get("class_type").is_none()).unwrap_or(&value);
-    if graph.get("nodes").is_some_and(Value::is_array) { return Err(error("Export (API) from ComfyUI, then choose that JSON file")); }
-    let graph=graph.as_object().filter(|v|v.len()<=2048).ok_or_else(||error("Invalid API workflow"))?;
-    let mut result=payload.clone();
-    result["workflowGraph"]=Value::Object(graph.clone());
-    Ok(result)
+    // The Python worker requests a fresh snapshot from ComfyUI's active tab.
+    Ok(payload.clone())
 }
 
 #[cfg(target_arch="wasm32")]
@@ -109,9 +104,8 @@ mod tests {
         assert_eq!(result["prompt"],payload["prompt"]);
         assert_eq!(result["width"],640);
         assert!(result.get("context").is_none());
-        assert!(result["workflowGraph"].is_object());
-        let error=request(&Settings::default(),&payload,&JobCtx::default()).err().unwrap().to_string();
-        assert!(error.contains("Choose a workflow"));
+        assert!(result.get("workflowGraph").is_none());
+        assert_eq!(request(&Settings::default(),&payload,&JobCtx::default()).unwrap(),payload);
     }
     #[test]
     fn recipe_rejects_invalid_hash_and_path(){

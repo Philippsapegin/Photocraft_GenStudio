@@ -13,7 +13,7 @@ if ($ValidateOnly) {
     Add-Type -ReferencedAssemblies System.Windows.Forms -TypeDefinition 'public class GenStudioSetupPreviewForm : System.Windows.Forms.Form { protected override bool ShowWithoutActivation { get { return true; } } }'
     $form = New-Object GenStudioSetupPreviewForm
 } else { $form = New-Object System.Windows.Forms.Form }
-$form.Text = 'GenGate 0.9.4 - Add-on Setup'
+$form.Text = 'GenGate 0.9.5 - Add-on Setup'
 $form.ClientSize = New-Object System.Drawing.Size(700, 655)
 $form.StartPosition = 'CenterScreen'
 $form.FormBorderStyle = 'FixedDialog'
@@ -120,7 +120,7 @@ function UpdateFields {
     $reuse = $comfy -or $runtime.SelectedIndex -eq 1
     $enginePython.Enabled = $reuse; $browsePython.Enabled = $reuse
     $comfyDir.Enabled = $comfy; $browseComfy.Enabled = $comfy; $lanpaint.Enabled = $comfy
-    if ($comfy) { $runtimeNote.Text = 'Uses your ComfyUI Python and shared models. FLUX 3 needs ComfyUI 0.41.3+; Qwen inpainting uses LanPaint.' }
+    if ($comfy) { $runtimeNote.Text = 'Uses your ComfyUI Python and shared models. Choose tool workflows in GenGate Settings; Studio uses the active browser graph.' }
     elseif ($reuse) { $runtimeNote.Text = 'Uses installed dependencies in place; does not change your existing Python.' }
     else { $runtimeNote.Text = 'A separate runtime downloads several GB of software. NVIDIA CUDA 13 driver required.' }
 }

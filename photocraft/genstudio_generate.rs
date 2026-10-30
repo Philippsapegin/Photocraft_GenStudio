@@ -174,6 +174,8 @@ pub struct Generation {
     pub version: u8,
     pub prompt: String,
     pub compiled_prompt: String,
+    #[serde(default)]
+    pub negative_prompt: String,
     pub model: String,
     pub width: u32,
     pub height: u32,
@@ -204,6 +206,7 @@ pub fn layer_generation(layer: &photocraft_doc::Layer) -> Result<Option<Generati
     if value.version != 1
         || value.prompt.len() > 12000
         || value.compiled_prompt.len() > 12000
+        || value.negative_prompt.len() > 12000 || value.negative_prompt.contains('\0')
         || value.width > limit
         || value.height > limit
         || u64::from(value.width)*u64::from(value.height)>32<<20
@@ -252,6 +255,7 @@ fn generate(s: &mut Session, p: &Value) -> Result<Value> {
     settings.validate().map_err(error)?;
     let loras: Vec<crate::genstudio_lora::Selection> = serde_json::from_value(p.get("loras").cloned().unwrap_or_else(|| json!([]))).map_err(error)?;
     crate::genstudio_lora::validate(&loras).map_err(error)?;
+    let negative_prompt=p.get("negativePrompt").map_or(Ok(""),|v|v.as_str().filter(|s|s.len()<=12000 && !s.contains('\0')).ok_or_else(||error("Invalid negative prompt")))?.to_owned();
     let spec = crate::genstudio::model_spec(&settings.model).ok_or_else(|| error("Choose a supported preset"))?;
     let reference_count = p["references"].as_array().map_or(0, Vec::len);
     if !settings.workflow_mode() && (reference_count > spec.reference_limit || (settings.model == "fibo-2-edit-turbo" && reference_count == 0)) {
@@ -268,6 +272,7 @@ fn generate(s: &mut Session, p: &Value) -> Result<Value> {
         version: 1,
         prompt: source_prompt,
         compiled_prompt: p["prompt"].as_str().unwrap_or_default().to_owned(),
+        negative_prompt,
         model: settings.model.clone(),
         width: p["width"].as_u64().unwrap_or(1024) as u32,
         height: p["height"].as_u64().unwrap_or(1024) as u32,
@@ -307,7 +312,7 @@ fn prepare_workflow_results(output:crate::genstudio_workflow::Output,template:ph
     use photocraft_doc::{Layer,LayerContent,LayerMask};
     let mut layers=Vec::new();
     for row in output.images {
-        let meta=Generation{model:"workflow".into(),prompt:row.record.prompt.clone(),compiled_prompt:row.record.prompt,width:row.record.width,height:row.record.height,
+        let meta=Generation{model:"workflow".into(),prompt:row.record.prompt.clone(),compiled_prompt:row.record.prompt,negative_prompt:row.record.negative_prompt,width:row.record.width,height:row.record.height,
             loras:row.record.loras,workflow:Some(output.workflow.clone()),seed:Some(row.record.seed),..metadata.clone()};
         let rect=photocraft_geom::Rect::new(0,0,meta.width as i32,meta.height as i32);
         let fmt=template.pixel_format();
@@ -522,7 +527,7 @@ mod tests {
         let meta = Generation {
             version: 1,
             prompt: "A quiet forest".into(),
-            compiled_prompt: "A quiet forest".into(),
+            compiled_prompt: "A quiet forest".into(), negative_prompt: "text, watermark".into(),
             model: "qwen-image-2.1-turbo".into(),
             width: 8,
             height: 8,
@@ -553,6 +558,7 @@ mod tests {
         let bytes = photocraft_format::save_to_bytes(doc, &Default::default()).unwrap();
         let loaded = photocraft_format::load_from_bytes(&bytes).unwrap();
         assert_eq!(layer_generation(loaded.layers.last().unwrap()).unwrap().unwrap().prompt, meta.prompt);
+        assert_eq!(layer_generation(loaded.layers.last().unwrap()).unwrap().unwrap().negative_prompt, meta.negative_prompt);
         assert_eq!(layer_generation(loaded.layers.last().unwrap()).unwrap().unwrap().loras, meta.loras);
         let exported = photocraft_io::export(doc, "psd", &Default::default()).unwrap();
         let psd = photocraft_io::import("generated.psd", &exported.bytes).unwrap().document;
@@ -569,7 +575,7 @@ mod tests {
         let meta = Generation {
             version: 1,
             prompt: "Original tab".into(),
-            compiled_prompt: "Original tab".into(),
+            compiled_prompt: "Original tab".into(), negative_prompt: String::new(),
             model: "qwen-image-2.1-turbo".into(),
             width: 8,
             height: 8,
@@ -592,10 +598,10 @@ mod tests {
     fn workflow_layers_keep_upscaled_size_mask_name_prompt_and_recipe_after_save(){
         let template=photocraft_doc::Document::new("Workflow",photocraft_geom::Size::new(8,8),photocraft_color::ColorMode::Rgb,photocraft_color::SampleType::U8);
         let recipe=crate::genstudio_workflow::Recipe{path:"custom.json".into(),sha256:"f".repeat(64)};
-        let meta=Generation{version:1,prompt:"source".into(),compiled_prompt:"source".into(),model:"qwen-image-2.1-turbo".into(),width:1024,height:1024,loras:vec![],workflow:None,seed:None};
+        let meta=Generation{version:1,prompt:"source".into(),compiled_prompt:"source".into(), negative_prompt: String::new(),model:"qwen-image-2.1-turbo".into(),width:1024,height:1024,loras:vec![],workflow:None,seed:None};
         let image=Image::from_u8(4096,2,ChannelLayout::Rgba,[10,20,30,255].repeat(8192)).unwrap();
         let mask=Image::from_u8(4096,2,ChannelLayout::Gray,vec![128;8192]).unwrap();
-        let record=crate::genstudio_workflow::ImageRecord{width:4096,height:2,prompt:"Workflow prompt".into(),name:"Workflow result".into(),seed:17,loras:vec![],has_mask:true};
+        let record=crate::genstudio_workflow::ImageRecord{width:4096,height:2,prompt:"Workflow prompt".into(),negative_prompt:"bad text".into(),name:"Workflow result".into(),seed:17,loras:vec![],has_mask:true};
         let output=crate::genstudio_workflow::Output{workflow:recipe,images:vec![crate::genstudio_workflow::OutputImage{image,mask:Some(mask),record}]};
         let ready=prepare_workflow_results(output,template,&meta).unwrap();
         let mut session=Session::new();import_results(&mut session,None,ready).unwrap();
@@ -606,6 +612,7 @@ mod tests {
         let layer=loaded.layers.first().unwrap();
         assert_eq!(layer.name,"Workflow result");
         let meta=layer_generation(layer).unwrap().unwrap();
+        assert_eq!(meta.negative_prompt,"bad text");
         assert_eq!(meta.prompt,"Workflow prompt");assert_eq!(meta.seed,Some(17));
         assert_eq!(meta.workflow.unwrap().sha256,"f".repeat(64));
         assert!((layer.mask.as_ref().unwrap().surface.read_region(photocraft_geom::Rect::new(0,0,1,1))[0]-0.5).abs()<0.01);

@@ -6,6 +6,11 @@ use serde_json::{Value, json};
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct State {
+    pub updates_open: bool,
+    #[serde(skip)]
+    pub updates_startup_checked: bool,
+    #[serde(skip)]
+    pub updates_notified: Option<String>,
     pub open: bool,
     pub collapsed: bool,
     pub settings_open: bool,
@@ -32,6 +37,7 @@ pub struct State {
 }
 
 pub fn menu(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<Value, String>> {
+    if id == "genstudio.updates.check" { return Some(crate::gengate_updates_ui::check(app,params)); }
     if let Some(result) = crate::genstudio_canvas::menu(app, id, params) {
         return Some(result);
     }
@@ -81,7 +87,7 @@ pub fn menu(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<
     }
     if id == "genstudio.component.browse" {
         let key = match params.get("component").and_then(Value::as_str) {
-            Some(key @ ("modelFile" | "textEncoder" | "promptUpsampler" | "vae" | "constantLora")) => key.to_owned(),
+            Some(key @ ("modelFile" | "textEncoder" | "promptUpsampler" | "vae" | "constantLora" | "fillWorkflow" | "removeWorkflow")) => key.to_owned(),
             _ => return Some(Err("Choose a valid preset component".into())),
         };
         let Some(dialog) = app.ui.dialogs.iter().rev().find(|d| crate::prefs_ui::is_preferences(&d.fields)).map(|d| d.id) else {
@@ -89,17 +95,19 @@ pub fn menu(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<
         };
         let values = app.ui.dialogs.iter().find(|d| d.id == dialog).map(|d| d.fields["values"]["genStudio"].clone()).unwrap_or(Value::Null);
         let preset = values["model"].as_str().unwrap_or("qwen-image-2.1-turbo").to_owned();
+        let workflow=matches!(key.as_str(),"fillWorkflow"|"removeWorkflow");
         let initial_dir = values["modelsDir"].as_str().map(str::to_owned);
         let request = crate::file_dialog::FileDialogRequest::Open {
             multiple: false,
             initial_dir,
-            extensions: Some(vec!["safetensors".into(), "pt".into(), "ckpt".into()]),
+            extensions: Some(if workflow {vec!["json".into()]}else{vec!["safetensors".into(), "pt".into(), "ckpt".into()]}),
         };
         return Some(app.ask_file(request, move |app, answer| {
             let crate::file_dialog::FileDialogAnswer::Paths(paths) = answer else { return Err("Choose a model component file on this computer".into()) };
             let path = paths.first().ok_or("No component file selected")?;
             let d = app.ui.dialog_mut(dialog).ok_or("Preferences was closed")?;
             let value = d.fields.get_mut("values").and_then(|v| v.get_mut("genStudio")).ok_or("Preferences draft is missing")?;
+            if workflow {value[&key]=json!(path);return Ok(json!({"workflowSelected":key}));}
             let mut settings: Settings = serde_json::from_value(value.clone()).map_err(|e| e.to_string())?;
             let original = settings.model.clone();
             settings.model = preset.clone();
@@ -140,8 +148,8 @@ pub fn menu(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<
 }
 
 fn text(ui: &mut egui::Ui, label: &str, value: &mut String) {
-    ui.label(label);
-    ui.add(egui::TextEdit::singleline(value).desired_width(350.0));
+    let caption = ui.label(label);
+    ui.add(egui::TextEdit::singleline(value).desired_width(350.0)).labelled_by(caption.id);
     ui.end_row();
 }
 
@@ -241,6 +249,7 @@ fn workspace_header(ui: &mut egui::Ui, model: &str, collapsed: bool) -> Floating
 }
 
 pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    crate::gengate_updates_ui::show(app,ctx);
     if let Some(job) = app.session.jobs().into_iter().find(|job| job.state == "running" && job.message.starts_with("Starting"))
         && ((job.command.starts_with("genstudio.fill.") || job.command == "genstudio.studio.generate")
             || job.label == "Remove · Ai Fill"
@@ -367,6 +376,11 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                     if pending || activity.is_some() {
                         ui.add(egui::Spinner::new().size(12.0));
                     }
+                    if !pending && activity.is_none()
+                        && let Some(reason) = app.studio.info["controls"]["generateDisabledReason"].as_str() {
+                        ui.add(egui::Label::new(egui::RichText::new(reason).size(11.0).color(crate::theme::Tokens::get(ui.ctx()).warning)).truncate());
+                        ui.separator();
+                    }
                     let message = start_message
                         .as_deref()
                         .or_else(|| activity.as_ref().map(|j| j.message.as_str()).filter(|s| !s.is_empty()))
@@ -407,8 +421,8 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     crate::genstudio_lora_ui::show(app,ctx);
 }
 
-fn component(ui: &mut egui::Ui, label: &str, value: &mut String, catalog: &Value, key: &str, default: &str, strength: Option<&mut f64>) -> bool {
-    ui.label(label);
+fn component(ui: &mut egui::Ui, label: &str, value: &mut String, catalog: &Value, key: &str, default: &str, strength: Option<(&mut f64,&mut Option<u32>)>) -> bool {
+    let caption = ui.label(label);
     let automatic = catalog[default]
         .as_str()
         .filter(|s| !s.is_empty())
@@ -416,7 +430,7 @@ fn component(ui: &mut egui::Ui, label: &str, value: &mut String, catalog: &Value
     let mut browse = false;
     ui.horizontal(|ui| {
         egui::ComboBox::from_id_salt(("genstudio-component", key))
-            .width(if strength.is_some() { 234.0 } else { 302.0 })
+            .width(if strength.is_some() { 164.0 } else { 302.0 })
             .truncate()
             .selected_text(if value.is_empty() { automatic.clone() } else { value.replace('\\', "/").rsplit('/').next().unwrap_or(value).to_owned() })
             .show_ui(ui, |ui| {
@@ -430,10 +444,21 @@ fn component(ui: &mut egui::Ui, label: &str, value: &mut String, catalog: &Value
                 }
             })
             .response
+            .labelled_by(caption.id)
             .on_hover_text(value.as_str());
-        if let Some(strength) = strength {
+        if let Some((strength,steps)) = strength {
             ui.add_sized([60.0, 24.0], egui::DragValue::new(strength).speed(0.05).range(-20.0..=20.0).min_decimals(2).max_decimals(2))
+                .accessible_name("Constant LoRA strength")
                 .on_hover_text("LoRA strength — double-click to type");
+            let steps_caption = ui.label("Steps");
+            let mut count=steps.unwrap_or(0);
+            if ui.add_sized([42.0,24.0],egui::DragValue::new(&mut count).range(0..=200).speed(0.1)
+                .custom_formatter(|n,_|if n==0.0 {String::new()}else{format!("{n:.0}")})
+                .custom_parser(|s|if s.trim().is_empty(){Some(0.0)}else{s.parse().ok()}))
+                .labelled_by(steps_caption.id)
+                .on_hover_text("Generation steps. Empty uses the preset default; ComfyUI workflows can use GenGate Edit Steps.").changed() {
+                *steps=(count>0).then_some(count);
+            }
         }
         browse = ui.button("Browse…").clicked();
     });
@@ -444,7 +469,7 @@ fn settings(app: &mut PhotocraftApp, ui: &mut egui::Ui, draft: &mut Settings, st
     let mut action = None;
     ui.add_enabled_ui(!busy, |ui| {
         egui::Grid::new("genstudio-model-engine").num_columns(2).spacing([16.0, 8.0]).show(ui, |ui| {
-            ui.label("Preset");
+            let caption = ui.label("Preset");
             egui::ComboBox::from_id_salt("genstudio-model")
                 .width(410.0)
                 .selected_text(photocraft_engine::genstudio::model_spec(&draft.model).map_or("Choose preset", |m| m.label))
@@ -452,10 +477,10 @@ fn settings(app: &mut PhotocraftApp, ui: &mut egui::Ui, draft: &mut Settings, st
                     for model in photocraft_engine::genstudio::MODELS {
                         ui.selectable_value(&mut draft.model, model.id.into(), model.label);
                     }
-                });
+                }).response.labelled_by(caption.id);
             draft.components_mut();
             ui.end_row();
-            ui.label("Engine");
+            let caption = ui.label("Engine");
             egui::ComboBox::from_id_salt("genstudio-engine")
                 .width(410.0)
                 .selected_text(match draft.engine {
@@ -465,9 +490,9 @@ fn settings(app: &mut PhotocraftApp, ui: &mut egui::Ui, draft: &mut Settings, st
                 .show_ui(ui, |ui| {
                     ui.selectable_value(&mut draft.engine, Engine::Direct, "Direct");
                     ui.selectable_value(&mut draft.engine, Engine::Comfy, "ComfyUI");
-                });
+                }).response.labelled_by(caption.id);
             ui.end_row();
-            ui.label("Automatic start");
+            let caption = ui.label("Automatic start");
             let policy = draft.startup_mut();
             egui::ComboBox::from_id_salt("genstudio-startup")
                 .width(410.0)
@@ -480,11 +505,11 @@ fn settings(app: &mut PhotocraftApp, ui: &mut egui::Ui, draft: &mut Settings, st
                     ui.selectable_value(policy, Startup::Off, "Off");
                     ui.selectable_value(policy, Startup::AppStart, "When PhotoCraft starts");
                     ui.selectable_value(policy, Startup::FirstRequest, "On first AI request");
-                });
+                }).response.labelled_by(caption.id);
             ui.end_row();
-            ui.label("Models folder");
+            let caption = ui.label("Models folder");
             ui.horizontal(|ui| {
-                ui.add(egui::TextEdit::singleline(&mut draft.models_dir).desired_width(330.0));
+                ui.add(egui::TextEdit::singleline(&mut draft.models_dir).desired_width(330.0)).labelled_by(caption.id);
                 if ui.button("Browse…").clicked() {
                     action = Some(("genstudio.models.browse", json!({})));
                 }
@@ -493,29 +518,46 @@ fn settings(app: &mut PhotocraftApp, ui: &mut egui::Ui, draft: &mut Settings, st
         });
         let response =
             egui::CollapsingHeader::new("Advanced").id_salt("genstudio-advanced-section").open(Some(app.ui.gen_studio.advanced_open)).show(ui, |ui| {
+                if draft.engine==Engine::Comfy {
+                    egui::Grid::new("genstudio-tool-workflows").num_columns(2).spacing([16.0,8.0]).show(ui,|ui| {
+                        for (label,field,path) in [("Ai Fill workflow","fillWorkflow",&mut draft.fill_workflow),("Remove Brush workflow","removeWorkflow",&mut draft.remove_workflow)] {
+                            let caption = ui.label(label);
+                            ui.horizontal(|ui| {
+                                ui.add(egui::TextEdit::singleline(path).hint_text("Workflow JSON").desired_width(330.0)).labelled_by(caption.id);
+                                if ui.button("Browse…").clicked(){action=Some(("genstudio.component.browse",json!({"component":field})));}
+                            });
+                            ui.end_row();
+                        }
+                    });
+                    ui.small("Studio uses the active workflow in the ComfyUI browser.");
+                    ui.colored_label(crate::theme::Tokens::get(ui.ctx()).warning,"Model choices below override marked loaders in the selected workflow for this run.");
+                    ui.small("Title loaders GenGate: Model, GenGate: Text encoder or GenGate: VAE. Automatic keeps the workflow choice. The workflow file and browser graph stay unchanged.");
+                    ui.add_space(8.0);
+                }
                 let catalog = &state["models"];
                 let flux = draft.model == "flux-3-image-klein";
+                let comfy = draft.engine == Engine::Comfy;
                 let parts = draft.components_mut();
                 egui::Grid::new("genstudio-components").num_columns(2).spacing([16.0, 8.0]).show(ui, |ui| {
                     for (label, value, key, default, field) in [
                         ("Model", &mut parts.model_file, "diffusionModels", "defaultModel", "modelFile"),
                         ("Text encoder", &mut parts.text_encoder, "textEncoders", "defaultTextEncoder", "textEncoder"),
                     ] {
-                        if component(ui, label, value, catalog, key, default, None) {
+                        if component(ui, label, value, catalog, key, if comfy {""} else {default}, None) {
                             action = Some(("genstudio.component.browse", json!({"component":field})));
                         }
                     }
-                    if flux && component(ui, "Prompt upsampler", &mut parts.prompt_upsampler, catalog, "promptUpsamplers", "defaultPromptUpsampler", None) {
+                    if flux && component(ui, "Prompt upsampler", &mut parts.prompt_upsampler, catalog, "promptUpsamplers", if comfy {""} else {"defaultPromptUpsampler"}, None) {
                         action = Some(("genstudio.component.browse", json!({"component":"promptUpsampler"})));
                     }
-                    if component(ui, "VAE", &mut parts.vae, catalog, "vaes", "defaultVae", None) {
+                    if component(ui, "VAE", &mut parts.vae, catalog, "vaes", if comfy {""} else {"defaultVae"}, None) {
                         action = Some(("genstudio.component.browse", json!({"component":"vae"})));
                     }
-                    if component(ui, "Constant LoRA", &mut parts.constant_lora, &Value::Null, "constantLora", "", Some(&mut parts.constant_lora_strength)) {
+                    if component(ui, "Constant LoRA", &mut parts.constant_lora, &Value::Null, "constantLora", "", Some((&mut parts.constant_lora_strength,&mut parts.constant_lora_steps))) {
                         action = Some(("genstudio.component.browse", json!({"component":"constantLora"})));
                     }
                 });
-                ui.small("Automatic components follow the selected preset and Models folder.");
+                if draft.engine==Engine::Direct { ui.small("Automatic components follow the selected preset and Models folder."); }
                 ui.small("Constant LoRA applies only to Ai Fill and Remove Brush.");
                 if catalog["pending"] == true {
                     ui.small("Finding model components…");
@@ -580,6 +622,12 @@ fn settings(app: &mut PhotocraftApp, ui: &mut egui::Ui, draft: &mut Settings, st
 }
 
 pub fn preferences(app: &mut PhotocraftApp, ui: &mut egui::Ui, obj: &mut serde_json::Map<String, Value>, view: &mut Value) {
+    ui.horizontal(|ui| {
+        ui.small(format!("GenGate {}",photocraft_engine::gengate_updates::VERSION));
+        if ui.add_enabled(app.session.gen_studio.updates.check.is_some(),egui::Button::new("Check for updates…")).clicked() {
+            let _=crate::gengate_updates_ui::check(app,&json!({}));
+        }
+    });
     let mut draft = serde_json::from_value::<Settings>(Value::Object(obj.clone())).unwrap_or_else(|_| app.session.prefs().gen_studio.clone());
     draft.components_mut();
     photocraft_engine::genstudio::discover(&app.session, draft.clone());
@@ -598,7 +646,7 @@ pub fn preferences(app: &mut PhotocraftApp, ui: &mut egui::Ui, obj: &mut serde_j
     crate::widgets::checkbox(ui, &mut draft.segmentation.enabled, "Enable AI segmentation");
     ui.add_enabled_ui(draft.segmentation.enabled, |ui| {
         egui::Grid::new("gengate-segmentation-settings").num_columns(2).spacing([16.0, 8.0]).show(ui, |ui| {
-            ui.label("Detector");
+            let caption = ui.label("Detector");
             egui::ComboBox::from_id_salt("gengate-detector")
                 .width(300.0)
                 .selected_text(format!(
@@ -616,12 +664,12 @@ pub fn preferences(app: &mut PhotocraftApp, ui: &mut egui::Ui, obj: &mut serde_j
                     {
                         ui.selectable_value(&mut draft.segmentation.detector, id.into(), label);
                     }
-                });
+                }).response.labelled_by(caption.id);
             ui.end_row();
-            ui.label("Segmenter");
+            let caption = ui.label("Segmenter");
             egui::ComboBox::from_id_salt("gengate-segmenter").width(300.0).selected_text("SAM3").show_ui(ui, |ui| {
                 ui.selectable_value(&mut draft.segmentation.segmenter, "sam3".into(), "SAM3");
-            });
+            }).response.labelled_by(caption.id);
             ui.end_row();
             text(ui, "CUDA Python (optional)", &mut draft.segmentation.python);
         });
@@ -684,7 +732,10 @@ pub fn confirm_preferences(app: &mut PhotocraftApp, f: &serde_json::Map<String, 
 
 fn idle_message(state: &Value) -> &str {
     if state["status"]["ready"] == true {
-        "Engine ready"
+        state["status"]["message"].as_str().filter(|s| !s.is_empty() && *s != "Ready").unwrap_or_else(|| {
+            if state["status"]["engine"] == "direct" { "Direct service running · model load status unavailable" }
+            else { "ComfyUI connected" }
+        })
     } else if state["status"]["state"] == "stopped" {
         "Engine not running"
     } else {
@@ -695,6 +746,37 @@ fn idle_message(state: &Value) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn service_readiness_does_not_claim_that_the_direct_model_is_loaded() {
+        assert_eq!(idle_message(&json!({"status":{"ready":true,"engine":"direct","message":"Ready"}})), "Direct service running · model load status unavailable");
+        let message = "Direct service running · model loads on first generation";
+        assert_eq!(idle_message(&json!({"status":{"ready":true,"engine":"direct","message":message,"modelState":"unloaded"}})), message);
+        assert_eq!(idle_message(&json!({"status":{"ready":true,"engine":"comfy","message":"Ready"}})), "ComfyUI connected");
+    }
+    #[test]
+    fn workflow_fields_and_override_warning_are_only_in_comfy_advanced() {
+        use egui_kittest::kittest::Queryable;
+        let app=PhotocraftApp::new(photocraft_engine::Session::new(),crate::Services::default());
+        let mut ready=false;
+        let mut h=egui_kittest::Harness::builder().with_size(egui::vec2(1200.0,1800.0)).build_ui_state(move|ui,app:&mut PhotocraftApp|{
+            if !ready {PhotocraftApp::setup_context(ui.ctx(),crate::theme::ThemeKind::Studio);ready=true;return;}
+            let mut draft=app.session.prefs().gen_studio.clone();
+            let _=settings(app,ui,&mut draft,&json!({"models":{}}),false,&mut json!({}));
+        },app);
+        h.run_steps(6);
+        assert!(h.query_by_label("Ai Fill workflow").is_none());
+        assert!(h.query_by_label("Remove Brush workflow").is_none());
+        let warning="Model choices below override marked loaders in the selected workflow for this run.";
+        assert!(h.query_by_label(warning).is_none());
+        h.state_mut().ui.gen_studio.advanced_open=true;h.run_steps(30);
+        assert!(h.query_by_label("Ai Fill workflow").is_some());
+        assert!(h.query_by_label("Remove Brush workflow").is_some());
+        assert!(h.query_by_label(warning).is_some());
+        h.state_mut().session.edit_prefs(|p|p.gen_studio.engine=Engine::Direct);h.run_steps(6);
+        assert!(h.query_by_label("Ai Fill workflow").is_none());
+        assert!(h.query_by_label("Remove Brush workflow").is_none());
+        assert!(h.query_by_label(warning).is_none());
+    }
     #[test]
     fn startup_status_is_visible_with_settings_collapsed_without_a_model_process() {
         use egui_kittest::kittest::Queryable;

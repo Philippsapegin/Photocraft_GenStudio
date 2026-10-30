@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+## 0.9.5 Beta
+
+- Explain disabled Studio generation, including FIBO Edit Turbo's source-image requirement, and expose the reason to automation.
+- Distinguish Direct service availability from unloaded, loading, loaded and failed model components; starting the service no longer claims the model is ready.
+- Add PhotoCraft 0.17.0 compatibility and retain its native updater with a GenGate compatibility warning before Update and Restart.
+- Check GenGate releases independently, respecting PhotoCraft's automatic-check preference, and offer the add-on download page when a newer stable version exists.
+- Move ComfyUI tool workflow fields into Advanced. Explicit component selections override only titled loader bindings in the submitted graph copy; Automatic retains the graph's choices.
+- Add optional per-preset edit steps beside Constant LoRA; empty retains native defaults. ComfyUI tool graphs can wire GenGate Edit Steps.
+- Add the Studio Neg toggle, negative text transport and generated-layer metadata/restore. IN exposes negative_prompt; OUT no longer accepts prompt text.
+- Run Studio from a fresh snapshot of the active ComfyUI browser graph, including unsaved changes.
+- Give ComfyUI Ai Fill and Remove Brush independent workflow files; keep Direct preset processing.
+- Bundle the frontend snapshot extension and migrate old API OUT connections safely.
+
+Known issue: Direct FIBO model loading can fail with `_apply(): Couldn't swap Embedding.weight`; investigation follows this release. No real model inference has been validated.
+
+See [release notes](docs/RELEASE_NOTES_0.9.5.md) and [validation](docs/VALIDATION.md).
+
 ## 0.9.4 Beta
 
 - Remove the Object Selection options-bar instruction and use PhotoCraft's SVG folder icon in LoRA Explorer.

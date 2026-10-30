@@ -42,7 +42,7 @@ def main():
              '--temp-directory',str(folder/'temp'),'--user-directory',str(folder/'user'),
              '--database-url','sqlite:///'+str(folder/'comfy.db').replace('\\','/')]
     report={'passed':False,'real_inference':False,'cpu_only':True,'folder':str(folder),'node_install':installed,'checks':[]}
-    process=None
+    process=None;frontend=None;frontend_thread=None;stop_frontend=threading.Event()
     def check(value,message):
         if not value:raise AssertionError(message)
         report['checks'].append(message);print(message,flush=True)
@@ -59,17 +59,21 @@ def main():
             else:raise TimeoutError('CPU Comfy startup timed out')
             graph={'in':{'class_type':'GenGateIN2','inputs':{}},
                    'invert':{'class_type':'ImageInvert','inputs':{'image':['in',0]}},
-                   'out':{'class_type':'GenGateOUT','inputs':{'images':['invert',0],'mask':['in',1],'prompt':['in',2]}}}
+                   'out':{'class_type':'GenGateOUT2','inputs':{'images':['invert',0],'mask':['in',1]}}}
             path=folder/'invert-api.json';path.write_text(json.dumps(graph),encoding='utf-8')
             settings={**defaults(),'engine':'comfy','model':'fibo-2-edit-turbo','studioMode':'workflow','studioWorkflow':str(path),
                       'comfyUrl':base,'comfyDir':str(args.comfy.resolve()),'comfyPython':str(args.python.resolve()),
                       'modelsDir':str(folder/'models'),'comfyStartup':'off'}
             host=EngineHost(settings)
-            try:
-                host.ensure('request')
-            except ValueError as error:
-                check('missing' in str(error).lower(),'Quick editing still validates its native preset independently of Studio workflows')
-            else:raise AssertionError('Quick editing must require the missing FIBO preset components')
+            host.ensure('request')
+            extensions=http_json(base+'/extensions')
+            entry=next((name for name in extensions if name.endswith('/active_workflow.js')),None)
+            from genfill.comfy import ComfyClient
+            check(entry and b'app.graphToPrompt' in ComfyClient(host.config()).request(entry,raw=True),
+                  'ComfyUI advertises and serves the installed active-workflow frontend module')
+            try:host.generate_edit(Image.new('RGBA',(32,32)),Image.new('L',(32,32),255),1,'test',threading.Event(),lambda _:None)
+            except ValueError as error:check('Ai Fill' in str(error),'ComfyUI editing requires its chosen tool workflow, without preset model validation')
+            else:raise AssertionError('Ai Fill must require its workflow')
             def run(color,prompt,definition=None):
                 source=Image.new('RGBA',(31,19),color)
                 data=request({'prompt':prompt,'references':[base64.b64encode(png_bytes(source)).decode()],'batch':3},settings['model'],workflow=True)
@@ -88,16 +92,58 @@ def main():
             # Text-only/multi-output/batch uses only core EmptyImage, not a model.
             graph={'in':{'class_type':'GenGateIN2','inputs':{}},
                    'blank':{'class_type':'EmptyImage','inputs':{'width':['in',3],'height':['in',4],'batch_size':['in',6],'color':123}},
-                   'one':{'class_type':'GenGateOUT','inputs':{'images':['blank',0]}},
-                   'two':{'class_type':'GenGateOUT','inputs':{'images':['blank',0]}}}
-            assert {n['class_type'] for n in graph.values()}<={'GenGateIN2','GenGateOUT','EmptyImage'}
+                   'one':{'class_type':'GenGateOUT2','inputs':{'images':['blank',0]}},
+                   'two':{'class_type':'GenGateOUT2','inputs':{'images':['blank',0]}}}
+            assert {n['class_type'] for n in graph.values()}<={'GenGateIN2','GenGateOUT2','EmptyImage'}
             path.write_text(json.dumps(graph),encoding='utf-8')
             data=request({'prompt':'','references':[],'width':256,'height':320,'batch':2},settings['model'],workflow=True);data['workflowPath']=str(path)
             result=host.generate_workflow(read_workflow(str(path)),data,threading.Event(),lambda m:None)
             check(len(result['images'])==4 and all((r['width'],r['height'])==(256,320) for r in result['images']),'Text-only input, empty prompt, graph batch and multiple OUT nodes work without preset models')
+            # Exercise both configured native tools with actual nodes, not model mocks.
+            fill=folder/'fill.json';remove=folder/'remove.json'
+            native={'in':{'class_type':'GenGateIN2','inputs':{}},'invert':{'class_type':'ImageInvert','inputs':{'image':['in',0]}},
+                    'out':{'class_type':'GenGateOUT2','inputs':{'images':['invert',0]}}}
+            fill.write_text(json.dumps(native));native['out']['inputs']['images']=['in',0];remove.write_text(json.dumps(native))
+            host.settings.update(fillWorkflow=str(fill),removeWorkflow=str(remove))
+            image=Image.new('RGBA',(32,32),(10,30,60,255));coverage=Image.new('L',image.size,255)
+            a=host.generate_edit(image,coverage,4,'Fill',threading.Event(),lambda _:None,mode='fill')
+            b=host.generate_edit(image,coverage,4,'Remove',threading.Event(),lambda _:None,mode='remove')
+            check(a.getpixel((0,0))[:3]==(245,225,195) and b.getpixel((0,0))[:3]==(10,30,60),'Ai Fill and Remove execute their separate workflow files')
+            step_graph={'in':{'class_type':'GenGateIN2','inputs':{}},
+                        'steps':{'class_type':'GenGateEditSteps','inputs':{'default_steps':32}},
+                        'blank':{'class_type':'EmptyImage','inputs':{'width':['steps',0],'height':16,'batch_size':1,'color':0}},
+                        'out':{'class_type':'GenGateOUT2','inputs':{'images':['blank',0]}}}
+            path.write_text(json.dumps(step_graph))
+            data.update(steps=None);one=host.generate_workflow(read_workflow(str(path)),data,threading.Event(),lambda _:None)
+            data.update(steps=16);two=host.generate_workflow(read_workflow(str(path)),data,threading.Event(),lambda _:None)
+            check(one['images'][0]['width']==32 and two['images'][0]['width']==16,'Edit Steps preserves the workflow default when empty and uses the explicit override')
+            # A synthetic frontend speaks the actual Comfy websocket/HTTP protocol.
+            # The frontend JS module itself has a separate executable module test.
+            import websocket
+            frontend=websocket.create_connection(base.replace('http','ws',1)+'/ws?clientId=GenGate-snapshot-validation',timeout=1)
+            current={'graph':step_graph}
+            def browser():
+                while not stop_frontend.is_set():
+                    try:message=json.loads(frontend.recv())
+                    except websocket.WebSocketTimeoutException:continue
+                    except Exception:
+                        if stop_frontend.is_set():return
+                        raise
+                    if message.get('type')=='gengate.workflow.request':
+                        http_json(base+'/gengate/active-workflow',{'nonce':message['data']['nonce'],'activeAt':time.time()*1000,'visible':True,'graph':current['graph']})
+            frontend_thread=threading.Thread(target=browser,daemon=True);frontend_thread.start()
+            live=host.generate_workflow(None,data,threading.Event(),lambda _:None)
+            current['graph']={**step_graph,'steps':{'class_type':'GenGateEditSteps','inputs':{'default_steps':48}}}
+            data['steps']=None
+            changed=host.generate_workflow(None,data,threading.Event(),lambda _:None)
+            check(live['images'][0]['width']==16 and changed['images'][0]['width']==48 and live['workflow']['sha256']!=changed['workflow']['sha256'],
+                  'Studio requests the current frontend graph on every Generate, including unsaved changes')
             check('WARNING: Run this workflow' not in (folder/'comfy.log').read_text(errors='replace'),'Cache probes do not emit misleading missing-context warnings')
             report['passed']=True
     finally:
+        stop_frontend.set()
+        if frontend:frontend.close()
+        if frontend_thread:frontend_thread.join(timeout=2)
         if process and process.poll() is None:
             process.terminate();process.wait(timeout=15)
         (folder/'report.json').write_text(json.dumps(report,indent=2),encoding='utf-8')

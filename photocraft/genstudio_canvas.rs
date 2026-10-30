@@ -15,6 +15,8 @@ use std::sync::{Arc, Mutex};
 #[serde(default)]
 pub struct Workspace {
     pub prompt: String,
+    pub negative_prompt: String,
+    pub negative_open: bool,
     pub batch: u8,
     pub resolution: u32,
     pub aspect_ratio: String,
@@ -23,7 +25,7 @@ pub struct Workspace {
 }
 impl Default for Workspace {
     fn default() -> Self {
-        Self { prompt: String::new(), batch: 1, resolution: 1024, aspect_ratio: "1:1".into(), monospace: false, loras: Default::default() }
+        Self { prompt: String::new(), negative_prompt: String::new(), negative_open: false, batch: 1, resolution: 1024, aspect_ratio: "1:1".into(), monospace: false, loras: Default::default() }
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -338,6 +340,11 @@ pub fn menu(app: &mut PhotocraftApp, id: &str, p: &Value) -> Option<Result<Value
             if let Some(v) = p.get("prompt") {
                 state.prompt = v.as_str().filter(|s| s.len() <= 12000).ok_or("Invalid prompt")?.to_owned();
             }
+            if let Some(v) = p.get("negativePrompt") {
+                state.negative_prompt = v.as_str().filter(|s| s.len() <= 12000 && !s.contains('\0')).ok_or("Invalid negative prompt")?.to_owned();
+                state.negative_open = !state.negative_prompt.is_empty();
+            }
+            if let Some(v) = p.get("negativeOpen") {state.negative_open=v.as_bool().ok_or("Negative prompt visibility must be boolean")?;}
             if let Some(v) = p.get("batch") {
                 state.batch = v.as_u64().filter(|n| (1..=8).contains(n)).ok_or("Batch must be 1 to 8")? as u8;
             }
@@ -411,7 +418,7 @@ pub fn menu(app: &mut PhotocraftApp, id: &str, p: &Value) -> Option<Result<Value
             let references: Vec<_> = references.into_iter().map(|r| r.png.clone()).collect();
             let result = app.run(
                 "genstudio.studio.generate",
-                json!({"prompt":prompt,"sourcePrompt":state.prompt,"references":references,"width":width,"height":height,"batch":state.batch,
+                json!({"prompt":prompt,"sourcePrompt":state.prompt,"negativePrompt":if state.negative_open {state.negative_prompt.as_str()}else{""},"references":references,"width":width,"height":height,"batch":state.batch,
                     "loras":crate::genstudio_lora_ui::selected(&state.loras,&app.session.prefs().gen_studio.models_dir)}),
             )?;
             if app.studio.main.is_none() {
@@ -477,6 +484,8 @@ fn apply_layer(app: &mut PhotocraftApp, target: Slot, restore: bool, result: &Va
         app.studio.main=None;
         app.studio.capture=None;app.studio.generation=None;
         app.ui.gen_studio.workspace.prompt=result["prompt"].as_str().unwrap_or_default().into();
+        app.ui.gen_studio.workspace.negative_prompt=result["generation"]["negative_prompt"].as_str().unwrap_or_default().into();
+        app.ui.gen_studio.workspace.negative_open=!app.ui.gen_studio.workspace.negative_prompt.is_empty();
         app.ui.gen_studio.workspace.resolution=if result["generation"]["width"].as_u64().unwrap_or(1024)>1024 {2048}else{1024};
     }
     start_load(&mut app.studio,target,result["name"].as_str().unwrap_or("Layer").into(),false,move||Ok(bytes))
@@ -680,22 +689,23 @@ fn accent_label(tokens: &crate::theme::Tokens) -> egui::Color32 {
 pub fn workflow_controls(app:&mut PhotocraftApp,ui:&mut egui::Ui)->Vec<(&'static str,Value)>{
     let settings=app.session.prefs().gen_studio.clone();
     let available=settings.engine==photocraft_engine::genstudio::Engine::Comfy;
-    let mut actions=Vec::new();let mut info=json!({"mode":if available{"workflow"}else{"preset"},"path":settings.studio_workflow,"available":available});
+    let mut info=json!({"mode":if available{"workflow"}else{"preset"},"path":"","available":available,"active":available});
     if available {
-        let tokens=crate::theme::Tokens::get(ui.ctx());
-        let empty=settings.studio_workflow.is_empty();
-        let label=if empty {"workflow goes here"} else {
-            std::path::Path::new(&settings.studio_workflow).file_name().and_then(|n|n.to_str()).unwrap_or("Workflow")
-        };
-        let text=egui::RichText::new(label).color(if empty {tokens.text_faint}else{tokens.text});
-        let button=ui.add_sized([ui.available_width(),26.0],egui::Button::new(text).truncate())
-            .on_hover_text(if empty {"Choose JSON exported with Export (API) in ComfyUI"}else{&settings.studio_workflow});
-        info["browse"]=rect_json(button.rect);
-        info["placeholder"]=json!(empty);
-        if button.clicked(){actions.push(("genstudio.studio.workflow.browse",json!({})));}
+        let button=ui.add_sized([ui.available_width(),26.0],egui::Button::new("Active workflow in ComfyUI").truncate())
+            .on_hover_text("Generate uses the currently open ComfyUI graph, including unsaved changes. Click to open ComfyUI.");
+        info["open"]=rect_json(button.rect);
+        if button.clicked(){ui.ctx().open_url(egui::OpenUrl::new_tab(&settings.comfy_url));}
     }
     app.studio.workflow_controls=info;
-    actions
+    Vec::new()
+}
+
+fn generation_blocker(workflow: bool, model: ModelSpec, prompt: &str, references: usize, loading: bool, running: bool) -> Option<&'static str> {
+    if running { Some("Generation is already running") }
+    else if loading { Some("Wait for reference images to finish loading") }
+    else if !workflow && model.id == "fibo-2-edit-turbo" && references == 0 { Some("Add a source image to use FIBO 2.0 Edit Turbo") }
+    else if !workflow && prompt.trim().is_empty() { Some("Enter a prompt") }
+    else { None }
 }
 
 pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> Vec<(&'static str, Value)> {
@@ -718,7 +728,7 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> Vec<(&'static str, Va
     let mut controls = json!({});
     let (row, _) = ui.allocate_exact_size(vec2(width, row_height), Sense::hover());
     let main_rect = Rect::from_min_size(row.min, vec2(main_width, row_height));
-    let prompt_rect = Rect::from_min_size(pos2(main_rect.right() + gap, row.top()), vec2(prompt_width, prompt_height));
+    let prompt_rect = Rect::from_min_size(pos2(main_rect.right() + gap, row.top()), vec2(prompt_width, if state.negative_open {(prompt_height-gap)*0.5}else{prompt_height}));
     let buttons = Rect::from_min_size(pos2(prompt_rect.left(), row.bottom() - control_height), vec2(prompt_width, control_height));
     ui.scope_builder(egui::UiBuilder::new().max_rect(main_rect), |ui| {
         slot_widget(ui, &mut cache, Slot::Main, main_rect.size(), selection_available, &mut actions);
@@ -753,8 +763,8 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> Vec<(&'static str, Va
         let scroll = egui::ScrollArea::vertical()
             .id_salt("genstudio-prompt-scroll")
             .auto_shrink([false, false])
-            .min_scrolled_height(prompt_height - 8.0)
-            .max_height(prompt_height - 8.0)
+            .min_scrolled_height(prompt_rect.height() - 8.0)
+            .max_height(prompt_rect.height() - 8.0)
             .show(ui, |ui| {
                 egui::TextEdit::multiline(&mut state.prompt)
                     .id_salt("genstudio-prompt")
@@ -762,7 +772,7 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> Vec<(&'static str, Va
                     .frame(egui::Frame::NONE)
                     .margin(0.0)
                     .desired_width(ui.available_width())
-                    .min_size(vec2(ui.available_width(), prompt_height - 8.0))
+                    .min_size(vec2(ui.available_width(), prompt_rect.height() - 8.0))
                     .desired_rows(1)
                     .char_limit(12000)
                     .layouter(&mut layouter)
@@ -800,6 +810,21 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> Vec<(&'static str, Va
         }
     });
     ui.painter().rect_stroke(prompt_rect, tokens.radius, egui::Stroke::new(1.0, tokens.field_border), egui::StrokeKind::Inside);
+    if state.negative_open {
+        let rect=Rect::from_min_size(pos2(prompt_rect.left(),prompt_rect.bottom()+gap),prompt_rect.size());
+        controls["negativePrompt"]=rect_json(rect);
+        ui.painter().rect_filled(rect,tokens.radius,tokens.field);
+        ui.scope_builder(egui::UiBuilder::new().max_rect(rect.shrink(4.0)),|ui| {
+            egui::ScrollArea::vertical().id_salt("genstudio-negative-scroll").auto_shrink([false,false])
+                .min_scrolled_height(rect.height()-8.0).max_height(rect.height()-8.0).show(ui,|ui| {
+                    ui.add(egui::TextEdit::multiline(&mut state.negative_prompt).id_salt("genstudio-negative-prompt")
+                        .hint_text("Negative prompt goes here…").frame(egui::Frame::NONE).margin(0.0)
+                        .font(if state.monospace {egui::TextStyle::Monospace}else{egui::TextStyle::Body})
+                        .desired_width(ui.available_width()).min_size(vec2(ui.available_width(),rect.height()-8.0)).char_limit(12000));
+                });
+        });
+        ui.painter().rect_stroke(rect,tokens.radius,egui::Stroke::new(1.0,tokens.field_border),egui::StrokeKind::Inside);
+    }
     ui.scope_builder(egui::UiBuilder::new().max_rect(buttons).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
         ui.spacing_mut().item_spacing = vec2(gap, 0.0);
         ui.spacing_mut().interact_size.y = control_height;
@@ -817,7 +842,7 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> Vec<(&'static str, Va
             if minus.clicked() {
                 state.batch = state.batch.saturating_sub(1).max(1);
             }
-            let number = ui.add_sized(vec2(34.0, control_height), egui::DragValue::new(&mut state.batch).range(1..=8).speed(0.1));
+            let number = ui.add_sized(vec2(34.0, control_height), egui::DragValue::new(&mut state.batch).range(1..=8).speed(0.1)).accessible_name("Batch size");
             let plus = ui.add_enabled_ui(state.batch < 8, |ui| ui.add_sized(vec2(24.0, control_height), egui::Button::new("+").frame(false))).inner;
             if plus.clicked() {
                 state.batch = state.batch.saturating_add(1).min(8);
@@ -839,8 +864,12 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> Vec<(&'static str, Va
                     ui.selectable_value(&mut state.aspect_ratio, ratio.to_owned(), ratio);
                 }
             });
+            aspect.response.clone().accessible_name("Aspect ratio");
             controls["aspect"] = rect_json(aspect.response.rect);
         }
+        let neg=ui.add_sized(vec2(38.0,control_height),egui::Button::new("Neg").selected(state.negative_open)).on_hover_text("Show or hide negative prompt");
+        controls["negativeToggle"]=rect_json(neg.rect);
+        if neg.clicked(){state.negative_open=!state.negative_open;}
         let text_mode =
             ui.add_sized(vec2(42.0, control_height), egui::Button::new(if state.monospace { "{Aa}" } else { "Aa" })).on_hover_text("Switch prompt font");
         controls["textMode"] = rect_json(text_mode.rect);
@@ -853,13 +882,14 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> Vec<(&'static str, Va
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let running = app.session.jobs().iter().any(|j| j.command == "genstudio.studio.generate" && j.state == "running");
             let custom=app.session.prefs().gen_studio.workflow_mode();
-            let ready = !running && cache.loading.is_empty() && (custom || !state.prompt.trim().is_empty())
-                && (custom || model.id!="fibo-2-edit-turbo" || !ids(&cache).is_empty())
-                && (!custom || !app.session.prefs().gen_studio.studio_workflow.is_empty());
+            let blocked = generation_blocker(custom, model, &state.prompt, ids(&cache).len(), !cache.loading.is_empty(), running);
+            let ready = blocked.is_none();
+            controls["generateEnabled"] = json!(ready);
+            controls["generateDisabledReason"] = json!(blocked);
             let generate = ui.add_enabled(
                 ready,
                 egui::Button::new(egui::RichText::new("Generate").color(accent_label(&tokens))).min_size(vec2(72.0, control_height)).fill(tokens.accent),
-            );
+            ).on_disabled_hover_text(blocked.unwrap_or_default());
             controls["generate"] = rect_json(generate.rect);
             if generate.clicked() {
                 actions.push(("genstudio.studio.submit", json!({})));
@@ -893,7 +923,7 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> Vec<(&'static str, Va
         .enumerate()
         .map(|(i, r)| json!({"id":r.id,"number":i+1,"chip":model.chip(i+1),"name":r.name,"width":r.image.width(),"height":r.image.height()}))
         .collect();
-    cache.info = json!({"model":model.id,"referenceLimit":model.reference_limit,"referenceSyntax":model.chip(1),"aspectRatio":state.aspect_ratio,"textOnly":text_only,"fileHover":cache.file_hover.map(|slot|match slot {Slot::Main=>json!("main"),Slot::Extra(i)=>json!(i)}),"selectionAvailable":selection_available,"controls":controls,"prompt":state.prompt,"batch":state.batch,"resolution":state.resolution,"monospace":state.monospace,"references":list,
+    cache.info = json!({"model":model.id,"referenceLimit":model.reference_limit,"referenceSyntax":model.chip(1),"aspectRatio":state.aspect_ratio,"textOnly":text_only,"fileHover":cache.file_hover.map(|slot|match slot {Slot::Main=>json!("main"),Slot::Extra(i)=>json!(i)}),"selectionAvailable":selection_available,"controls":controls,"prompt":state.prompt,"negativePrompt":state.negative_prompt,"negativeOpen":state.negative_open,"batch":state.batch,"resolution":state.resolution,"monospace":state.monospace,"references":list,
             "loading":!cache.loading.is_empty(),"promptRect":cache.prompt_rect.map(|r|[r.min.x,r.min.y,r.width(),r.height()]),
         "slots":cache.rects.iter().map(|(s,r)|json!({"slot":match s {Slot::Main=>json!("main"),Slot::Extra(i)=>json!(i)},"rect":[r.min.x,r.min.y,r.width(),r.height()]})).collect::<Vec<_>>()});
     app.studio = cache;
@@ -1005,6 +1035,43 @@ mod tests {
         assert_eq!(dimensions(2048, None, "1:1"), (2048, 2048));
         assert_eq!(dimensions(1024, Some((1200, 800)), "1:1"), (1024, 672));
         assert_eq!(dimensions(2048, Some((1, 20000)), "1:1"), (256, 2048));
+    }
+    #[test]
+    fn generate_explains_missing_fibo_source_and_enables_after_adding_one() {
+        use egui_kittest::kittest::{NodeT, Queryable};
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.session.edit_prefs(|p| {
+            p.gen_studio.engine = photocraft_engine::genstudio::Engine::Direct;
+            p.gen_studio.model = "fibo-2-edit-turbo".into();
+        });
+        app.ui.gen_studio.open = true;
+        app.ui.gen_studio.initialized = true;
+        app.ui.gen_studio.workspace.prompt = "Make the sky blue".into();
+        let mut initialized = false;
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(1200.0, 900.0)).build_ui_state(move |ui, app: &mut PhotocraftApp| {
+            if !initialized { PhotocraftApp::setup_context(ui.ctx(), crate::theme::ThemeKind::Studio); initialized = true; return; }
+            crate::genstudio_ui::show(app, ui.ctx());
+        }, app);
+        h.run_steps(6);
+        let reason = "Add a source image to use FIBO 2.0 Edit Turbo";
+        assert!(h.get_by_label("Generate").accesskit_node().is_disabled());
+        assert!(h.query_by_label(reason).is_some(), "the requirement is visible without hovering");
+        let image = Image::from_u8(8, 8, photocraft_codecs::ChannelLayout::Rgba, [120, 80, 20, 255].repeat(64)).unwrap();
+        h.state_mut().studio.main = Some(Reference { id: 1, name: "Source".into(), png: core::encoded(&image).unwrap(), image, texture: None, selection: false });
+        h.run_steps(6);
+        assert!(!h.get_by_label("Generate").accesskit_node().is_disabled());
+        assert!(h.query_by_label(reason).is_none());
+        h.state_mut().studio.main = None;
+        h.state_mut().session.edit_prefs(|p| p.gen_studio.model = MODELS[0].id.into());
+        h.run_steps(6);
+        assert!(!h.get_by_label("Generate").accesskit_node().is_disabled(), "text-to-image needs no source");
+        h.state_mut().session.edit_prefs(|p| {
+            p.gen_studio.model = "fibo-2-edit-turbo".into();
+            p.gen_studio.engine = photocraft_engine::genstudio::Engine::Comfy;
+        });
+        h.state_mut().ui.gen_studio.workspace.prompt.clear();
+        h.run_steps(6);
+        assert!(!h.get_by_label("Generate").accesskit_node().is_disabled(), "ComfyUI follows its graph requirements");
     }
     #[test]
     fn dragging_a_reference_inserts_a_chip_at_the_drop_cursor() {

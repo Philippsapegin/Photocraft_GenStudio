@@ -43,7 +43,7 @@ class InpaintReferenceTests(unittest.TestCase):
 
 @unittest.skipUnless(importlib.util.find_spec("torch"), "CPU tensor tests use the installed engine Python")
 class InpaintSamplingTests(unittest.TestCase):
-    def generate(self, mask, via_worker=False):
+    def generate(self, mask, via_worker=False, steps=None):
         import torch
         import numpy as np
         calls = {}
@@ -77,6 +77,7 @@ class InpaintSamplingTests(unittest.TestCase):
         modules["comfy.sample"].sample_custom = sample
         modules["comfy.samplers"].sampler_object = lambda _: "synthetic Euler"
         pipeline = DirectPipeline("unused")
+        pipeline.components['constantLoraSteps']=steps
         pipeline.load = Mock(return_value=(object(), Clip(), Vae()))
         image = Image.new("RGBA", mask.size, (220, 30, 10, 255))
         with patch.dict(sys.modules, modules), patch.object(torch.cuda, "init", side_effect=AssertionError("no CUDA")):
@@ -105,7 +106,7 @@ class InpaintSamplingTests(unittest.TestCase):
         self.assertEqual(len(calls["positive"][0][1]["reference_latents"]), 2)
         self.assertTrue(torch.equal(calls["latent"], torch.full((1, 64, 2, 2), 0.25)), "preserve the image latent, not a zero-filled canvas")
         self.assertEqual(calls["positive"][0][1]["image_slots"], [0, 1])
-        self.assertEqual(calls["sigmas"].numel() - 1, 8)
+        self.assertEqual(calls["sigmas"].numel() - 1, steps or 8)
         self.assertEqual(tuple(calls["noise_mask"].shape), (1, 1, 2, 2))
         self.assertTrue(np.isfinite(np.asarray(output)).all())
         return output, calls
@@ -124,6 +125,9 @@ class InpaintSamplingTests(unittest.TestCase):
         output, calls = self.generate(mask)
         self.assertEqual(calls["noise_mask"].flatten().tolist(), [0.0, 0.0, 0.0, 1.0])
         self.assertEqual(output.getpixel((18, 18))[3], 255)
+
+    def test_constant_lora_steps_override_reaches_the_sampler(self):
+        self.generate(Image.new('L',(32,32),255),steps=4)
 
     def test_worker_png_roundtrip_runs_the_real_pipeline_with_fake_model_parts(self):
         mask = Image.new("L", (32, 32))

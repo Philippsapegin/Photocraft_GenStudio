@@ -9,11 +9,11 @@ from pathlib import Path
 import re
 import uuid
 
-PROTOCOL = "gengate-comfy-v2"
+PROTOCOL = "gengate-comfy-v3"
 PORTS = [
     ("image", "IMAGE"), ("mask", "MASK"), ("prompt", "STRING"),
     ("width", "INT"), ("height", "INT"), ("seed", "INT"), ("batch", "INT"), ("loras", "STRING"),
-] + [(name, kind) for i in range(2, 11) for name, kind in ((f"reference_{i}", "IMAGE"), (f"reference_{i}_mask", "MASK"))]
+] + [(name, kind) for i in range(2, 11) for name, kind in ((f"reference_{i}", "IMAGE"), (f"reference_{i}_mask", "MASK"))] + [("negative_prompt", "STRING")]
 
 
 def context(extra):
@@ -91,7 +91,7 @@ class GenGateIN:
                 image, mask = None, None
             images.append(image); masks.append(mask)
         result = {"image": images[0] if images else None, "mask": masks[0] if masks else None,
-                  "prompt": value.get("prompt", ""),
+                  "prompt": value.get("prompt", ""), "negative_prompt": value.get("negative_prompt", ""),
                   "width": value.get("width", 1024), "height": value.get("height", 1024),
                   "seed": value.get("seed", 0), "batch": value.get("batch", 1),
                   "loras": json.dumps(value.get("loras", []), ensure_ascii=False)}
@@ -146,6 +146,30 @@ class GenGateApplyLoRAs:
         return model, clip
 
 
+class GenGateEditSteps:
+    CATEGORY = 'GenGate'
+    FUNCTION = 'steps'
+    RETURN_TYPES = ('INT',)
+    RETURN_NAMES = ('steps',)
+    DESCRIPTION = 'Connect to the sampler step count. Native Ai Fill/Remove uses the optional Steps override from PhotoCraft; when blank (or for Studio), use this workflow default.'
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {'required': {'default_steps': ('INT', {'default': 8, 'min': 1, 'max': 200})},
+                'hidden': {'extra_pnginfo': 'EXTRA_PNGINFO'}}
+
+    @classmethod
+    def IS_CHANGED(cls, **kwargs):
+        return float('nan')
+
+    def steps(self, default_steps, extra_pnginfo=None):
+        override = context(extra_pnginfo).get('steps')
+        steps = default_steps if override is None else override
+        if isinstance(steps, bool) or not isinstance(steps, int) or not 1 <= steps <= 200:
+            raise ValueError('Steps must be between 1 and 200.')
+        return (steps,)
+
+
 class GenGateOUT:
     CATEGORY = "GenGate"
     FUNCTION = "send"
@@ -156,7 +180,7 @@ class GenGateOUT:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {"images": ("IMAGE",)},
-                "optional": {"mask": ("MASK",), "prompt": ("STRING", {"forceInput": True}),
+                "optional": {"mask": ("MASK",),
                              "layer_name": ("STRING", {"forceInput": True}), "seed": ("INT", {"forceInput": True}),
                              "loras": ("STRING", {"forceInput": True})},
                 "hidden": {"extra_pnginfo": "EXTRA_PNGINFO", "unique_id": "UNIQUE_ID"}}
@@ -165,7 +189,7 @@ class GenGateOUT:
     def IS_CHANGED(cls, extra_pnginfo=None, **kwargs):
         return float("nan")
 
-    def send(self, images, mask=None, prompt=None, layer_name=None, seed=None, loras=None, extra_pnginfo=None, unique_id=None):
+    def send(self, images, mask=None, layer_name=None, seed=None, loras=None, extra_pnginfo=None, unique_id=None):
         import folder_paths
         import numpy as np
         from PIL import Image
@@ -175,8 +199,6 @@ class GenGateOUT:
                 or min(shape[1:3]) < 1 or max(shape[1:3]) > 8192
                 or shape[1] * shape[2] > 32 << 20 or shape[0] * shape[1] * shape[2] > 64 << 20):
             raise ValueError("GenGate OUT supports 1–8 images, up to 8192 px per side and 64 million pixels in total.")
-        if prompt is not None and (not isinstance(prompt, str) or len(prompt.encode("utf-8")) > 12000 or "\0" in prompt):
-            raise ValueError("The returned prompt is too large or invalid.")
         if layer_name is not None and (not isinstance(layer_name, str) or len(layer_name) > 120 or "\0" in layer_name):
             raise ValueError("The returned layer name is invalid.")
         if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed < 2**53):
@@ -205,7 +227,7 @@ class GenGateOUT:
             filename = f"GenGate-{value['request_id']}-{node}-{invocation}-{index}.png"
             Image.fromarray(np.rint(np.clip(pixels, 0, 1) * 255).astype(np.uint8)).save(folder / filename)
             descriptor = {"filename": filename, "subfolder": "gengate", "type": "temp"}
-            row = {"image": descriptor, "prompt": value.get("source_prompt", value.get("prompt", "")) if prompt is None else prompt,
+            row = {"image": descriptor,
                    "name": layer_name or "GenGate", "seed": value.get("seed", 0) + index if seed is None else seed + index,
                    "loras": adapters}
             if masks is not None:

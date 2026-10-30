@@ -77,10 +77,10 @@ class JobManager:
                     del self.jobs[oldest]
             job = Job(uuid.uuid4().hex)
             self.jobs[job.id] = job
-            self.pool.submit(self._run, job, edit, seed, prompt, feather, rectangle, masked_input)
+            self.pool.submit(self._run, job, edit, seed, prompt, feather, rectangle, masked_input, body.get("mode", "fill"))
             return job
 
-    def _run(self, job, edit, seed, prompt, feather, rectangle=False, masked_input=False):
+    def _run(self, job, edit, seed, prompt, feather, rectangle=False, masked_input=False, mode="fill"):
         def progress(message):
             with self.lock:
                 job.message = message
@@ -94,7 +94,8 @@ class JobManager:
                 job.state = "running"
             from .image_ops import masked_reference
             reference = masked_reference(edit.model_image, edit.model_mask) if masked_input else edit.model_image
-            output = self.client.generate(reference, edit.model_mask, seed, prompt, job.cancel, progress)
+            output = (self.client.generate_edit(reference, edit.model_mask, seed, prompt, job.cancel, progress, mode=mode)
+                      if hasattr(self.client, 'generate_edit') else self.client.generate(reference, edit.model_mask, seed, prompt, job.cancel, progress))
             if job.cancel.is_set():
                 raise Cancelled()
             patch = restore_result(edit, output) if rectangle else result_patch(edit, output, feather)

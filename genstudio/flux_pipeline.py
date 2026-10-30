@@ -161,7 +161,7 @@ class FluxPipeline:
         self.pipe = model, clip, vae
         return self.pipe
 
-    def generate_studio(self, references, seed, prompt, width, height, cancel, progress, *, _minimum=256, _maximum=2048, _constant_lora=False, loras=None):
+    def generate_studio(self, references, seed, prompt, width, height, cancel, progress, *, _minimum=256, _maximum=2048, _constant_lora=False, loras=None, negative_prompt=""):
         if (len(references) > 10 or width % 16 or height % 16 or
                 not _minimum <= width <= _maximum or not _minimum <= height <= _maximum or width * height > 16 << 20):
             raise ValueError("Invalid FLUX 3 generation dimensions or reference count.")
@@ -217,6 +217,9 @@ class FluxPipeline:
             positive = [[embedding, {**metadata, **({"reference_latents": latents} if latents else {})}]
                         for embedding, metadata in conditioning]
 
+            from .conditioning import negative as encode_negative
+            negative = encode_negative(clip, negative_prompt, positive)
+
             # Match BFL's distilled Comfy workflow: 16 steps, Euler, simple,
             # CFG 1, constant alpha=16 (mu=ln(alpha)), Flux2's 128-channel grid.
             class Sampling(comfy.model_sampling.ModelSamplingFlux, comfy.model_sampling.CONST):
@@ -225,12 +228,12 @@ class FluxPipeline:
             sampling.set_parameters(shift=math.log(16.0))
             patched = model.clone()
             patched.add_object_patch("model_sampling", sampling)
-            sigmas = comfy.samplers.calculate_sigmas(sampling, "simple", 16)
+            sigmas = comfy.samplers.calculate_sigmas(sampling, "simple", (self.components.get("constantLoraSteps") or 16) if _constant_lora else 16)
             latent = torch.zeros((1, 128, height // 16, width // 16), dtype=torch.float32, device="cpu")
             noise = comfy.sample.prepare_noise(latent, seed)
             check()
             samples = comfy.sample.sample_custom(patched, noise, 1.0, comfy.samplers.sampler_object("euler"),
-                sigmas, positive, positive, latent, callback=step, disable_pbar=True, seed=seed)
+                sigmas, positive, negative, latent, callback=step, disable_pbar=True, seed=seed)
             check()
             decoded = vae.decode(samples).detach().float().cpu().numpy()[0]
             return Image.fromarray((np.clip(decoded, 0, 1) * 255).round().astype(np.uint8)).convert("RGBA")

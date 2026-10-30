@@ -18,7 +18,7 @@ def defaults():
     from .segmentation_models import DEFAULTS
     return {"segmentation": dict(DEFAULTS), "reduceEditResolution": False,
             "model": MODEL, "textEncoder": "", "vae": "", "presets": {},
-            "studioMode": "preset", "studioWorkflow": "",
+            "studioMode": "preset", "studioWorkflow": "", "fillWorkflow": "", "removeWorkflow": "",
             "engine": "comfy", "comfyStartup": "firstRequest", "directStartup": "firstRequest",
             "comfyUrl": old["comfy_url"], "comfyDir": old.get("comfy_dir", ""),
             "comfyPython": old.get("comfy_python", ""),
@@ -80,7 +80,7 @@ def validate(value):
 
 
 def component_defaults():
-    return {"modelFile": "", "textEncoder": "", "promptUpsampler": "", "vae": "", "constantLora": "", "constantLoraStrength": 1.0}
+    return {"modelFile": "", "textEncoder": "", "promptUpsampler": "", "vae": "", "constantLora": "", "constantLoraStrength": 1.0, "constantLoraSteps": None}
 
 
 def validate_components(value):
@@ -89,7 +89,10 @@ def validate_components(value):
         raise ValueError("Invalid preset components.")
     result.update(value)
     for key, item in result.items():
-        if key == "constantLoraStrength":
+        if key == "constantLoraSteps":
+            if item is not None and (isinstance(item, bool) or not isinstance(item, int) or not 1 <= item <= 200):
+                raise ValueError("Edit steps must be empty or an integer between 1 and 200.")
+        elif key == "constantLoraStrength":
             if isinstance(item, bool) or not isinstance(item, (int, float)) or not math.isfinite(item) or not -20 <= item <= 20:
                 raise ValueError("Constant LoRA strength must be a number between -20 and 20.")
         elif not isinstance(item, str) or len(item) > 4096 or "\x00" in item:

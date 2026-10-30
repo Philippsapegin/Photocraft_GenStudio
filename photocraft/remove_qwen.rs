@@ -1,5 +1,6 @@
 //! Qwen backend of the existing Remove command. Shares its brush, loops and selection semantics.
-use super::*;
+use super::{json, Plan, Value, LayerId, PixelFormat, Region, EngineError, Document, Result,
+    hole, coverage, Rect, targets_pixels, Session, Layer, damage_json, plan, stroke_bounds, sampling_margin, MAX_MARGIN, MAX_PIXELS};
 use photocraft_cms::{Builtin, Intent, Transform};
 use photocraft_codecs::{ChannelLayout, Image};
 use photocraft_doc::LayerMask;
@@ -188,6 +189,9 @@ pub(super) fn remove(s: &mut Session, p: &Value) -> Result<Value> { run_with(s, 
 
 #[cfg(test)]
 mod tests {
+    use photocraft_raster::Surface;
+    use photocraft_color::SampleType;
+    use photocraft_doc::LayerContent;
     use super::*;
     use std::sync::Arc;
 

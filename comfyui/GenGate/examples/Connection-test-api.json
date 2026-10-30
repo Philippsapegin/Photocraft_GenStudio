@@ -13,15 +13,11 @@
     }
   },
   "3": {
-    "class_type": "GenGateOUT",
+    "class_type": "GenGateOUT2",
     "inputs": {
       "images": [
         "2",
         0
-      ],
-      "prompt": [
-        "1",
-        2
       ]
     }
   }

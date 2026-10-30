@@ -1,6 +1,6 @@
 {
   "last_node_id": 3,
-  "last_link_id": 3,
+  "last_link_id": 2,
   "nodes": [
     {
       "id": 1,
@@ -11,7 +11,7 @@
       ],
       "size": [
         290,
-        560
+        580
       ],
       "flags": {},
       "order": 0,
@@ -35,9 +35,7 @@
         {
           "name": "prompt",
           "type": "STRING",
-          "links": [
-            3
-          ],
+          "links": null,
           "slot_index": 2
         },
         {
@@ -177,6 +175,12 @@
           "type": "MASK",
           "links": null,
           "slot_index": 25
+        },
+        {
+          "name": "negative_prompt",
+          "type": "STRING",
+          "links": null,
+          "slot_index": 26
         }
       ],
       "properties": {
@@ -222,7 +226,7 @@
     },
     {
       "id": 3,
-      "type": "GenGateOUT",
+      "type": "GenGateOUT2",
       "pos": [
         1120,
         50
@@ -246,11 +250,6 @@
           "link": null
         },
         {
-          "name": "prompt",
-          "type": "STRING",
-          "link": 3
-        },
-        {
           "name": "layer_name",
           "type": "STRING",
           "link": null
@@ -268,7 +267,7 @@
       ],
       "outputs": [],
       "properties": {
-        "Node name for S&R": "GenGateOUT"
+        "Node name for S&R": "GenGateOUT2"
       },
       "widgets_values": []
     }
@@ -289,14 +288,6 @@
       3,
       0,
       "IMAGE"
-    ],
-    [
-      3,
-      1,
-      2,
-      3,
-      2,
-      "STRING"
     ]
   ],
   "groups": [],

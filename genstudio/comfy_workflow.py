@@ -15,13 +15,14 @@ from genfill.comfy import Cancelled
 from genfill.image_ops import png_bytes
 from .lora import validate_studio
 
-PROTOCOL = "gengate-comfy-v2"
+PROTOCOL = "gengate-comfy-v3"
 IN_NODE = "GenGateIN2"
+OUT_NODE = "GenGateOUT2"
 PORT_NAMES = ["image", "mask", "prompt", "width", "height", "seed", "batch", "loras"] + [
-    name for i in range(2, 11) for name in (f"reference_{i}", f"reference_{i}_mask")]
+    name for i in range(2, 11) for name in (f"reference_{i}", f"reference_{i}_mask")] + ["negative_prompt"]
 LEGACY_PORT_NAMES = ["image", "mask", "document", "layer", "selection", "prompt", "width", "height",
                      "seed", "batch", "source_prompt", "reference_count", "references", "reference_masks",
-                     "preset", "model", "text_encoder", "vae", "prompt_upsampler", "loras", "metadata"] + PORT_NAMES[8:]
+                     "preset", "model", "text_encoder", "vae", "prompt_upsampler", "loras", "metadata"] + PORT_NAMES[8:-1]
 NODE_SOURCE = Path(__file__).resolve().parents[1] / "comfyui/GenGate"
 
 
@@ -56,6 +57,10 @@ def parse_workflow(value):
         if (not isinstance(key, str) or not key or len(key) > 128 or not isinstance(node, dict)
                 or not isinstance(node.get("class_type"), str) or not isinstance(node.get("inputs"), dict)):
             raise ValueError("Invalid ComfyUI API workflow node.")
+    for node in graph.values():
+        if node['class_type'] == 'GenGateOUT':
+            node['class_type'] = OUT_NODE
+            node['inputs'].pop('prompt', None)
     legacy = {key for key, node in graph.items() if node["class_type"] == "GenGateIN"}
     # API links use numeric socket positions. Migrate retained v1 sockets by name;
     # a different class id prevents old canvas links silently changing meaning.
@@ -70,7 +75,7 @@ def parse_workflow(value):
     for key in legacy:
         graph[key]["class_type"] = IN_NODE
     inputs = [key for key, node in graph.items() if node["class_type"] == IN_NODE]
-    outputs = [key for key, node in graph.items() if node["class_type"] == "GenGateOUT"]
+    outputs = [key for key, node in graph.items() if node["class_type"] == OUT_NODE]
     if not inputs or not outputs:
         raise ValueError("Add GenGate IN and GenGate OUT to the workflow, then export its API JSON.")
     if len(outputs) > 8:
@@ -106,7 +111,7 @@ def install_nodes(comfy_dir):
     if target.is_symlink() or target.exists() and not target.is_dir():
         raise ValueError("custom_nodes/GenGate is not an ordinary folder; install the bridge there manually.")
     source = NODE_SOURCE
-    files = ("__init__.py", "nodes.py", "README.md", "LICENSE", "examples/Connection-test.json", "examples/Connection-test-api.json")
+    files = ("__init__.py", "nodes.py", "bridge.py", "web/active_workflow.js", "README.md", "LICENSE", "examples/Connection-test.json", "examples/Connection-test-api.json")
     if not all((source / name).is_file() for name in files):
         raise ValueError("The GenGate node package is incomplete. Update the add-on.")
     current = {name: hashlib.sha256((source / name).read_bytes()).hexdigest() for name in files}
@@ -122,6 +127,10 @@ def install_nodes(comfy_dir):
         path = target / name
         if path.is_symlink() or path.exists() and hashlib.sha256(path.read_bytes()).hexdigest() not in (digest, current[name]):
             raise ValueError("A GenGate node file was edited locally. Keep that copy before updating: " + name)
+    for name,digest in current.items():
+        path=target/name
+        if name not in previous.get('files',{}) and path.exists() and hashlib.sha256(path.read_bytes()).hexdigest()!=digest:
+            raise ValueError('A new GenGate file conflicts with an unmanaged local file: '+name)
     changed = any(not (target / name).is_file() or hashlib.sha256((target / name).read_bytes()).hexdigest() != digest for name, digest in current.items())
     target.mkdir(parents=True, exist_ok=True)
     for name in files:
@@ -145,6 +154,16 @@ def inspect(client, definition):
     return info
 
 
+def active_workflow(client):
+    try:
+        response = client.request('/gengate/active-workflow', timeout=8)
+    except Exception as error:
+        raise ValueError('Cannot get the active ComfyUI workflow. Install/update GenGate nodes, restart ComfyUI and refresh its browser tab. ' + str(error)) from error
+    if not isinstance(response, dict) or not isinstance(response.get('graph'), dict):
+        raise ValueError(response.get('error', 'No active ComfyUI workflow responded.') if isinstance(response, dict) else 'Invalid active workflow response.')
+    return parse_workflow(response['graph'])
+
+
 def checked_image(data, grayscale=False):
     if len(data) > 64 << 20:
         raise ValueError("The workflow returned an oversized image file.")
@@ -157,13 +176,17 @@ def checked_image(data, grayscale=False):
         return image.convert("L" if grayscale else "RGBA")
 
 
-def generate(client, definition, data, config, cancel, progress):
-    inspect(client, definition)
+def generate(client, definition, data, config, cancel, progress, *, settings=None):
+    info = inspect(client, definition)
+    if settings is not None:
+        from .workflow_components import apply
+        definition = apply(definition, settings, info)
     uid = uuid.uuid4().hex
     envelope = {"protocol": PROTOCOL, "request_id": uid, "prompt": data["prompt"],
-                "source_prompt": data.get("sourcePrompt", data["prompt"]), "width": data["width"], "height": data["height"],
+                "width": data["width"], "height": data["height"],
                 "seed": data["seed"], "batch": data["batch"],
-                "loras": data["loras"], "references": []}
+                "loras": data["loras"], "negative_prompt": data.get("negativePrompt", ""),
+                "steps": data.get("steps"), "references": []}
     for index, image in enumerate(data["references"]):
         if cancel.is_set(): raise Cancelled()
         progress(f"Sending reference {index + 1} to ComfyUI…")
@@ -199,7 +222,7 @@ def generate(client, definition, data, config, cancel, progress):
                 pixels += image.width * image.height
                 if pixels > 64 << 20:
                     raise ValueError("The workflow batch exceeds 64 million pixels.")
-                prompt = record.get("prompt", data["prompt"])
+                prompt = data.get("sourcePrompt", data["prompt"])
                 name = record.get("name", "GenGate")
                 seed = record.get("seed", data["seed"])
                 if not isinstance(prompt, str) or len(prompt.encode()) > 12000 or "\0" in prompt:
@@ -209,7 +232,7 @@ def generate(client, definition, data, config, cancel, progress):
                 if isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed < 2**53:
                     raise ValueError("Invalid returned workflow seed.")
                 row = {"image": base64.b64encode(png_bytes(image)).decode("ascii"), "width": image.width,
-                       "height": image.height, "prompt": prompt, "name": name, "seed": seed,
+                       "height": image.height, "prompt": prompt, "negativePrompt": data.get("negativePrompt", ""), "name": name, "seed": seed,
                        "loras": validate_studio(record.get("loras", data["loras"]))}
                 if record.get("mask"):
                     mask = fetch(record["mask"], True)

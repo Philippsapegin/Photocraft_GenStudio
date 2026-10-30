@@ -95,7 +95,7 @@ class DirectPipeline:
         self.pipe = model, clip, vae
         return self.pipe
 
-    def generate_studio(self, references, seed, prompt, width, height, cancel, progress, *, loras=None):
+    def generate_studio(self, references, seed, prompt, width, height, cancel, progress, *, loras=None, negative_prompt=""):
         """Qwen 2.1 generation: zero target latent and up to ten image slots."""
         if cancel.is_set():
             raise Cancelled()
@@ -132,11 +132,13 @@ class DirectPipeline:
                 prompt, images=images, keep_vision=not latents, prevent_empty_text=True))
             positive = [[embedding, {**metadata, **({"reference_latents": latents} if latents else {})}]
                         for embedding, metadata in conditioning]
+            from .conditioning import negative as encode_negative
+            negative = encode_negative(clip, negative_prompt, positive, images=images, keep_vision=not latents, prevent_empty_text=True)
             latent = torch.zeros((1, 64, height // 16, width // 16), dtype=torch.float32, device="cpu")
             noise = comfy.sample.prepare_noise(latent, seed)
             check()
             samples = comfy.sample.sample_custom(model, noise, 1.0, comfy.samplers.sampler_object("euler"),
-                torch.tensor(TURBO_SIGMAS, dtype=torch.float32), positive, positive, latent,
+                torch.tensor(TURBO_SIGMAS, dtype=torch.float32), positive, negative, latent,
                 callback=step, disable_pbar=True, seed=seed)
             check()
             decoded = vae.decode(samples).detach().float().cpu().numpy()[0]
@@ -155,7 +157,7 @@ class DirectPipeline:
         import comfy.samplers
         import comfy.model_management
         from PIL import Image
-        from genfill.workflow import TURBO_SIGMAS
+        from genfill.workflow import turbo_sigmas
 
         def cancelled():
             if cancel.is_set():
@@ -192,7 +194,7 @@ class DirectPipeline:
             progress("Qwen Image 2.1 · generating…")
             cancelled()
             samples = comfy.sample.sample_custom(model, noise, 1.0, comfy.samplers.sampler_object("euler"),
-                       torch.tensor(TURBO_SIGMAS, dtype=torch.float32), positive, negative, latent,
+                       torch.tensor(turbo_sigmas(self.components.get("constantLoraSteps")), dtype=torch.float32), positive, negative, latent,
                        noise_mask=noise_mask, callback=step, disable_pbar=True, seed=seed)
             cancelled()
             decoded = vae.decode(samples).detach().float().cpu().numpy()[0]

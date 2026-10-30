@@ -19,9 +19,13 @@ Controls below the prompt:
 - **Aa / {Aa}**: switch proportional and monospaced prompt text without changing the prompt.
 - **Generate / Cancel**: submit full-image generation or cancel the running workspace job.
 
+When Generate is disabled, Studio shows the reason in its footer and on the button's tooltip. Direct FIBO 2.0 Edit Turbo requires a source image as well as a prompt; Qwen and FLUX accept text-only requests. ComfyUI follows the active graph's requirements.
+
 ## Settings
 
 Open **Edit → Preferences → GenGate Settings**. It contains separate **Model** and **Engine** selectors, startup policy, shared Models folder, display preferences and engine controls. The engine status stays in a small footer in the main workspace. Engine startup retains its nonblocking notice and spinner.
+
+Starting Direct starts its service without loading model weights. The footer explicitly says that the model loads on the first generation, then distinguishes loading, loaded components and model errors. Loaded components may be offloaded from VRAM between jobs. ComfyUI's connection status likewise does not claim that its workflow models are loaded.
 
 The Preferences tab keeps a working copy: Apply and OK save changes, Cancel discards unapplied changes. Advanced remains collapsed initially and scrolls into view when expanded. The floating selection-fill bar is temporarily hidden while the Studio window is open; closing Studio restores it without changing the display preference.
 

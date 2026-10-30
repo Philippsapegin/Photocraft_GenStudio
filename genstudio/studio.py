@@ -20,6 +20,9 @@ def request(value, model="qwen-image-2.1-turbo", *, workflow=False):
     if not isinstance(value, dict):
         raise ValueError("Expected a generation request.")
     prompt = value.get("prompt", "")
+    negative = value.get("negativePrompt", "")
+    if not isinstance(negative, str) or len(negative.encode("utf-8")) > 12000 or "\0" in negative:
+        raise ValueError("Negative prompt must contain at most 12000 UTF-8 bytes.")
     if not isinstance(prompt, str) or not workflow and not prompt.strip() or len(prompt.encode("utf-8")) > 12000 or "\0" in prompt:
         raise ValueError("Enter a prompt (up to 12000 UTF-8 bytes).")
     refs = value.get("references", [])
@@ -48,7 +51,7 @@ def request(value, model="qwen-image-2.1-turbo", *, workflow=False):
         # by resizing every image to the output canvas dimensions.
         w, h = (max(grid, round(side / grid) * grid) for side in image.size)
         images.append(image.resize((w, h), Image.Resampling.LANCZOS))
-    data = {"prompt": prompt, "references": images, "width": width, "height": height, "batch": count, "seed": seed, "loras": loras}
+    data = {"prompt": prompt, "negativePrompt": negative, "references": images, "width": width, "height": height, "batch": count, "seed": seed, "loras": loras}
     if workflow:
         source_prompt = value.get("sourcePrompt", prompt)
         if not isinstance(source_prompt, str) or len(source_prompt.encode()) > 12000 or "\0" in source_prompt:
@@ -66,13 +69,13 @@ class StudioJobs:
 
     def submit(self, body):
         model = self.host.settings["model"]
-        from .comfy_workflow import enabled, parse_workflow, read_workflow
+        from .comfy_workflow import enabled, parse_workflow
         workflow = enabled(self.host.settings)
         mode = (self.host.settings.get("studioMode", "preset"), self.host.settings.get("studioWorkflow", ""), self.host.settings.get("engine", "direct"))
         data = request(body, model, workflow=True) if workflow else request(body, model)
         if workflow:
-            data["workflow"] = parse_workflow(body["workflowGraph"]) if "workflowGraph" in body else read_workflow(mode[1])
-            data["workflowPath"] = mode[1]
+            data["workflow"] = parse_workflow(body["workflowGraph"]) if "workflowGraph" in body else None
+            data["workflowPath"] = ""
         from .lora import validate_studio
         if data['loras'] and not workflow:
             validate_studio(data['loras'], self.host.settings['modelsDir'])
@@ -120,7 +123,8 @@ class StudioJobs:
                     raise Cancelled()
                 output = self.host.generate_studio(data["references"], data["seed"] + index,
                     data["prompt"], data["width"], data["height"], job.cancel, progress,
-                    **({'loras': data['loras']} if data['loras'] else {}))
+                    **({'loras': data['loras']} if data['loras'] else {}),
+                    **({'negative_prompt': data['negativePrompt']} if data['negativePrompt'] else {}))
                 if output.size != (data["width"], data["height"]):
                     raise RuntimeError("The engine returned the wrong generation dimensions.")
                 images.append({"image": base64.b64encode(png_bytes(output)).decode("ascii"), "seed": data["seed"] + index})

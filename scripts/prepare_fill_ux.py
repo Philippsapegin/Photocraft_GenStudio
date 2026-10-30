@@ -109,7 +109,10 @@ fn queue_ai_fill(app: &mut PhotocraftApp, params: Value) {
     }
 }
 '''
-    text=text.replace('\n#[cfg(test)]\nmod tests {',helper+'\n#[cfg(test)]\nmod tests {',1)
+    if '\n#[cfg(test)]\nmod tests {' in text:
+        text=text.replace('\n#[cfg(test)]\nmod tests {',helper+'\n#[cfg(test)]\nmod tests {',1)
+    elif '\nfn queue_ai_fill(' not in text:
+        text += helper
     retouch.write_text(text, encoding="utf-8")
     replace(ui / "lib.rs", "pub mod genstudio_ui;", "pub mod genstudio_ui;\npub mod genstudio_fill_ui;")
     replace(ui / "lib.rs", "    pub(crate) remove_pending_doc:", "    pub(crate) ai_fill_overlays: crate::genstudio_fill_ui::Cache,\n    pub(crate) remove_pending_doc:")

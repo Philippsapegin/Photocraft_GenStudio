@@ -31,7 +31,7 @@ spec.loader.exec_module(nodes)
 def graph():
     return {"source": {"class_type": "GenGateIN2", "inputs": {}},
             "invert": {"class_type": "ImageInvert", "inputs": {"image": ["source", 0]}},
-            "return": {"class_type": "GenGateOUT", "inputs": {"images": ["invert", 0]}}}
+            "return": {"class_type": "GenGateOUT2", "inputs": {"images": ["invert", 0]}}}
 
 
 class Tensor:
@@ -114,15 +114,23 @@ class NodeTests(unittest.TestCase):
         for name in ("../private.png [temp]", "C:/private.png [temp]", "outside.png [temp]", "ordinary.png"):
             with self.assertRaises(ValueError): nodes.asset_path(name, self.context["request_id"])
         with self.assertRaises(ValueError): nodes.context({})
+    def test_negative_port_and_edit_steps_follow_request_without_an_out_prompt(self):
+        value={**self.context,'negative_prompt':'text, watermark','steps':None}
+        received=dict(zip(nodes.GenGateIN.RETURN_NAMES,nodes.GenGateIN().receive(extra_pnginfo={'gengate':value})))
+        self.assertEqual(received['negative_prompt'],'text, watermark')
+        self.assertNotIn('prompt',nodes.GenGateOUT.INPUT_TYPES()['optional'])
+        self.assertEqual(nodes.GenGateEditSteps().steps(16,extra_pnginfo={'gengate':value}),(16,))
+        value['steps']=4
+        self.assertEqual(nodes.GenGateEditSteps().steps(16,extra_pnginfo={'gengate':value}),(4,))
     @unittest.skipIf(np is None, "Pixel bridge tests use NumPy from the ComfyUI Python")
     def test_output_batches_masks_prompts_and_multiple_list_calls_do_not_overwrite(self):
         image = Tensor(np.full((2, 3, 4, 3), .25, np.float32))
         mask = Tensor(np.full((1, 3, 4), .5, np.float32))
         out = nodes.GenGateOUT()
-        one = out.send(image, mask=mask, prompt="Workflow prompt", layer_name="Retouch", extra_pnginfo={"gengate": self.context}, unique_id="return")
+        one = out.send(image, mask=mask, layer_name="Retouch", extra_pnginfo={"gengate": self.context}, unique_id="return")
         two = out.send(image, extra_pnginfo={"gengate": self.context}, unique_id="return")
         rows = one["ui"]["gengate"][0]["images"]
-        self.assertEqual(len(rows), 2); self.assertEqual(rows[0]["prompt"], "Workflow prompt")
+        self.assertEqual(len(rows), 2); self.assertNotIn("prompt", rows[0])
         self.assertNotEqual(rows[0]["image"], two["ui"]["gengate"][0]["images"][0]["image"])
         with Image.open(self.root / "gengate" / rows[0]["image"]["filename"]) as saved:
             self.assertEqual(saved.size, (4, 3)); self.assertEqual(saved.getpixel((0, 0)), (64, 64, 64))
@@ -146,7 +154,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertIsNot(parsed["graph"], value)
         self.assertEqual(parsed["outputs"], ["return"])
         self.assertEqual(parsed["sha256"], bridge.parse_workflow({"prompt": value})["sha256"])
-        named = {"prompt": {"class_type": "GenGateIN2", "inputs": {}}, "output": {"class_type": "GenGateOUT", "inputs": {"images": ["prompt", 0]}}}
+        named = {"prompt": {"class_type": "GenGateIN2", "inputs": {}}, "output": {"class_type": "GenGateOUT2", "inputs": {"images": ["prompt", 0]}}}
         self.assertEqual(bridge.parse_workflow(named)["inputs"], ["prompt"])
         with self.assertRaisesRegex(ValueError, "Export"):
             bridge.parse_workflow({"nodes": [], "links": []})
@@ -156,11 +164,14 @@ class WorkflowTests(unittest.TestCase):
     def test_legacy_api_ports_migrate_by_name_or_request_reexport(self):
         value = graph(); value["source"]["class_type"] = "GenGateIN"
         value["return"]["inputs"]["prompt"] = ["source", 5]
+        value["text"]={"class_type":"CLIPTextEncode","inputs":{"text":["source",5]}}
+        value["return"]["class_type"]="GenGateOUT"
         parsed = bridge.parse_workflow(value)
+        self.assertNotIn("prompt",parsed["graph"]["return"]["inputs"])
         self.assertEqual(parsed["graph"]["source"]["class_type"], bridge.IN_NODE)
-        self.assertEqual(parsed["graph"]["return"]["inputs"]["prompt"], ["source", 2])
+        self.assertEqual(parsed["graph"]["text"]["inputs"]["text"], ["source", 2])
         self.assertEqual(value["return"]["inputs"]["prompt"], ["source", 5])
-        value["return"]["inputs"]["prompt"] = ["source", 14]
+        value["text"]["inputs"]["text"] = ["source", 14]
         with self.assertRaisesRegex(ValueError, "removed.*Recreate"):
             bridge.parse_workflow(value)
     def test_studio_only_mode_is_independent_of_the_preset(self):
@@ -181,6 +192,16 @@ class WorkflowTests(unittest.TestCase):
             target.write_text("# local edit")
             with self.assertRaisesRegex(ValueError, "edited locally"): bridge.install_nodes(folder)
             self.assertEqual(target.read_text(), "# local edit")
+    def test_new_managed_files_do_not_replace_unmanaged_user_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);(root/'main.py').write_text('# fixture')
+            bridge.install_nodes(directory)
+            folder=root/'custom_nodes/GenGate';marker=folder/'gengate-nodes.json'
+            metadata=json.loads(marker.read_text());metadata['files'].pop('bridge.py');marker.write_text(json.dumps(metadata))
+            (folder/'bridge.py').write_text('# user code')
+            with self.assertRaisesRegex(ValueError,'unmanaged'):bridge.install_nodes(directory)
+            self.assertEqual((folder/'bridge.py').read_text(),'# user code')
+
     def test_queue_uses_graph_batch_and_keeps_result_masks_without_presets(self):
         settings = {**defaults(), "engine": "comfy", "studioMode": "workflow", "studioWorkflow": "fixture.json"}
         result = {"images": [{"image": "fake", "width": 4096, "height": 2048, "mask": "mask", "prompt": "Altered"}], "workflow": {"path": "fixture.json", "sha256": "f" * 64}}
@@ -197,7 +218,7 @@ class WorkflowTests(unittest.TestCase):
     def test_transport_reads_only_matching_out_nodes_and_preserves_size_mask_recipe(self):
         class Client:
             def request(self, route, *args, **kwargs):
-                if route == "/object_info": return {"GenGateIN2": {}, "GenGateOUT": {}, "ImageInvert": {}}
+                if route == "/object_info": return {"GenGateIN2": {}, "GenGateOUT2": {}, "ImageInvert": {}}
                 image = Image.new("L", (17, 9), 128) if "mask" in route else Image.new("RGB", (17, 9), "blue")
                 return png_bytes(image)
             def upload(self, name, raw, **kwargs): return name + " [temp]"
@@ -214,7 +235,7 @@ class WorkflowTests(unittest.TestCase):
         result = bridge.generate(Client(), bridge.parse_workflow(graph()), data, {}, threading.Event(), lambda _: None)
         row = result["images"][0]
         self.assertEqual((row["width"], row["height"]), (17, 9))
-        self.assertTrue(row["mask"]); self.assertEqual(row["prompt"], "new prompt")
+        self.assertTrue(row["mask"]); self.assertEqual(row["prompt"], "input")
         self.assertEqual(result["workflow"]["path"], "fixture.json")
         class Stale(Client):
             def run_workflow(self, *args, **kwargs):

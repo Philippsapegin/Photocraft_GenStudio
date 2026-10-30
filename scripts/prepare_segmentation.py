@@ -49,7 +49,15 @@ def prepare(source, replace):
     path.write_text(text, encoding="utf-8")
     path=ui/"control.rs"
     text=path.read_text(encoding="utf-8")
-    if 'let object_ai_select = bool_field' not in text:
+    if 'object_ai_select: Option<bool>' in text:
+        pass
+    elif 'struct ToolSet {' in text:
+        text=re.sub(r'pub const UI_SET_FIELDS: \[&str; (\d+)\] = \[',lambda m:f'pub const UI_SET_FIELDS: [&str; {int(m.group(1))+1}] = [\n    "objectAiSelect",',text,count=1)
+        text=text.replace('struct ToolSet {','struct ToolSet {\n    object_ai_select: Option<bool>,',1)
+        text=text.replace('            gradient_classic: bool_field(p, "gradientClassic")?,','            object_ai_select: bool_field(p, "objectAiSelect")?,\n            gradient_classic: bool_field(p, "gradientClassic")?,',1)
+        text=text.replace('        let gradient_before = app.ui.tool_options.clone();','        if let Some(enabled)=self.object_ai_select {app.ui.tool_options.object_ai_select=enabled;}\n        let gradient_before = app.ui.tool_options.clone();',1)
+        path.write_text(text,encoding="utf-8")
+    elif 'let object_ai_select = bool_field' not in text:
         text=re.sub(r'pub const UI_SET_FIELDS: \[&str; (\d+)\] = \[',lambda m:f'pub const UI_SET_FIELDS: [&str; {int(m.group(1))+1}] = [\n    "objectAiSelect",',text,count=1)
         text=text.replace('                let gradient_classic = bool_field(p, "gradientClassic")?;', '                let object_ai_select = bool_field(p, "objectAiSelect")?;\n                let gradient_classic = bool_field(p, "gradientClassic")?;',1)
         text=text.replace('                let gradient_before = app.ui.tool_options.clone();','                if let Some(enabled)=object_ai_select {app.ui.tool_options.object_ai_select=enabled;}\n                let gradient_before = app.ui.tool_options.clone();',1)

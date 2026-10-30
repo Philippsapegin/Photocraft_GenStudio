@@ -225,7 +225,7 @@ fn workspace_and_chip_follow_every_pointer_frame_without_lag_or_release_jump() {
 }
 
 #[test]
-fn workflow_picker_is_one_field_only_for_comfy_and_retains_choice_in_direct() {
+fn workflow_controls_use_the_active_comfy_graph_and_keep_legacy_preferences() {
     use photocraft_engine::genstudio::Engine;
     let mut h=workspace_harness();
     for engine in [Engine::Comfy,Engine::Direct] {
@@ -234,12 +234,36 @@ fn workflow_picker_is_one_field_only_for_comfy_and_retains_choice_in_direct() {
             h.run_steps(8);
             let info=&h.state().studio.info["workflow"];
             assert_eq!(info["available"],engine==Engine::Comfy);
-            assert_eq!(info.get("browse").is_some(),engine==Engine::Comfy);
+            assert_eq!(info.get("open").is_some(),engine==Engine::Comfy);
             assert!(info.get("selector").is_none());
             assert_eq!(h.state().session.prefs().gen_studio.workflow_mode(),engine==Engine::Comfy);
-            assert_eq!(info["path"],path);
-            if engine==Engine::Comfy {assert_eq!(info["placeholder"],path.is_empty());}
+            assert_eq!(info["path"],"");
+            assert_eq!(h.state().session.prefs().gen_studio.studio_workflow,path);
+            assert_eq!(info["active"],engine==Engine::Comfy);
         }
     }
     assert!(crate::icons::exists("folder"));
+}
+
+#[test]
+fn negative_prompt_splits_the_field_and_hiding_it_preserves_text() {
+    let mut h=workspace_harness();
+    h.state_mut().ui.gen_studio.workspace.prompt="A quiet forest".into();
+    h.state_mut().ui.gen_studio.workspace.negative_prompt="text, watermark".into();
+    h.state_mut().ui.gen_studio.workspace.negative_open=true;
+    h.run_steps(8);
+    let info=&h.state().studio.info;
+    let positive=&info["promptRect"];let negative=&info["controls"]["negativePrompt"];
+    assert!(positive[1].as_f64().unwrap()+positive[3].as_f64().unwrap()<negative[1].as_f64().unwrap());
+    assert!((positive[3].as_f64().unwrap()-negative[3].as_f64().unwrap()).abs()<1.0);
+    let controls=&info["controls"];
+    assert!(controls["negativeToggle"][0].as_f64().unwrap()<controls["textMode"][0].as_f64().unwrap());
+    let ctx=h.ctx.clone();
+    crate::menus::invoke(h.state_mut(),&ctx,"genstudio.studio.configure",json!({"negativeOpen":false})).unwrap();
+    h.run_steps(4);
+    assert_eq!(h.state().studio.info["negativePrompt"],"text, watermark");
+    assert!(h.state().studio.info["controls"].get("negativePrompt").is_none());
+    let saved=serde_json::to_value(&h.state().ui.gen_studio.workspace).unwrap();
+    let loaded:crate::genstudio_canvas::Workspace=serde_json::from_value(saved).unwrap();
+    assert_eq!(loaded.negative_prompt,"text, watermark");
 }

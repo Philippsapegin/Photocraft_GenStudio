@@ -12,6 +12,15 @@ def table(text, name):
 
 
 def anchors(path, text, old, new):
+    if '"window.panel.layout" | "ui.dock"' in text:
+        old, new = old.replace('"window.panel.layout" => true', '"window.panel.layout" | "ui.dock" => true'), new.replace('"window.panel.layout" => true', '"window.panel.layout" | "ui.dock" => true')
+    for previous, current in (('pub mod plugin_cmds;', 'pub use cmd::plugin_cmds;'), ('pub mod plugin_ui;', 'pub use menus::plugin_ui;')):
+        if current in text:
+            old, new = old.replace(previous, current), new.replace(previous, current)
+    if path.name == 'canvas.rs' and '    draw_drag_preview(app, painter, xf);' in text:
+        old = old.replace('        draw_drag_preview(app, &painter, &xf);\n        if app.session.active_index()', '    draw_drag_preview(app, painter, xf);\n    if app.session.active_index()')
+        old = old.replace('crate::genstudio_fill_ui::show(app, ui, &xf, idx)', 'crate::genstudio_fill_ui::show(app, ui, xf, idx)').replace('crate::genstudio_ai_ui::show_bar(app, ui, &xf, idx)', 'crate::genstudio_ai_ui::show_bar(app, ui, xf, idx)')
+        new = new.replace('        draw_drag_preview(app, &painter, &xf);', '    draw_drag_preview(app, painter, xf);').replace('crate::genstudio_fill_ui::show(app, ui, &xf, idx)', 'crate::genstudio_fill_ui::show(app, ui, xf, idx)').replace('crate::genstudio_ai_ui::show_bar(app, ui, &xf, idx)', 'crate::genstudio_ai_ui::show_bar(app, ui, xf, idx)').replace('        if app.session.active_index()', '    if app.session.active_index()')
     if path.name == 'jobs_ui.rs' and '|| app.jobs.saves.iter().any(|s| s.job == j.id)' in text:
         suffix = ' || app.jobs.saves.iter().any(|s| s.job == j.id)'
         if old == '    if j.elapsed_ms < DIALOG_DELAY_MS {':
@@ -172,6 +181,9 @@ def prepare_windows_input(source):
     }
 
 '''
+    if anchor not in text and '#[test]\nfn cpu_prefers_software_adapters() {' in text:
+        import textwrap
+        anchor, regression = textwrap.dedent(anchor), textwrap.dedent(regression)
     if text.count(anchor) != 1:
         raise RuntimeError('PhotoCraft graphics regression test anchor changed.')
     path.write_text(text.replace(anchor, regression + anchor), encoding='utf-8')

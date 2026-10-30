@@ -58,6 +58,7 @@ pub struct PresetComponents {
     pub vae: String,
     pub constant_lora: String,
     pub constant_lora_strength: f64,
+    pub constant_lora_steps: Option<u32>,
 }
 impl Default for PresetComponents {
     fn default() -> Self {
@@ -68,11 +69,13 @@ impl Default for PresetComponents {
             vae: String::new(),
             constant_lora: String::new(),
             constant_lora_strength: 1.0,
+            constant_lora_steps: None,
         }
     }
 }
 impl PresetComponents {
     pub fn validate(&self) -> std::result::Result<(), String> {
+        if self.constant_lora_steps.is_some_and(|n| !(1..=200).contains(&n)) { return Err("Edit steps must be empty or between 1 and 200".into()); }
         for value in [&self.model_file, &self.text_encoder, &self.prompt_upsampler, &self.vae, &self.constant_lora] {
             if value.len() > 4096 || value.contains('\0') {
                 return Err("Invalid preset component path".into());
@@ -97,6 +100,8 @@ pub struct Settings {
     pub engine: Engine,
     pub studio_mode: String,
     pub studio_workflow: String,
+    pub fill_workflow: String,
+    pub remove_workflow: String,
     pub comfy_startup: Startup,
     pub direct_startup: Startup,
     pub comfy_url: String,
@@ -130,6 +135,8 @@ impl Default for Settings {
             engine: if v.get("engine").and_then(Value::as_str) == Some("direct") { Engine::Direct } else { Engine::Comfy },
             studio_mode: v.get("studioMode").and_then(Value::as_str).unwrap_or("preset").to_owned(),
             studio_workflow: string("studioWorkflow"),
+            fill_workflow: string("fillWorkflow"),
+            remove_workflow: string("removeWorkflow"),
             comfy_startup: Startup::FirstRequest,
             direct_startup: Startup::FirstRequest,
             comfy_url: string("comfyUrl"),
@@ -198,6 +205,8 @@ impl Settings {
         for s in [
             &self.model,
             &self.studio_workflow,
+            &self.fill_workflow,
+            &self.remove_workflow,
             &self.text_encoder,
             &self.vae,
             &self.comfy_url,
@@ -226,6 +235,7 @@ impl Settings {
 
 #[derive(Default)]
 pub struct Runtime {
+    pub updates: crate::gengate_updates::Runtime,
     pub catalog: Arc<Mutex<Value>>,
     pub state: Arc<Mutex<Snapshot>>,
     pub queue: crate::genstudio_queue::Queue,

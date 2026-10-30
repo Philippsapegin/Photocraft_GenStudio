@@ -12,7 +12,7 @@ import subprocess
 import sys
 import uuid
 
-VERSION = "0.9.4"
+VERSION = "0.9.5"
 REPOSITORY = "https://github.com/Philippsapegin/Photocraft_GenStudio"
 
 
@@ -188,15 +188,13 @@ def install(request, bundle, *, shortcuts=True):
                 or address.password or address.query or address.fragment):
             raise ValueError("Use a local ComfyUI HTTP address with a port, e.g. http://127.0.0.1:8190.")
         lanpaint = Path(request["comfyDir"]) / "custom_nodes/LanPaint"
-        if not lanpaint.exists() and not request.get("installLanPaint", False):
-            raise ValueError("ComfyUI needs LanPaint. Enable Install missing LanPaint, or install it yourself.")
     profile = editor_patch.profile_folder(host)
     prefs_path = profile / "preferences.json"
     # Parse before changing anything. Preserve all unrelated editor preferences.
     preferences = read_json(prefs_path) if prefs_path.exists() else {}
     if not isinstance(preferences, dict):
         raise ValueError("Existing preferences are invalid. Back up Profile/preferences.json before retrying.")
-    old_settings = preferences.get("genStudio", {})
+    old_settings = editor_patch.previous_settings(host, preferences)
     if request.get("migrationProfile"):
         previous = read_json(Path(request["migrationProfile"]) / "preferences.json")
         old_settings = previous.get("genStudio", old_settings)
@@ -228,9 +226,10 @@ def install(request, bundle, *, shortcuts=True):
         settings["reduceEditResolution"] = old_settings["reduceEditResolution"]
     if old_settings.get("studioMode") in ("preset", "workflow"):
         settings["studioMode"] = old_settings["studioMode"]
-    path = old_settings.get("studioWorkflow")
-    if isinstance(path, str) and len(path) <= 4096 and "\0" not in path:
-        settings["studioWorkflow"] = path
+    for field in ("studioWorkflow", "fillWorkflow", "removeWorkflow"):
+        path = old_settings.get(field)
+        if isinstance(path, str) and len(path) <= 4096 and "\0" not in path:
+            settings[field] = path
     if os.path.normcase(str(Path(old_settings.get("modelsDir") or ".").resolve())) == os.path.normcase(settings["modelsDir"]):
         for key in ("textEncoder", "vae"):
             value=old_settings.get(key)
@@ -249,7 +248,7 @@ def install(request, bundle, *, shortcuts=True):
         except ValueError:
             pass
     write_json(runtime / "config.photocraft.json", settings)
-    if engine == "comfy" and not lanpaint.exists():
+    if engine == "comfy" and not lanpaint.exists() and request.get("installLanPaint", False):
         report("Installing the bundled, pinned LanPaint extension into the selected ComfyUI...")
         shutil.copytree(runtime / "third_party/LanPaint", lanpaint)
     if engine == "comfy":

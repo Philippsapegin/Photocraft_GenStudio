@@ -61,7 +61,7 @@ class FiboPipeline:
         self.pipe = model, clip, vae
         return self.pipe
 
-    def generate_studio(self, references, seed, prompt, width, height, cancel, progress, *, loras=None, _mask=None, _constant=False):
+    def generate_studio(self, references, seed, prompt, width, height, cancel, progress, *, loras=None, _mask=None, _constant=False, negative_prompt=""):
         if cancel.is_set():
             raise Cancelled()
         maximum = 8192 if _mask is not None else 2048
@@ -96,6 +96,8 @@ class FiboPipeline:
             check(); progress('FIBO 2.0 · encoding edit instruction...')
             conditioning = clip.encode_from_tokens_scheduled(clip.tokenize(prompt, images=images))
             positive = [[embedding, {**metadata, 'reference_latents': latents}] for embedding, metadata in conditioning]
+            from .conditioning import negative as encode_negative
+            negative = encode_negative(clip, negative_prompt, positive, images=images)
             latent = torch.zeros((1, 128, height // 16, width // 16), dtype=torch.float32, device='cpu')
             noise_mask = None
             if _mask is not None:
@@ -103,10 +105,10 @@ class FiboPipeline:
                 noise_mask = torch.nn.functional.adaptive_max_pool2d(mask, latent.shape[-2:])
                 latent = latents[0].to(device='cpu')
             noise = comfy.sample.prepare_noise(latent, seed)
-            sigmas = comfy.samplers.calculate_sigmas(model.get_model_object('model_sampling'), 'simple', 4)
+            sigmas = comfy.samplers.calculate_sigmas(model.get_model_object('model_sampling'), 'simple', (self.components.get('constantLoraSteps') or 4) if _constant else 4)
             check()
             samples = comfy.sample.sample_custom(model, noise, 1.0, comfy.samplers.sampler_object('euler'),
-                sigmas, positive, positive, latent, noise_mask=noise_mask, callback=step, disable_pbar=True, seed=seed)
+                sigmas, positive, negative, latent, noise_mask=noise_mask, callback=step, disable_pbar=True, seed=seed)
             check(); decoded = vae.decode(samples).detach().float().cpu().numpy()[0]
             return Image.fromarray((np.clip(decoded, 0, 1) * 255).round().astype(np.uint8)).convert('RGBA')
 

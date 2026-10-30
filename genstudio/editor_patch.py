@@ -327,6 +327,27 @@ def restore(host):
     return {"restored": True, "updatedFilesRetained": retained}
 
 
+def previous_settings(host, preferences):
+    """An official editor can drop the unknown add-on section when it saves prefs."""
+    if "genStudio" in preferences:
+        if not isinstance(preferences["genStudio"], dict):
+            raise ValueError("Existing GenGate preferences are invalid. Keep a copy before reinstalling.")
+        return preferences["genStudio"]
+    state = state_for(host)
+    runtime = state.get("runtime")
+    if not isinstance(runtime, str) or not runtime:
+        return {}
+    path = next((path for path in (Path(runtime) / "config.photocraft.json", host / "runtime/config.photocraft.json") if path.is_file()), None)
+    if path is None:
+        return {}
+    if path.stat().st_size > 128 * 1024:
+        raise ValueError("The saved GenGate runtime settings exceed 128 KB.")
+    settings = read(path)
+    if not isinstance(settings, dict):
+        raise ValueError("The saved GenGate runtime settings are invalid.")
+    return settings
+
+
 def ensure_current(host):
     """Called by the GenGate launcher. Unknown updates are never downgraded."""
     host = host_folder(host)
@@ -343,6 +364,9 @@ def ensure_current(host):
     if all(current[name] == entry["files"][name]["targetSha256"] for name in FILES):
         return {"state": "applied", "hostVersion": entry["hostVersion"]}
     prefs = read(profile / "preferences.json")
-    settings = prefs["genStudio"]
+    settings = previous_settings(host, prefs)
+    if not settings:
+        raise ValueError("GenGate settings are missing. Reinstall the compatible add-on to configure it again.")
+    prefs["genStudio"] = settings
     apply(Path(state["package"]), host, settings, prefs, profile, state["version"])
     return {"state": "reapplied", "hostVersion": entry["hostVersion"]}

@@ -1,4 +1,4 @@
-"""Apply GenGate integration to pinned PhotoCraft 0.8.2, 0.12.0, 0.15.1 and 0.16.0 sources."""
+"""Apply the current GenGate integration to pinned PhotoCraft 0.17.0 sources."""
 from pathlib import Path
 import argparse
 import json
@@ -14,6 +14,8 @@ from prepare_studio import prepare as prepare_studio
 import prepare_gengate
 import prepare_segmentation
 import prepare_photocraft_012
+import prepare_updates
+from photocraft_source import source_view
 
 
 def replace(path, old, new):
@@ -27,6 +29,9 @@ def replace(path, old, new):
 
 
 def prepare(source):
+    if not (source / 'crates/engine/src/cmd.rs').is_file():
+        raise RuntimeError('This development integration targets PhotoCraft 0.17.0. Use the matching older GenGate release source for earlier editors.')
+    source = source_view(source)
     prepare_photocraft_012.before(source)
     prepare_gengate.before(source)
     engine, ui = source / "crates/engine/src", source / "crates/ui-egui/src"
@@ -55,7 +60,8 @@ def prepare(source):
     menu_text = menu_source.read_text(encoding="utf-8").replace('        "genstudio.open" | "genstudio.models.browse" => true,\n', '')
     enabled_line='        "genstudio.open" | "genstudio.models.browse" | "genstudio.progress.set" => true,'
     if enabled_line not in menu_text:
-        menu_text=menu_text.replace('        "window.panel.activate" | "window.panel.layout" => true,',enabled_line+'\n        "window.panel.activate" | "window.panel.layout" => true,')
+        anchor = '        "window.panel.activate" | "window.panel.layout"' + (' | "ui.dock"' if '"window.panel.layout" | "ui.dock"' in menu_text else '') + ' => true,'
+        menu_text=menu_text.replace(anchor,enabled_line+'\n'+anchor)
     menu_source.write_text(menu_text, encoding="utf-8")
     locales = json.loads((ROOT / "photocraft/menu-locales.json").read_text(encoding="utf-8"))
     for code, label in locales.items():
@@ -79,6 +85,7 @@ def prepare(source):
         prepare_segmentation.prepare(source, replace)
         prepare_gengate.after(source)
         prepare_photocraft_012.after(source)
+        prepare_updates.prepare(source, replace)
         return
     replace(engine / "lib.rs", "pub mod plugin_cmds;", "pub mod plugin_cmds;\npub mod genstudio;")
     replace(engine / "lib.rs", "pub struct Session {", "pub struct Session {\n    pub gen_studio: genstudio::Runtime,")
@@ -86,7 +93,7 @@ def prepare(source):
     replace(engine / "prefs.rs", "pub struct Preferences {", "pub struct Preferences {\n    pub gen_studio: crate::genstudio::Settings,")
     replace(engine / "prefs.rs", '"general.colorPicker" => ColorPicker::NAMES,', '"genStudio.engine" => &["comfy", "direct"],\n        "genStudio.comfyStartup" | "genStudio.directStartup" => &["off", "appStart", "firstRequest"],\n        "general.colorPicker" => ColorPicker::NAMES,')
     replace(ui / "lib.rs", "pub mod plugin_ui;", "pub mod plugin_ui;\npub mod genstudio_ui;")
-    replace(ui / "lib.rs", "dialogs::show(self, &ctx);", "dialogs::show(self, &ctx);\n        genstudio_ui::show(self, &ctx);")
+    replace(ui / "lib.rs", "dialogs::show(self, &ctx);", "dialogs::show(self, &ctx);\n        crate::genstudio_ui::show(self, &ctx);")
     replace(ui / "control.rs", '"toolOptions": app.ui.tool_options,', '"toolOptions": app.ui.tool_options,\n        "genStudio": app.ui.gen_studio,')
     replace(ui / "state.rs", "pub struct UiState {", "pub struct UiState {\n    #[serde(default)]\n    pub gen_studio: crate::genstudio_ui::State,")
     replace(ui / "state.rs", "\n            tool: Tool::Brush,", "\n            tool: Tool::Brush,\n            gen_studio: Default::default(),")
@@ -101,6 +108,7 @@ def prepare(source):
     prepare_segmentation.prepare(source, replace)
     prepare_gengate.after(source)
     prepare_photocraft_012.after(source)
+    prepare_updates.prepare(source, replace)
 
 
 def prepare_remove(engine, ui):

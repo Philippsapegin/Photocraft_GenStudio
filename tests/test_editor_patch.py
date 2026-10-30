@@ -67,6 +67,21 @@ class EditorPatchTests(unittest.TestCase):
         for name, data in self.outputs.items():
             self.assertEqual((self.host / name).read_bytes(), data)
 
+    def test_official_editor_can_drop_addon_preferences_without_losing_runtime_settings(self):
+        self.apply()
+        previous=ep.read(self.prefs)['genStudio']
+        prefs=ep.read(self.prefs);prefs.pop('genStudio');self.prefs.write_bytes(ep.encoded(prefs))
+        for name,data in self.originals.items():(self.host/name).write_bytes(data)
+        self.assertEqual(ep.previous_settings(self.host,prefs),previous)
+        self.assertEqual(ep.ensure_current(self.host)['state'],'reapplied')
+        self.assertEqual(ep.read(self.prefs)['genStudio'],previous)
+        self.assertEqual(ep.read(self.prefs)['interface'],self.old_preferences['interface'])
+
+    def test_preference_recovery_never_hides_malformed_existing_settings(self):
+        self.apply()
+        with self.assertRaisesRegex(ValueError,'invalid'):
+            ep.previous_settings(self.host,{'genStudio':False})
+
     def test_new_host_release_uses_its_own_delta_and_restores_the_new_originals(self):
         self.apply()
         package = self.root / "updated add-on"

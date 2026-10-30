@@ -33,6 +33,21 @@ class Worker:
         self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="genstudio-direct")
         self.jobs = {}
         self.lock = threading.RLock()
+        self.loading = False
+        self.model_error = ""
+
+    def health(self):
+        # Dependency/file checks must never load a checkpoint or initialize CUDA.
+        problems = self.pipeline.check()
+        with self.lock:
+            loaded = self.pipeline.pipe is not None
+            state = "error" if self.model_error else "loaded" if loaded else "loading" if self.loading else "unloaded"
+            return {"service": "genstudio-direct", "ready": not problems,
+                    "owner": self.owner, "inpaint_protocol": 2, "model": self.model_id,
+                    "studio_protocol": 3, "components": self.pipeline.components,
+                    "textEncoder": self.pipeline.text_encoder, "vae": self.pipeline.vae,
+                    "modelsDir": str(self.pipeline.models.resolve()), "problems": problems,
+                    "modelState": state, "modelLoaded": loaded, "modelError": self.model_error}
 
     def submit(self, data):
         if not isinstance(data, dict):
@@ -77,9 +92,12 @@ class Worker:
                 raise RuntimeError("Generation inference is disabled for validation")
             with gpu_lease(cancelled=job["cancel"].is_set,
                            waiting=lambda: progress("Waiting for AI selection to release the GPU\u2026")):
+                with self.lock:
+                    self.loading = True
+                    self.model_error = ""
                 failure = None
                 try:
-                    output = self.pipeline.generate_studio(studio["references"], seed, prompt, studio["width"], studio["height"], job["cancel"], progress, loras=studio['loras']) if studio else self.pipeline.generate(image, mask, seed, prompt, job["cancel"], progress)
+                    output = self.pipeline.generate_studio(studio["references"], seed, prompt, studio["width"], studio["height"], job["cancel"], progress, loras=studio['loras'], **({'negative_prompt':studio['negativePrompt']} if studio['negativePrompt'] else {})) if studio else self.pipeline.generate(image, mask, seed, prompt, job["cancel"], progress)
                 except Cancelled:
                     failure = "cancelled", "Cancelled"
                 except Exception as error:
@@ -87,6 +105,8 @@ class Worker:
                     # Discard a partially loaded/broken pipeline, and clear its
                     # traceback before offloading and handing off the GPU.
                     self.pipeline.pipe = None
+                    with self.lock:
+                        self.model_error = str(error)
                 finally:
                     release_gpu()
                 if failure:
@@ -104,6 +124,9 @@ class Worker:
         except Exception as error:
             with self.lock:
                 job.update(state="error", message=str(error))
+        finally:
+            with self.lock:
+                self.loading = False
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -115,14 +138,7 @@ class Handler(BaseHTTPRequestHandler):
         worker = self.server.worker
         try:
             if self.command == "GET" and self.path == "/health":
-                problems = worker.pipeline.check()
-                return send(200, {"service": "genstudio-direct", "ready": not problems,
-                                  "owner": worker.owner,
-                                  "inpaint_protocol": 2, "model": worker.model_id,
-                                  "studio_protocol": 2,
-                                  "components": worker.pipeline.components,
-                                  "textEncoder": worker.pipeline.text_encoder, "vae": worker.pipeline.vae,
-                                  "modelsDir": str(worker.pipeline.models.resolve()), "problems": problems})
+                return send(200, worker.health())
             if self.command == "POST" and self.path == "/jobs":
                 if self.headers.get("Content-Type", "").split(";")[0] != "application/json":
                     raise ValueError("JSON content type required.")

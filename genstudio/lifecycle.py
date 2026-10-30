@@ -50,6 +50,7 @@ class EngineHost:
         self.message = "Stopped"
         self.runtime = ROOT / ".runtime/genstudio"
         self.direct_url = None
+        self.worker_status = {}
         self.worker_id = uuid.uuid4().hex
 
     def config(self):
@@ -79,7 +80,7 @@ class EngineHost:
 
     @property
     def model_name(self):
-        return self.config()["diffusion_model"]
+        return "ComfyUI workflow" if self.engine == "comfy" else self.config()["diffusion_model"]
 
     def policy(self):
         return self.settings[self.engine + "Startup"]
@@ -98,6 +99,7 @@ class EngineHost:
             self.settings = settings
 
     def probe(self):
+        self.worker_status = {}
         if self.engine == "direct" and self.direct_url is None:
             return False
         url = self.settings["comfyUrl"].rstrip("/") if self.engine == "comfy" else self.direct_url
@@ -109,17 +111,21 @@ class EngineHost:
             # Older workers can still serve default, adapter-free presets.
             old_components = {**component_defaults(),
                               "textEncoder": info.get("textEncoder", ""), "vae": info.get("vae", "")}
-            return (info.get("service") == "genstudio-direct" and info.get("ready") is True
+            matched = (info.get("service") == "genstudio-direct" and info.get("ready") is True
                     and info.get("owner") == self.worker_id
                     and Path(info.get("modelsDir", "")).resolve() == Path(self.settings["modelsDir"]).resolve()
                     and info.get("components", old_components) == components
                     and info.get("model", "qwen-image-2.1-turbo") == self.settings["model"])
+            if matched:
+                self.worker_status = info
+            return matched
         except (OSError, ValueError, URLError):
             return False
 
     def status(self):
         if not self.lock.acquire(blocking=False):
             return {"engine": self.engine, "state": "starting", "ready": False,
+                    "serviceReady": False, "modelState": "unknown", "modelLoaded": None,
                     "owned": self.process is not None, "busy": self.busy,
                     "message": self.message, "startup": self.policy()}
         try:
@@ -127,10 +133,24 @@ class EngineHost:
             exited = self.process is not None and self.process.poll() is not None
             if exited:
                 self.message = "Engine exited. See .runtime/genstudio logs."
+            model_state = self.worker_status.get("modelState", "unknown") if ready and self.engine == "direct" else "unknown"
+            message = self.message
+            if ready:
+                if self.engine == "comfy":
+                    message = "ComfyUI connected"
+                else:
+                    message = {
+                        "unloaded": "Direct service running · model loads on first generation",
+                        "loading": "Loading model components…",
+                        "loaded": "Direct service running · model components loaded",
+                        "error": "Direct model error: " + self.worker_status.get("modelError", "See the generation error."),
+                    }.get(model_state, "Direct service running · model load status unavailable")
             return {"engine": self.engine, "state": "ready" if ready else "stopped",
                     "workerUrl": self.direct_url if self.engine == "direct" else None,
-                    "ready": ready, "owned": self.process is not None and not exited,
-                    "busy": self.busy, "message": "Ready" if ready else self.message,
+                    "ready": ready, "serviceReady": ready, "owned": self.process is not None and not exited,
+                    "busy": self.busy, "message": message,
+                    "modelState": model_state,
+                    "modelLoaded": self.worker_status.get("modelLoaded") if ready and self.engine == "direct" else None,
                     "startup": self.policy()}
         finally:
             self.lock.release()
@@ -143,9 +163,9 @@ class EngineHost:
                 from genfill.comfy import Cancelled
                 raise Cancelled()
             from .models import resolve_components, resolve_lora, extra_paths
-            from .comfy_workflow import enabled, read_workflow, inspect as inspect_workflow
-            custom = enabled(self.settings) and (studio or event in ("manual", "appStart") and bool(self.settings["studioWorkflow"]))
-            definition = (workflow or read_workflow(self.settings["studioWorkflow"])) if custom else None
+            from .comfy_workflow import enabled, inspect as inspect_workflow
+            custom = enabled(self.settings)
+            definition = workflow
             components = active_components(self.settings)
             if not custom:
                 resolve_components(self.settings["modelsDir"], components, self.settings["model"])
@@ -153,9 +173,9 @@ class EngineHost:
                 resolve_lora(self.settings["modelsDir"], components)
             if self.probe():
                 if self.engine == "comfy":
-                    if custom:
+                    if custom and definition is not None:
                         inspect_workflow(ComfyClient(self.config()), definition)
-                    else:
+                    elif not custom:
                         _, problems = ComfyClient(self.config()).inspect(studio=True) if studio else ComfyClient(self.config()).inspect()
                         if problems:
                             raise ValueError("\n".join(problems))
@@ -215,9 +235,9 @@ class EngineHost:
                     raise Cancelled()
                 if self.probe():
                     if self.engine == "comfy":
-                        if custom:
+                        if custom and definition is not None:
                             inspect_workflow(ComfyClient(self.config()), definition)
-                        else:
+                        elif not custom:
                             _, problems = ComfyClient(self.config()).inspect(studio=True) if studio else ComfyClient(self.config()).inspect()
                             if problems:
                                 raise ValueError("\n".join(problems))
@@ -254,36 +274,74 @@ class EngineHost:
         if not status["ready"]:
             return {}, [status["message"]]
         if self.engine == "comfy":
-            return ComfyClient(self.config()).inspect()
+            from .comfy_workflow import IN_NODE, OUT_NODE
+            info=ComfyClient(self.config()).request('/object_info',timeout=30)
+            missing=[name for name in (IN_NODE,OUT_NODE) if name not in info]
+            return info, ['Install/update GenGate nodes and restart ComfyUI: '+', '.join(missing)] if missing else []
         return {}, []
 
     def generate(self, image, mask, seed, prompt, cancel, progress):
+        if self.engine=='comfy':
+            return self.generate_edit(image,mask,seed,prompt,cancel,progress,mode='fill')
         with self.work_lock:
             return self._generate(image, mask, seed, prompt, cancel, progress)
+
+    def generate_edit(self, image, mask, seed, prompt, cancel, progress, *, mode="fill"):
+        if self.engine != 'comfy':
+            return self.generate(image, mask, seed, prompt, cancel, progress)
+        if mode not in ('fill', 'remove'):
+            raise ValueError('Unknown editing tool.')
+        from .comfy_workflow import read_workflow
+        path = self.settings['fillWorkflow' if mode == 'fill' else 'removeWorkflow']
+        if not path:
+            raise ValueError('Choose the ' + ('Ai Fill' if mode == 'fill' else 'Remove Brush') + ' workflow in GenGate Settings.')
+        definition = read_workflow(path)
+        from PIL import ImageOps
+        reference = image.convert('RGBA')
+        reference.putalpha(ImageOps.invert(mask.convert('L')))
+        components = active_components(self.settings)
+        from .models import resolve_lora
+        adapter = resolve_lora(self.settings['modelsDir'], components)
+        data = {'references': [reference], 'prompt': prompt, 'sourcePrompt': prompt, 'negativePrompt': '',
+                'width': image.width, 'height': image.height, 'batch': 1, 'seed': seed, 'steps': components['constantLoraSteps'],
+                'loras': [{'path': adapter['name'], 'strength': components['constantLoraStrength']}] if adapter else [],
+                'workflowPath': path}
+        result = self.generate_workflow(definition, data, cancel, progress)
+        if len(result['images']) != 1:
+            raise ValueError('An editing workflow must return exactly one image.')
+        from genfill.image_ops import decode_png
+        row = result['images'][0]
+        output = decode_png(row['image'], 32 << 20).convert('RGBA')
+        if output.size != image.size:
+            raise ValueError(f'Editing workflow must return {image.width} x {image.height} pixels; got {output.width} x {output.height}.')
+        if row.get('mask'):
+            from PIL import ImageChops
+            output.putalpha(ImageChops.multiply(output.getchannel('A'), decode_png(row['mask'], 32 << 20).convert('L')))
+        return output
 
     def _generate(self, image, mask, seed, prompt, cancel, progress):
         with self.lock:
             self.busy = True
         try:
             self.ensure("request", progress, cancel)
-            if self.engine == "comfy":
-                return ComfyClient(self.config()).generate(image, mask, seed, prompt, cancel, progress)
+            if self.engine != "direct":
+                raise ValueError('The engine changed. Submit the editing workflow again.')
             from .direct_client import generate
             return generate(image, mask, seed, prompt, cancel, progress, base=self.direct_url)
         finally:
             with self.lock:
                 self.busy = False
 
-    def generate_studio(self, references, seed, prompt, width, height, cancel, progress, *, loras=None):
+    def generate_studio(self, references, seed, prompt, width, height, cancel, progress, *, loras=None, negative_prompt=""):
+        if self.engine=='comfy':
+            raise ValueError('ComfyUI Studio uses workflow jobs with the active browser graph.')
         with self.work_lock:
             with self.lock:
                 self.busy = True
             try:
                 self.ensure("request", progress, cancel, studio=True)
-                if self.engine == "comfy":
-                    return ComfyClient(self.config()).generate_studio(references, seed, prompt, width, height, cancel, progress, loras=loras)
                 from .direct_client import generate_studio
-                return generate_studio(references, seed, prompt, width, height, cancel, progress, base=self.direct_url, loras=loras)
+                return generate_studio(references, seed, prompt, width, height, cancel, progress, base=self.direct_url, loras=loras, negative_prompt=negative_prompt)
             finally:
                 with self.lock:
                     self.busy = False
@@ -296,8 +354,12 @@ class EngineHost:
             with self.lock:
                 self.busy = True
             try:
+                if definition is None:
+                    self.ensure("request", progress, cancel, studio=True)
+                    from .comfy_workflow import active_workflow
+                    definition = active_workflow(ComfyClient(self.config()))
                 self.ensure("request", progress, cancel, studio=True, workflow=definition)
-                return generate(ComfyClient(self.config()), definition, data, self.config(), cancel, progress)
+                return generate(ComfyClient(self.config()), definition, data, self.config(), cancel, progress, settings=self.settings)
             finally:
                 with self.lock:
                     self.busy = False

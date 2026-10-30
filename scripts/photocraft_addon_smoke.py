@@ -94,7 +94,12 @@ def main():
                "--metadata", destination / "genstudio-install.json"]
     for name in ep.FILES:
         shutil.copyfile(args.original / name, host / name)
+    # An official editor can omit unknown add-on preferences when saving them.
+    without_addon=ep.read(prefs)
+    saved_addon=without_addon.pop("genStudio")
+    prefs.write_bytes(ep.encoded(without_addon))
     run("refresh", manager)
+    assert ep.read(prefs)["genStudio"]==saved_addon
     assert {name: ep.sha256(host / name) for name in ep.FILES} == target_hashes
     run("uninstall", [*manager, "--restore"])
     assert {name: ep.sha256(host / name) for name in ep.FILES} == originals
