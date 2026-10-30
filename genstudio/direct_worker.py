@@ -6,6 +6,7 @@ import base64
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import logging
 import os
 import threading
 import uuid
@@ -101,6 +102,7 @@ class Worker:
                 except Cancelled:
                     failure = "cancelled", "Cancelled"
                 except Exception as error:
+                    logging.getLogger(__name__).exception("Direct model job failed")
                     failure = "error", str(error)
                     # Discard a partially loaded/broken pipeline, and clear its
                     # traceback before offloading and handing off the GPU.

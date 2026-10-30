@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fix Direct quantized Embedding transfers that fail with `_apply(): Couldn't swap Embedding.weight`; reuse the private core's quantized transfer implementation and retain complete chained errors in the worker log.
+
 ## 0.9.5 Beta
 
 - Explain disabled Studio generation, including FIBO Edit Turbo's source-image requirement, and expose the reason to automation.

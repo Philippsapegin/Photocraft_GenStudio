@@ -53,6 +53,9 @@ def import_core(cpu=False, core=CORE):
     args.reserve_vram = 1.0
     import comfy.sd
     import comfy.sample
+    import comfy.ops
+    from .model_compat import quantized_embeddings
+    quantized_embeddings(comfy.ops)
     return comfy.sd, comfy.sample
 
 

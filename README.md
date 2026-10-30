@@ -53,7 +53,7 @@ ComfyUI Studio runs the graph currently open in the browser. Ai Fill and Remove 
 
 **Compatibility (0.9.5 package):** official **PhotoCraft 0.17.0 Windows x64** binaries. For official PhotoCraft 0.16.0, use [GenGate 0.9.4](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/tag/v0.9.4). Other builds need separate patch adaptation. Setup checks file hashes and refuses unknown builds. It never downgrades an updated editor.
 
-**Known issue:** Direct FIBO loading can fail with `_apply(): Couldn't swap Embedding.weight`; the fix is being investigated after this release. Real model inference has not been validated. [Release notes](docs/RELEASE_NOTES_0.9.5.md).
+**Known issue in the 0.9.5 download:** Direct FIBO loading can fail with `_apply(): Couldn't swap Embedding.weight`. Current source includes a CPU-tested compatibility fix; the published 0.9.5 package predates it. Real model inference has not been validated. [Release notes](docs/RELEASE_NOTES_0.9.5.md).
 
 To update GenGate, close PhotoCraft and run Setup into the same **GenGate** folder. The editor's existing profile is preserved. The PhotoCraft shortcut checks for replaced editor files and reapplies a compatible patch; an unknown PhotoCraft update opens normally with a compatibility notice and requires an updated GenGate patch.
 

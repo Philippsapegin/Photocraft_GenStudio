@@ -1,5 +1,14 @@
 # Release validation
 
+## Direct quantized Embedding transfer fix - 2026-10-30
+
+- The installed worker reports `_apply(): Couldn't swap Embedding.weight`. Reproduced that exact failure on the existing **PyTorch 2.14.0+cu130**, using a 4x4 INT8 CPU Embedding with a weak reference. PyTorch's ordinary module conversion attempts a prohibited wrapper-tensor swap; the pinned model core's quantized Embedding did not have its own transfer implementation.
+- Direct now gives the core's own generated quantized Embedding class the `_quantized_apply` path already used by its quantized Linear layers. Existing class-specific implementations and older factories are retained; repeated setup is idempotent. The adapter runs before checkpoint loading, only inside the private Direct process. Complete chained exceptions are logged before discarding a failed pipeline.
+- **184 Python tests: 172 passed, 12 skipped.** New coverage proves argument forwarding, one-time adaptation, retaining upstream handlers/older factories and installing the adapter before checkpoint loaders. The standalone `scripts/quantized_embedding_smoke.py` proves the baseline failure and fixed CPU conversions with inference mode both enabled and disabled, plus offloading after leaving inference mode. Packed INT8 data, scales and ConvRot metadata remain intact. CUDA initialization is guarded against and remains false; no checkpoint is opened.
+- The prepared local post-release package has **2,519 manifest files** and passed the same CPU regression from its own runtime. It reuses the release-tested 0.9.5 editor/CLI deltas. The public `v0.9.5` archive and tag are unchanged; that release explicitly lists the original failure as a known issue.
+
+Evidence: `.runtime/fibo-python.log`, `.runtime/fibo-cpu.log`, `.runtime/fibo-package.json` and `.runtime/fibo-package-cpu.log`. Real model generation, image quality and GPU memory behavior remain untested.
+
 ## 0.9.5 Beta release - 2026-10-30
 
 - Host, installer, Setup title and native update checker report **0.9.5**. The prepared native source differs from the previous validated candidate only in `gengate-version.txt`; published documentation now targets PhotoCraft 0.17.0 and describes active-graph workflows, negative prompts, edit steps and readiness states.
