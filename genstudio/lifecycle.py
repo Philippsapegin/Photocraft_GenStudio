@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 import subprocess
@@ -8,7 +9,7 @@ import threading
 import time
 import socket
 import uuid
-from urllib.request import Request, urlopen
+from urllib.request import ProxyHandler, Request, build_opener, urlopen
 from urllib.error import URLError
 from urllib.parse import urlparse
 
@@ -17,12 +18,16 @@ from genfill.server import load_config
 from .settings import ROOT, validate, active_components, component_defaults
 
 DIRECT_URL = "http://127.0.0.1:8767"
+LOCAL_HTTP = build_opener(ProxyHandler({}))
 
 
 def http_json(url, body=None, timeout=3):
     data = json.dumps(body).encode() if body is not None else None
     req = Request(url, data=data, headers={"Content-Type": "application/json"})
-    with urlopen(req, timeout=timeout) as response:
+    # These services are on this computer, even when a VPN changes the system
+    # proxy or its bypass list while the editor/host are already running.
+    open_request = LOCAL_HTTP.open if urlparse(url).hostname in ("localhost", "127.0.0.1", "::1") else urlopen
+    with open_request(req, timeout=timeout) as response:
         return json.load(response)
 
 
@@ -51,6 +56,7 @@ class EngineHost:
         self.runtime = ROOT / ".runtime/genstudio"
         self.direct_url = None
         self.worker_status = {}
+        self.probe_error = ""
         self.worker_id = uuid.uuid4().hex
 
     def config(self):
@@ -98,29 +104,48 @@ class EngineHost:
                 self.stop()
             self.settings = settings
 
+    def _probe_failed(self, url, reason):
+        detail = f"{url}: {reason}"[:1500]
+        if detail != self.probe_error:
+            logging.getLogger(__name__).warning("Engine readiness failed: %s", detail)
+        self.probe_error = detail
+        return False
+
     def probe(self):
         self.worker_status = {}
         if self.engine == "direct" and self.direct_url is None:
+            self.probe_error = "Direct service has not been started."
             return False
         url = self.settings["comfyUrl"].rstrip("/") if self.engine == "comfy" else self.direct_url
         try:
             info = self.request(url + ("/system_stats" if self.engine == "comfy" else "/health"))
+            if not isinstance(info, dict):
+                raise ValueError("Expected a JSON service status object.")
             if self.engine == "comfy":
-                return isinstance(info.get("system"), dict)
+                if not isinstance(info.get("system"), dict):
+                    return self._probe_failed(url, "The server did not return ComfyUI system status.")
+                self.probe_error = ""
+                return True
             components = active_components(self.settings)
             # Older workers can still serve default, adapter-free presets.
             old_components = {**component_defaults(),
                               "textEncoder": info.get("textEncoder", ""), "vae": info.get("vae", "")}
-            matched = (info.get("service") == "genstudio-direct" and info.get("ready") is True
-                    and info.get("owner") == self.worker_id
-                    and Path(info.get("modelsDir", "")).resolve() == Path(self.settings["modelsDir"]).resolve()
-                    and info.get("components", old_components) == components
-                    and info.get("model", "qwen-image-2.1-turbo") == self.settings["model"])
-            if matched:
-                self.worker_status = info
-            return matched
-        except (OSError, ValueError, URLError):
-            return False
+            checks = (
+                (info.get("service") == "genstudio-direct", "The server is not a GenGate Direct worker."),
+                (info.get("owner") == self.worker_id, "The worker belongs to another engine host."),
+                (Path(info.get("modelsDir", "")).resolve() == Path(self.settings["modelsDir"]).resolve(), "The worker uses a different Models folder."),
+                (info.get("components", old_components) == components, "The worker uses different model components."),
+                (info.get("model", "qwen-image-2.1-turbo") == self.settings["model"], "The worker uses a different model preset."),
+                (info.get("ready") is True, "The worker is not ready: " + str(info.get("problems") or "no reason supplied")),
+            )
+            for valid, reason in checks:
+                if not valid:
+                    return self._probe_failed(url, reason)
+            self.worker_status = info
+            self.probe_error = ""
+            return True
+        except (OSError, ValueError, TypeError, URLError) as error:
+            return self._probe_failed(url, f"{type(error).__name__}: {error}")
 
     def status(self):
         if not self.lock.acquire(blocking=False):
@@ -135,6 +160,8 @@ class EngineHost:
                 self.message = "Engine exited. See .runtime/genstudio logs."
             model_state = self.worker_status.get("modelState", "unknown") if ready and self.engine == "direct" else "unknown"
             message = self.message
+            if not ready and self.probe_error and self.process is not None and not exited:
+                message = "Engine process is running, but its service is unavailable. " + self.probe_error
             if ready:
                 if self.engine == "comfy":
                     message = "ComfyUI connected"
@@ -247,7 +274,9 @@ class EngineHost:
                     detail = (self.runtime / (self.engine + "-errors.log")).read_text(encoding="utf-8", errors="replace")[-2000:]
                     raise RuntimeError("Engine failed to start. " + detail)
                 time.sleep(0.25)
-            raise RuntimeError("Engine startup timed out. See .runtime/genstudio logs.")
+            self.message = "Engine startup timed out. Last readiness check: " + (self.probe_error or "No response.")
+            logging.getLogger(__name__).error(self.message)
+            raise RuntimeError(self.message + " See .runtime/genstudio/host-errors.log.")
 
     def stop(self):
         with self.lock:
@@ -263,6 +292,7 @@ class EngineHost:
                     self.process.wait(timeout=5)
             self.process = None
             self.direct_url = None
+            self.probe_error = ""
             for handle in self.logs:
                 handle.close()
             self.logs = []

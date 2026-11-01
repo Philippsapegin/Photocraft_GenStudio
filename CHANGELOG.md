@@ -1,7 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.9.6 Beta
 
+- Add PhotoCraft 0.18.0 compatibility, preserving the native updater and independent GenGate update checks.
+
+- Send local engine HTTP requests directly regardless of system proxy changes; retain readiness failure reasons in the status, startup timeout and host log instead of silently waiting five minutes.
 - Fix Direct quantized Embedding transfers that fail with `_apply(): Couldn't swap Embedding.weight`; reuse the private core's quantized transfer implementation and retain complete chained errors in the worker log.
 
 ## 0.9.5 Beta

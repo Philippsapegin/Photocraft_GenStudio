@@ -6,6 +6,14 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def prepare_desktop_transport(path, replace):
+    text = path.read_text(encoding='utf-8')
+    legacy = '        check_updates: update_transport(std::env::var_os("FLATPAK_ID").as_deref()),'
+    current = '        check_updates: Some(crate::updates::service()),'
+    anchor = legacy if legacy in text else current
+    replace(path, anchor, anchor + '\n        check_gengate_updates: Some(crate::gengate_updates_transport::service()),')
+
+
 def prepare(source, replace):
     engine, ui = source/'crates/engine/src', source/'crates/ui-egui/src'
     for name, destination in (('gengate_updates.rs',engine),('gengate_updates_ui.rs',ui)):
@@ -34,8 +42,7 @@ def prepare(source, replace):
                 '    pub check_updates: Option<photocraft_engine::updates_cmds::CheckFn>,\n    pub check_gengate_updates: Option<photocraft_engine::gengate_updates::CheckFn>,')
         replace(ui/'lib.rs','        session.updates.check = services.check_updates.take();',
                 '        session.updates.check = services.check_updates.take();\n        session.gen_studio.updates.check = services.check_gengate_updates.take();')
-        replace(desktop/'services.rs','        check_updates: update_transport(std::env::var_os("FLATPAK_ID").as_deref()),',
-                '        check_updates: update_transport(std::env::var_os("FLATPAK_ID").as_deref()),\n        check_gengate_updates: Some(crate::gengate_updates_transport::service()),')
+        prepare_desktop_transport(desktop/'services.rs', replace)
         # Show the version/status window with the add-on warning before offering
         # the suite's download/restart prompt. The user's Update button keeps it.
         path=ui/'updates_ui.rs'

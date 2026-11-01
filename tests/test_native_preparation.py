@@ -2,8 +2,13 @@
 import importlib.util
 from pathlib import Path
 import unittest
+import tempfile
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'scripts'))
+from prepare_updates import prepare_desktop_transport
+from prepare_photocraft import replace
 spec = importlib.util.spec_from_file_location("prepare_selection_fill", ROOT / "scripts/prepare_selection_fill.py")
 preparer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(preparer)
@@ -26,6 +31,29 @@ class RemoveDispatchTests(unittest.TestCase):
     def test_unknown_dispatch_is_refused(self):
         with self.assertRaises((RuntimeError, ValueError)):
             queue_preparer.prepare_remove_dispatch('pub fn finish_stroke(\n    new_dispatch(p);\n}')
+
+
+class UpdateTransportTests(unittest.TestCase):
+    def test_017_and_018_keep_native_transport_and_add_independent_check_once(self):
+        for native in ('Some(crate::updates::service())', 'update_transport(std::env::var_os("FLATPAK_ID").as_deref())'):
+            with self.subTest(native=native), tempfile.TemporaryDirectory() as folder:
+                path = Path(folder) / 'services.rs'
+                original = 'Services {\n        check_updates: ' + native + ',\n}\n'
+                path.write_text(original, encoding='utf-8')
+                prepare_desktop_transport(path, replace)
+                first = path.read_text(encoding='utf-8')
+                prepare_desktop_transport(path, replace)
+                self.assertEqual(path.read_text(encoding='utf-8'), first)
+                self.assertEqual(first.replace('\n        check_gengate_updates: Some(crate::gengate_updates_transport::service()),', ''), original)
+
+    def test_unknown_native_transport_is_rejected_without_rewriting_it(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'services.rs'
+            original = 'check_updates: new_upstream_transport(),\n'
+            path.write_text(original, encoding='utf-8')
+            with self.assertRaises(RuntimeError):
+                prepare_desktop_transport(path, replace)
+            self.assertEqual(path.read_text(encoding='utf-8'), original)
 
 
 class ClearDispatchTests(unittest.TestCase):

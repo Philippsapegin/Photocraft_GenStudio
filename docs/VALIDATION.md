@@ -1,5 +1,30 @@
 # Release validation
 
+## GenGate 0.9.6 / PhotoCraft 0.18.0 - 2026-11-01
+
+- Pinned official PhotoCraft `v0.18.0` at `8a87a457abb43ac344deeb3fdb67541b91a72ff1`. Verified the Windows x64 portable archive against its published SHA-256, `2b4ff065e718fc9b44d9aee77b8215f8200c8fa962e0d9555c07dd4e987e11e9`, and registered both original executable hashes. The new portable archive has a flat layout.
+- Adapted the changed native updater transport while preserving PhotoCraft's own transport and the independent GenGate check. Synthetic fixtures cover both 0.17 and 0.18, repeated preparation and refusing an unknown integration point. A clean-source/repeated-preparation check matches all **2,151 native source files** against the build inputs after normalizing Windows line endings.
+- **190 Python tests: 178 passed, 12 skipped.** The tiny INT8 CPU Embedding regression passed with PyTorch 2.14.0+cu130, including the exact baseline failure and both inference-mode cases. No checkpoint was opened and CUDA remained uninitialized.
+- Native unit tests passed: **2,500 engine tests**, with 16 ignored, and **4,507 UI tests**, with 21 ignored. These are complete unit-test runs for the two crates, not just the GenGate filter.
+- Application/CLI unit and integration suites passed **267 tests**, with one ignored. Release all-target Clippy with HEIF and warnings denied passed, as did dependency layering and WASM checks for **24 crates**, including HEIF codecs.
+- Optimized editor/CLI builds passed with HEIF. Official MCP checked service/model readiness, FIBO's source-image requirement, active workflow changes, batches and dimensions, layer masks, both prompt texts, LoRA recipes and native save/reopen/restore. Both live update transports reached GitHub and reported the correct versions. Studio, Advanced and update-window screenshots were inspected.
+- The ZIP passed CRC and all **2,519 manifest hashes**; the installed/reconstructed binaries match the tested candidate. The embedded interpreter passed install, repeated update, official-editor refresh/reapply, original restore and reinstall on an isolated 0.18.0 base with Unicode paths. The CPU Embedding regression and seven local-transport/readiness regressions also passed from the packaged runtime. No complete editor or model weights are included.
+- Upgraded a local 0.17.0 overlay to 0.18.0 / GenGate 0.9.6 after a complete application/profile/runtime backup. Installed-file hashes match the release candidate. Official MCP and the CPU regression passed against the installed runtime on an isolated profile; saved preferences (except the runtime path), all other profile files and metadata of all **151 weight files** remain unchanged. The test editor was closed after verification.
+
+Release archive: `GenGate-0.9.6-windows-x64-addon.zip`, **220,467,798 bytes**, SHA-256 `fa996a8455cdc75a7c351ddf482055cd7898d9ba8438cdf8f824538037737c46`.
+
+Evidence: `.runtime/release096-native.json`, `.runtime/release096-preparation.json`, `.runtime/release096-python.json`, `.runtime/release096-embedding-cpu.json`, `.runtime/release096-final-checks.json`, `.runtime/release096-package-cpu.json`, `.runtime/release096-updates-mcp.json`, `.runtime/release096-installed.json` and `.runtime/release096-post-install.json`. Automated checks use synthetic backends and CPU fixtures; real model inference is outside their scope.
+
+## Direct startup timeout diagnostics - 2026-10-30
+
+- The manual Start request returned HTTP 400 at 20:34:29 after approximately five minutes. The existing Direct worker had started at 16:18:43; no new worker was launched for this attempt. Its log contains no completed `/health` requests during the wait. Read-only checks later reached the same owned worker, with matching FIBO/components and `modelState: loaded`; the last retained user job reports `done`.
+- The old probe discarded connection errors and readiness mismatch reasons. The precise historical transport failure cannot be recovered. A system proxy is enabled on this machine, but that alone does not establish it as the cause. A synthetic local proxy reproduces default urllib routing away from the worker when its bypass rule is unavailable.
+- Follow-up: the user reports no sleep or VPN/proxy changes before the timeout. Repeating the installed host's manual `start` action at 21:22 succeeded in 61 ms and retained the same worker process/URL; no settings or generation request were sent. Six read-only health checks completed in 7-104 ms. The original stall is not currently reproducible.
+- Shared local control/Direct JSON requests now explicitly bypass proxies. Readiness retains and logs connection failures, service/owner/model/component mismatches and worker dependency problems; repeated identical failures are logged once. A startup timeout includes its last reason, and a live but unreachable worker is described accurately without restarting it.
+- **188 Python tests: 176 passed, 12 skipped.** New regressions cover real local HTTP proxy bypass, failed-check diagnostics, deduplicated logging, recovery and timeout handling without replacing a live worker. No real inference, CUDA initialization, model dependency changes or user-process restarts were performed.
+
+Evidence: `.runtime/direct-startup-diagnosis.json` and `.runtime/direct-startup-tests.json` / `.log`. The local transport failure has recovered; verifying that proxy routing caused this particular incident remains open.
+
 ## Direct quantized Embedding transfer fix - 2026-10-30
 
 - The installed worker reports `_apply(): Couldn't swap Embedding.weight`. Reproduced that exact failure on the existing **PyTorch 2.14.0+cu130**, using a 4x4 INT8 CPU Embedding with a weak reference. PyTorch's ordinary module conversion attempts a prohibited wrapper-tensor swap; the pinned model core's quantized Embedding did not have its own transfer implementation.

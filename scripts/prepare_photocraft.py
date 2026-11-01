@@ -1,4 +1,4 @@
-"""Apply the current GenGate integration to pinned PhotoCraft 0.17.0 sources."""
+"""Apply the current GenGate integration to pinned PhotoCraft 0.18.0 sources."""
 from pathlib import Path
 import argparse
 import json
@@ -30,7 +30,7 @@ def replace(path, old, new):
 
 def prepare(source):
     if not (source / 'crates/engine/src/cmd.rs').is_file():
-        raise RuntimeError('This development integration targets PhotoCraft 0.17.0. Use the matching older GenGate release source for earlier editors.')
+        raise RuntimeError('This development integration targets PhotoCraft 0.18.0. Use the matching older GenGate release source for earlier editors.')
     source = source_view(source)
     prepare_photocraft_012.before(source)
     prepare_gengate.before(source)

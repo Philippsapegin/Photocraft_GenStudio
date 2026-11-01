@@ -43,5 +43,14 @@
       "photocraft.exe": "35db91df9dbddefb269ad1d382bf82bb03cadeab333794e802aecd93c4d0bcc3",
       "photocraft-cli.exe": "f14cd188751908a35c40bddd8e6eb0ba1529a4f4cecc13444b252d1d48c107d4"
     }
+  },
+  "0.18.0": {
+    "upstream": "8a87a457abb43ac344deeb3fdb67541b91a72ff1",
+    "archive": "https://github.com/storytold/photocraft/releases/download/v0.18.0/photocraft-0.18.0-windows-x64-portable.zip",
+    "archiveSha256": "2b4ff065e718fc9b44d9aee77b8215f8200c8fa962e0d9555c07dd4e987e11e9",
+    "files": {
+      "photocraft.exe": "dd3f9de7c1d14e2f93b4367129ed6e9a58b0b74678a5146672f937018183a58b",
+      "photocraft-cli.exe": "4c3da089c2f262477fb8184ae89f0c282c84239ec7961e1890ce661b769f47ad"
+    }
   }
 }
