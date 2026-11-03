@@ -67,7 +67,7 @@ fn input(doc: &Document, layer: Option<LayerId>, all: bool, area: Rect, ctx: &Jo
         let row = Rect::new(area.x0, sy, area.x1, sy + 1);
         let (pixels, stride) = match surface {
             Some(surface) => (surface.read_region(row), surface.channels()),
-            None => (photocraft_compose::render(doc, row).px.into_iter().flatten().collect(), 4),
+            None => (photocraft_compose::render(doc, row).px.iter().flatten().copied().collect(), 4),
         };
         if stride < transform.inputs() || stride > 5 {
             return Err(error("Invalid source color channels"));

@@ -124,7 +124,7 @@ fn capture(s: &mut Session, _: &Value) -> Result<Value> {
         false,
         move |ctx| {
             ctx.check()?;
-            let pixels: Vec<f32> = photocraft_compose::render(&doc, bounds).px.into_iter().flatten().collect();
+            let pixels: Vec<f32> = photocraft_compose::render(&doc, bounds).px.iter().flatten().copied().collect();
             let transform =
                 Transform::new(&crate::color_cmds::composite_profile(&doc), Builtin::Srgb.profile(), Intent::RelativeColorimetric, true).map_err(error)?;
             let mut rgba = vec![0.0; pixels.len()];
@@ -406,7 +406,7 @@ fn layer_source(s: &mut Session, p: &Value) -> Result<Value> {
         move |ctx| {
             ctx.check()?;
             let image = photocraft_compose::render(&source, rect);
-            let pixels: Vec<f32> = image.px.into_iter().flatten().collect();
+            let pixels: Vec<f32> = image.px.iter().flatten().copied().collect();
             let transform = Transform::new(&crate::color_cmds::composite_profile(&source), Builtin::Srgb.profile(), Intent::RelativeColorimetric, true).map_err(error)?;
             let mut rgba = vec![0.0; pixels.len()];
             transform.convert_f32(&pixels, 4, &mut rgba, 4, true);
@@ -439,7 +439,7 @@ fn result_reference(s: &mut Session, p: &Value) -> Result<Value> {
         false,
         move |ctx| {
             ctx.check()?;
-            let pixels: Vec<f32> = photocraft_compose::render(&source, rect).px.into_iter().flatten().collect();
+            let pixels: Vec<f32> = photocraft_compose::render(&source, rect).px.iter().flatten().copied().collect();
             let transform =
                 Transform::new(&crate::color_cmds::composite_profile(&source), Builtin::Srgb.profile(), Intent::RelativeColorimetric, true).map_err(error)?;
             let mut rgba = vec![0.0; pixels.len()];

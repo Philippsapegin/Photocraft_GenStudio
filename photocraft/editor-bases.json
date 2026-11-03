@@ -52,5 +52,23 @@
       "photocraft.exe": "dd3f9de7c1d14e2f93b4367129ed6e9a58b0b74678a5146672f937018183a58b",
       "photocraft-cli.exe": "4c3da089c2f262477fb8184ae89f0c282c84239ec7961e1890ce661b769f47ad"
     }
+  },
+  "0.19.0": {
+    "upstream": "2df9f807702a935184041355a86405380bda8274",
+    "archive": "https://github.com/storytold/photocraft/releases/download/v0.19.0/photocraft-0.19.0-windows-x64-portable.zip",
+    "archiveSha256": "b6ead3cbab9d5aee27d23cfe7903be1e820ca1e1b3f002b9970e996d9c3a38e1",
+    "files": {
+      "photocraft.exe": "a8f748bca591a4afb7ed70b55808240f20d963e40dc9568277db8fcbfc2e7fd7",
+      "photocraft-cli.exe": "5845c1feafd7563453b7a1be671d87988e12cb04bbe67d737780b64b487e1f27"
+    }
+  },
+  "0.20.1": {
+    "upstream": "327c4cc82e737a3e0af7c147a477126d77525495",
+    "archive": "https://github.com/storytold/photocraft/releases/download/v0.20.1/photocraft-0.20.1-windows-x64-portable.zip",
+    "archiveSha256": "e21ac903cf0477b05d8d1b6071f1f579b80f8ee9c8737a0b47b53948a17c5c73",
+    "files": {
+      "photocraft.exe": "e14eb29519d42f4014eeecc1cd89d0d917088e5bb4076a785bb0f98f273009a7",
+      "photocraft-cli.exe": "e56a7ad28cc37b633015175e9e716e196d074c3581c22fe8724c1a2ae80c68ac"
+    }
   }
 }

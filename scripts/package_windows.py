@@ -122,7 +122,7 @@ def build(args):
     from genstudio.segmentation_models import ensure_modules
     copy_tree(ensure_modules(), runtime / ".runtime/segmentation/deps")
     copy_tree(ROOT / "packaging", runtime / "packaging")
-    for name in ("Setup.cmd", "Setup.ps1", "Launch.ps1", "PhotoCraft.cmd", "Uninstall.cmd", "Uninstall.ps1"):
+    for name in ("Setup.cmd", "Setup.ps1", "SetupWindow.ps1", "SetupUi.cs", "Launch.ps1", "PhotoCraft.cmd", "Uninstall.cmd", "Uninstall.ps1"):
         shutil.copyfile(ROOT / "packaging" / name, target / name)
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     # The package contains the user guide, while developer/source links should
@@ -189,9 +189,9 @@ def build(args):
         shutil.copyfile(path, destination)
     shutil.copyfile(ROOT / "LICENSE", licenses / "GenGate-GPL-3.0.txt")
     shutil.copyfile(ROOT / "THIRD_PARTY.md", licenses / "THIRD_PARTY.md")
-    if any(entry["hostVersion"] in ("0.12.0", "0.15.1", "0.16.0", "0.17.0", "0.18.0") for entry in catalog["patches"]):
+    if any(entry["hostVersion"] in ("0.12.0", "0.15.1", "0.16.0", "0.17.0", "0.18.0", "0.19.0", "0.20.1") for entry in catalog["patches"]):
         from prepare_craft_fonts import prepare as prepare_fonts
-        fonts = prepare_fonts("0.17.0" if any(entry["hostVersion"] in ("0.17.0", "0.18.0") for entry in catalog["patches"]) else "0.16.0")
+        fonts = prepare_fonts("0.17.0" if any(entry["hostVersion"] in ("0.17.0", "0.18.0", "0.19.0", "0.20.1") for entry in catalog["patches"]) else "0.16.0")
         for path in (fonts / "fonts").rglob("OFL.txt"):
             destination = licenses / "craft-fonts" / path.relative_to(fonts)
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -226,7 +226,7 @@ def build(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    base = ROOT / ".runtime/photocraft-0.18.0"
+    base = ROOT / ".runtime/photocraft-0.20.1"
     parser.add_argument("--upstream", type=Path, default=base)
     parser.add_argument("--patches", type=Path, required=True, help="Verified editor-patches.json and binary deltas")
     parser.add_argument("--core", type=Path)

@@ -6,6 +6,37 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def prepare_update_notice(text):
+    text=text.replace('        #[cfg(not(target_arch = "wasm32"))]\n        app.updates_rt.updater.offer(release_of(release));',
+                      '        // GenGate: show compatibility notice before the user starts the native updater.')
+    if 'gengate_updates_ui::photocraft_notice' not in text:
+        if 'craft_update::CheckResultDialog::new' in text:
+            anchor='    if app.ui.updates_open {\n        let dialog = craft_update::CheckResultDialog::new'
+            if text.count(anchor)!=1:raise RuntimeError('PhotoCraft shared update dialog changed')
+            notice='''    if app.ui.updates_open && let Status::Available { release } = app.session.updates.status.clone() {
+        let mut open = true;
+        egui::Window::new("PhotoCraft Update").id(egui::Id::unique("gengate-photocraft-update"))
+            .open(&mut open).collapsible(false).resizable(false).default_width(440.0).show(ctx, |ui| {
+                ui.label(format!("PhotoCraft {} is available.", release.version));
+                crate::gengate_updates_ui::photocraft_notice(app, ui);
+                if ui.button("Update and Restart").clicked() { app.updates_rt.updater.offer(release_of(&release)); }
+            });
+        app.ui.updates_open = open;
+        return;
+    }
+'''
+            text=text.replace(anchor,notice+anchor)
+        else:
+            anchor='                    ui.label(crate::i18n::fmt(crate::i18n::t("PhotoCraft {version} is available."), &[("version", &release.version)]));'
+            if text.count(anchor)!=1:raise RuntimeError('PhotoCraft update notice changed')
+            text=text.replace(anchor,anchor+'\n                    crate::gengate_updates_ui::photocraft_notice(app,ui);')
+    text=text.replace('assert!(app.updates_rt.updater.prompt_open(), "startup prompt initialized on available release");',
+                      'assert!(!app.updates_rt.updater.prompt_open(), "GenGate warning appears before the native update prompt");')
+    text=text.replace('// Rendering show() renders the prompt modal', '// Rendering show() displays the compatibility notice first')
+    text=text.replace('        assert!(app.updates_rt.updater.prompt_open());', '        assert!(!app.updates_rt.updater.prompt_open());\n        assert!(app.ui.updates_open);')
+    return text
+
+
 def prepare_desktop_transport(path, replace):
     text = path.read_text(encoding='utf-8')
     legacy = '        check_updates: update_transport(std::env::var_os("FLATPAK_ID").as_deref()),'
@@ -46,17 +77,7 @@ def prepare(source, replace):
         # Show the version/status window with the add-on warning before offering
         # the suite's download/restart prompt. The user's Update button keeps it.
         path=ui/'updates_ui.rs'
-        text=path.read_text(encoding='utf-8')
-        text=text.replace('        #[cfg(not(target_arch = "wasm32"))]\n        app.updates_rt.updater.offer(release_of(release));',
-                          '        // GenGate: show compatibility notice before the user starts the native updater.')
-        anchor='                    ui.label(crate::i18n::fmt(crate::i18n::t("PhotoCraft {version} is available."), &[("version", &release.version)]));'
-        if 'gengate_updates_ui::photocraft_notice' not in text:
-            if text.count(anchor)!=1:raise RuntimeError('PhotoCraft update notice changed')
-            text=text.replace(anchor,anchor+'\n                    crate::gengate_updates_ui::photocraft_notice(app,ui);')
-        text=text.replace('assert!(app.updates_rt.updater.prompt_open(), "startup prompt initialized on available release");',
-                          'assert!(!app.updates_rt.updater.prompt_open(), "GenGate warning appears before the native update prompt");')
-        text=text.replace('// Rendering show() renders the prompt modal', '// Rendering show() displays the compatibility notice first')
-        text=text.replace('        assert!(app.updates_rt.updater.prompt_open());', '        assert!(!app.updates_rt.updater.prompt_open());\n        assert!(app.ui.updates_open);')
+        text=prepare_update_notice(path.read_text(encoding='utf-8'))
         path.write_text(text,encoding='utf-8')
         example=source/'crates/ui-egui/examples/snapshot.rs'
         text=example.read_text(encoding='utf-8')

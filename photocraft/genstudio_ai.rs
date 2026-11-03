@@ -156,7 +156,8 @@ pub(crate) fn capture(s:&Session,p:&Value)->Result<Request> {
 }
 fn input(doc:&Document,mask:&FillMask)->Result<(Image,Image)> {
     let rect=mask.rect;
-    let pixels:Vec<f32>=photocraft_compose::render(doc,rect).px.into_iter().flatten().collect();
+    // The compositor owns its pooled buffer; copy the scalar payload while borrowed.
+    let pixels:Vec<f32>=photocraft_compose::render(doc,rect).px.iter().flatten().copied().collect();
     let profile=crate::color_cmds::composite_profile(doc);
     let transform=Transform::new(&profile,Builtin::Srgb.profile(),Intent::RelativeColorimetric,true).map_err(error)?;
     if transform.inputs()!=3 { return Err(error("the composite color profile is invalid")); }

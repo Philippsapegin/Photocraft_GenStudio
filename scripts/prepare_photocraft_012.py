@@ -12,6 +12,12 @@ def table(text, name):
 
 
 def anchors(path, text, old, new):
+    checkbox = 'crate::widgets::checkbox(ui, &mut o.remove_new_layer, tl!("Create a new layer"));'
+    guarded = 'ui.add_enabled_ui(composite, |ui| crate::widgets::checkbox(ui, &mut o.remove_new_layer, tl!("Create a new layer")));'
+    if path.name == 'retouch_ui.rs' and guarded in text and checkbox in old:
+        return old.replace(checkbox, guarded), new.replace(checkbox, guarded)
+    if path.name == 'state.rs' and '\n            tool: Tool::Move,' in text and '\n            tool: Tool::Brush,' in old:
+        return old.replace('tool: Tool::Brush,', 'tool: Tool::Move,'), new.replace('tool: Tool::Brush,', 'tool: Tool::Move,')
     if '"window.panel.layout" | "ui.dock"' in text:
         old, new = old.replace('"window.panel.layout" => true', '"window.panel.layout" | "ui.dock" => true'), new.replace('"window.panel.layout" => true', '"window.panel.layout" | "ui.dock" => true')
     for previous, current in (('pub mod plugin_cmds;', 'pub use cmd::plugin_cmds;'), ('pub mod plugin_ui;', 'pub use menus::plugin_ui;')):
@@ -28,6 +34,9 @@ def anchors(path, text, old, new):
     if path.name == 'lib.rs' and 'remove_pending_target:' in text:
         return old.replace('remove_pending_doc:', 'remove_pending_target:'), new.replace('remove_pending_doc:', 'remove_pending_target:')
     if path.name == 'retouch_ui.rs' and 'o.sample_all.remove' in text and 'json!({"sampleAllLayers": o.sample_all_layers' in old:
+        if 'o.remove_new_layer && composite' in text:
+            old = old.replace('o.remove_new_layer', 'o.remove_new_layer && composite')
+            new = new.replace('o.remove_new_layer', 'o.remove_new_layer && composite')
         return old.replace('o.sample_all_layers', 'o.sample_all.remove'), new.replace('o.sample_all_layers', 'o.sample_all.remove')
     if path.name == 'state.rs' and 'sample_all: SampleAllLayers::default(),' in text and 'sample_all_layers: false,' in old:
         return old.replace('sample_all_layers: false,', 'sample_all: SampleAllLayers::default(),'), new.replace('sample_all_layers: false,', 'sample_all: SampleAllLayers::default(),')
@@ -114,6 +123,24 @@ def after(source):
     remove = source / 'crates/engine/src/retouch_cmds/remove'
     qwen = remove / 'qwen.rs'
     text = qwen.read_text(encoding='utf-8').replace('let hole = hole(plan, None);', 'let hole = hole(plan, None)?;')
+    if (source / 'crates/engine/src/color_channels.rs').is_file():
+        text = text.replace('restriction: Option<usize>', 'restriction: Option<crate::color_channels::Restriction>')
+        text = text.replace('channel != selected', '!selected.colors.contains(channel)')
+        if 'fn ai_remove_preserves_unselected_colour_components' not in text:
+            regression = '''
+    #[test]
+    fn ai_remove_preserves_unselected_colour_components() {
+        let mut s=scene(SampleType::F32);
+        let before=pixels(&s).rgba(180,100);
+        run_with(&mut s,&json!({"points":[[180,100]],"size":12,"target":{"colors":[0,1]}}),green).unwrap();
+        let after=pixels(&s).rgba(180,100);
+        assert!(after[0] < before[0] && after[1] > before[1]);
+        assert_eq!(after[2],before[2]);
+        assert_eq!(after[3],before[3]);
+    }
+'''
+            head, tail = text.rsplit('}', 1)
+            text = head + regression + '}' + tail
     qwen.write_text(text, encoding='utf-8')
 
 

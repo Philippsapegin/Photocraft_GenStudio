@@ -66,7 +66,7 @@ fn prepare_mask(doc: &mut Document, plan: &Plan, p: &Value, ctx: &JobCtx, mask: 
     let format = surf.format();
     let (pixels, stride, profile) = if plan.all_layers {
         let buf = photocraft_compose::render(doc, plan.window);
-        (buf.px.into_iter().flatten().collect::<Vec<_>>(), 4, crate::color_cmds::composite_profile(doc))
+        (buf.px.iter().flatten().copied().collect::<Vec<_>>(), 4, crate::color_cmds::composite_profile(doc))
     } else {
         (surf.read_region(plan.window), format.channels(), if targets_pixels(p) { crate::color_cmds::document_profile(doc) } else { std::sync::Arc::new(Builtin::SGray.profile().clone()) })
     };

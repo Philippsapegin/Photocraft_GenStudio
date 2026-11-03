@@ -8,7 +8,7 @@ A work-in-progress suite for [PhotoCraft](https://github.com/storytold/photocraf
 - **Two engines:** Direct for users without ComfyUI, and ComfyUI for preset editing and custom Studio workflows.
 - **ComfyUI workflows:** Studio runs the active graph open in ComfyUI, including unsaved changes; Ai Fill and Remove Brush use separate API workflow files. IN supplies both prompt texts, images and request values. Optional helpers apply selected LoRAs and native edit-step overrides. [Setup and ports](docs/COMFY_WORKFLOWS.md).
 - **Negative prompt:** Studio's Neg button splits the text area; both source texts are stored with generated layers and restored from them.
-- **Updates:** PhotoCraft 0.18.0 support, a warning before PhotoCraft updates replace GenGate's native additions, and independent GenGate release notifications. [Updating safely](docs/UPDATES.md).
+- **Updates:** PhotoCraft 0.20.1 support, a warning before PhotoCraft updates replace GenGate's native additions, and independent GenGate release notifications. [Updating safely](docs/UPDATES.md).
 - **Preset-based setup:** compatible model components are selected automatically. Advanced settings let you choose your own model, text encoder, VAE and FLUX prompt upsampler, including INT8 and other supported formats.
 - **Native tools, uncluttered workspace:** editing tools stay inside PhotoCraft; configuration lives in **Edit → Preferences → GenGate Settings**.
 - **Constant LoRA:** an optional adapter with adjustable strength for Ai Fill and Remove Brush. It is separate from full image generation.
@@ -40,20 +40,20 @@ Planned:
 
 **Windows x64 · NVIDIA CUDA GPU for local AI processing.**
 
-Download **[GenGate 0.9.6 Beta](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/tag/v0.9.6)** · [Windows add-on ZIP](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/download/v0.9.6/GenGate-0.9.6-windows-x64-addon.zip) · [SHA-256](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/download/v0.9.6/SHA256SUMS.txt).
+Download **[GenGate 0.9.7 Beta](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/tag/v0.9.7)** · [Windows add-on ZIP](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/download/v0.9.7/GenGate-0.9.7-windows-x64-addon.zip) · [SHA-256](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/download/v0.9.7/SHA256SUMS.txt).
 
-1. Install PhotoCraft separately. Extract **GenGate-0.9.6-windows-x64-addon.zip** and run **Setup.cmd**. This add-on contains binary patches and its local host, **no complete PhotoCraft editor**.
+1. Install PhotoCraft separately. Extract **GenGate-0.9.7-windows-x64-addon.zip** and run **Setup.cmd**. This add-on contains binary patches and its local host, **no complete PhotoCraft editor**.
 2. Select your existing **PhotoCraft folder**, a separate GenGate installation folder and a **Models folder**. Reuse your `ComfyUI/models` directory or create a separate one. Models are used in place, without duplicate downloads.
 3. Choose **Direct** or **ComfyUI**. Direct can install a separate CUDA runtime or reuse an existing compatible CUDA Python. A fresh runtime downloads several GB of software.
 4. Save and close PhotoCraft before installing. Open **PhotoCraft** from Start or the desktop and choose a **Preset** in **Preferences → GenGate Settings**. Setup consolidates the editor shortcuts and removes old GenStudio/GenGate launcher duplicates. Engine startup can be off, on application launch, or on the first AI request.
 
-**GenGate 0.9.6 adds PhotoCraft 0.18.0 support, fixes Direct quantized Embedding transfers and improves startup diagnostics.**
+**GenGate 0.9.7 adds PhotoCraft 0.20.1 support and a redesigned frameless installer with reliable browsing and clear completion status.**
 
 ComfyUI Studio runs the graph currently open in the browser. Ai Fill and Remove Brush have separate workflow files in Advanced. Explicit component choices override only titled GenGate loaders in the submitted graph copy; Automatic retains the graph's values. Update the nodes, restart ComfyUI and refresh its tab. [Setup, migration and LoRA wiring](docs/COMFY_WORKFLOWS.md).
 
-**Compatibility (0.9.6 package):** official **PhotoCraft 0.18.0 Windows x64** binaries. For official PhotoCraft 0.17.0, use [GenGate 0.9.5](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/tag/v0.9.5); for 0.16.0, use [GenGate 0.9.4](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/tag/v0.9.4). Other builds need separate patch adaptation. Setup checks file hashes and refuses unknown builds. It never downgrades an updated editor.
+**Compatibility (0.9.7 package):** official **PhotoCraft 0.20.1 Windows x64** binaries. For official PhotoCraft 0.18.0, use [GenGate 0.9.6](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/tag/v0.9.6); for 0.17.0, use [GenGate 0.9.5](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/tag/v0.9.5); for 0.16.0, use [GenGate 0.9.4](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/tag/v0.9.4). Other builds need separate patch adaptation. Setup checks file hashes and refuses unknown builds. It never downgrades an updated editor.
 
-**Direct validation:** quantized Embedding transfers are covered by a tiny INT8 CPU regression. Startup failures now retain their readiness reason. The previously reported transient timeout has not been reproduced; real model inference is outside automated release checks. [Release notes](docs/RELEASE_NOTES_0.9.6.md).
+**Direct validation:** quantized Embedding transfers are covered by a tiny INT8 CPU regression. Startup failures now retain their readiness reason. The previously reported transient timeout has not been reproduced; real model inference is outside automated release checks. [Release notes](docs/RELEASE_NOTES_0.9.7.md).
 
 To update GenGate, close PhotoCraft and run Setup into the same **GenGate** folder. The editor's existing profile is preserved. The PhotoCraft shortcut checks for replaced editor files and reapplies a compatible patch; an unknown PhotoCraft update opens normally with a compatibility notice and requires an updated GenGate patch.
 

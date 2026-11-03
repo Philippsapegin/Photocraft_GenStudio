@@ -7,7 +7,8 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
-from prepare_updates import prepare_desktop_transport
+from prepare_updates import prepare_desktop_transport, prepare_update_notice
+from prepare_photocraft_012 import anchors
 from prepare_photocraft import replace
 spec = importlib.util.spec_from_file_location("prepare_selection_fill", ROOT / "scripts/prepare_selection_fill.py")
 preparer = importlib.util.module_from_spec(spec)
@@ -34,6 +35,23 @@ class RemoveDispatchTests(unittest.TestCase):
 
 
 class UpdateTransportTests(unittest.TestCase):
+    def test_shared_update_result_keeps_the_native_dialog_and_adds_a_warning_before_install(self):
+        original = '        #[cfg(not(target_arch = "wasm32"))]\n        app.updates_rt.updater.offer(release_of(release));\n    if app.ui.updates_open {\n        let dialog = craft_update::CheckResultDialog::new(&crate::UPDATE_APP, version);\n'
+        changed = prepare_update_notice(original)
+        self.assertIn('craft_update::CheckResultDialog::new', changed)
+        self.assertLess(changed.index('photocraft_notice'), changed.index('app.updates_rt.updater.offer('))
+        self.assertEqual(prepare_update_notice(changed), changed)
+
+    def test_019_native_move_default_and_composite_guard_are_preserved(self):
+        old='\n            tool: Tool::Brush,'
+        a,b=anchors(Path('state.rs'), '\n            tool: Tool::Move,', old, old+'\n gen_studio: Default::default(),')
+        self.assertIn('Tool::Move', a)
+        self.assertNotIn('Tool::Brush', b)
+        old='json!({"sampleAllLayers": o.sample_all_layers, "newLayer": o.remove_new_layer})'
+        a,b=anchors(Path('retouch_ui.rs'), 'o.sample_all.remove o.remove_new_layer && composite', old, old.replace('})', ',"useQwen": o.remove_use_qwen})'))
+        self.assertIn('o.remove_new_layer && composite', b)
+        self.assertIn('o.sample_all.remove', a)
+
     def test_017_and_018_keep_native_transport_and_add_independent_check_once(self):
         for native in ('Some(crate::updates::service())', 'update_transport(std::env::var_os("FLATPAK_ID").as_deref())'):
             with self.subTest(native=native), tempfile.TemporaryDirectory() as folder:

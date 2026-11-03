@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from io import StringIO
+from contextlib import redirect_stdout
 from unittest.mock import patch
 from installer_fixtures import fixture
 from genstudio import editor_patch
@@ -15,6 +17,41 @@ spec.loader.exec_module(installer)
 
 
 class InstallerTests(unittest.TestCase):
+    def test_terminal_result_distinguishes_installed_notes_and_real_failure(self):
+        for warnings, failure, status, code in (([], None, 'installed', 0),
+                                               (['synthetic shortcut warning'], None, 'installedWithWarnings', 0),
+                                               ([], ValueError('synthetic invalid editor'), 'failed', 1)):
+            def install(*args, **kwargs):
+                kwargs['warnings'].extend(warnings)
+                if failure:
+                    raise failure
+            output = StringIO()
+            with self.subTest(status=status), patch('sys.argv', ['installer', '--request', 'synthetic.json']), \
+                 patch.object(installer, 'read_json', return_value={}), patch.object(installer, 'install', side_effect=install), redirect_stdout(output):
+                self.assertEqual(installer.main(), code)
+            lines = output.getvalue().splitlines()
+            result = json.loads(next(line.removeprefix('GENGATE_SETUP_RESULT ') for line in lines if line.startswith('GENGATE_SETUP_RESULT ')))
+            self.assertEqual(result['status'], status)
+            self.assertTrue(lines[-1].startswith('ERROR:' if failure else 'Installed successfully'))
+
+    def test_optional_shortcut_and_model_scan_failures_leave_a_successful_install(self):
+        request = {"installDir": str(self.destination), "photocraftDir": str(self.host), "modelsDir": str(self.models),
+                   "engine": "direct", "python": "existing/python.exe"}
+        warnings = []
+        with patch.object(installer, "check_python", return_value="existing/python.exe"), \
+             patch("genstudio.windows_shortcuts.repair", side_effect=OSError("synthetic shell failure")), \
+             patch("genstudio.models.resolve", side_effect=PermissionError("synthetic model directory denied")):
+            result = installer.install(request, self.bundle, warnings=warnings)
+        self.assertEqual(result, self.destination)
+        metadata = installer.read_json(self.destination / "genstudio-install.json")
+        self.assertEqual(metadata["version"], installer.VERSION)
+        self.assertFalse(metadata["shortcutsInstalled"])
+        self.assertEqual(len(warnings), 2)
+        self.assertIn("synthetic shell failure", warnings[0])
+        self.assertIn("synthetic model directory denied", warnings[1])
+        self.assertEqual({name: editor_patch.sha256(self.host / name) for name in editor_patch.FILES},
+                         {name: hashlib.sha256(content).hexdigest() for name, content in self.outputs.items()})
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="Gen Studio install with spaces ")
         self.root = Path(self.temp.name)

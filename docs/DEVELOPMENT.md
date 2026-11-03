@@ -22,15 +22,15 @@ $env:CUDA_VISIBLE_DEVICES = ''
 
 ## Build the native editor
 
-Install Git, Rust **1.95+**, MSVC Build Tools with the Windows SDK, and PhotoCraft's native build prerequisites from its [pinned development guide](https://github.com/storytold/photocraft/blob/8a87a457abb43ac344deeb3fdb67541b91a72ff1/docs/development.md). Then:
+Install Git, Rust **1.95+**, MSVC Build Tools with the Windows SDK, and PhotoCraft's native build prerequisites from its [pinned development guide](https://github.com/storytold/photocraft/blob/327c4cc82e737a3e0af7c147a477126d77525495/docs/development.md). Then:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Build-PhotoCraft.ps1
 ```
 
-This builds pinned PhotoCraft v0.18.0 at `8a87a457abb43ac344deeb3fdb67541b91a72ff1` in `.runtime/photocraft-0.18.0`, applies the templates and hooks, formats Rust and builds both executables with HEIF support. Pass `-HostVersion 0.17.0` for the preceding supported source base; `-TargetDir` can reuse an existing Cargo cache. The preparer rejects changed integration points rather than silently patching another upstream version and can be rerun. Upstream remains under MIT OR Apache-2.0. Read its `AGENTS.md` and contribution instructions before editing upstream code.
+This builds pinned PhotoCraft v0.20.1 at `327c4cc82e737a3e0af7c147a477126d77525495` in `.runtime/photocraft-0.20.1`, applies the templates and hooks, formats Rust and builds both executables with HEIF support. Pass `-HostVersion 0.19.0` for the preceding source base; `-TargetDir` can reuse an existing Cargo cache. The preparer rejects changed integration points rather than silently patching another upstream version. The build script completes two prepare/format passes on fresh sources; subsequent passes retain the same generated source. Upstream remains under MIT OR Apache-2.0. Read its `AGENTS.md` and contribution instructions before editing upstream code.
 
-For 0.17.0 and 0.18.0 the script also obtains the official release's `craft-fonts` revision `b076417b5880bd4154bd22f00695b1d28c6bea83`, verifies all 13 font hashes and sets `CRAFT_FONTS_DIR` with `CRAFT_FONTS_REQUIRED=1`. Font files stay in the ignored build cache; the add-on retains their OFL copyright/license notices.
+For 0.17.0, 0.18.0, 0.19.0 and 0.20.1 the script also obtains the official release's `craft-fonts` revision `b076417b5880bd4154bd22f00695b1d28c6bea83`, verifies all 13 font hashes and sets `CRAFT_FONTS_DIR` with `CRAFT_FONTS_REQUIRED=1`. Font files stay in the ignored build cache; the add-on retains their OFL copyright/license notices.
 
 The locally reconstructed patched binaries contain neutral compiled defaults. On startup they read `runtime/config.photocraft.json` next to the existing PhotoCraft executable; saved PhotoCraft preferences then take precedence. Setup points these settings at the separately installed GenGate runtime. No developer paths or personal settings belong in a release.
 
@@ -38,8 +38,8 @@ Targeted native checks after changing the templates:
 
 ```powershell
 $env:GENSTUDIO_NO_PROCESS = '1'
-cargo test --manifest-path .runtime/photocraft-0.18.0/Cargo.toml -p photocraft-engine --lib genstudio::
-cargo clippy --manifest-path .runtime/photocraft-0.18.0/Cargo.toml -p photocraft-engine --all-targets -- -D warnings
+cargo test --manifest-path .runtime/photocraft-0.20.1/Cargo.toml -p photocraft-engine --lib genstudio::
+cargo clippy --manifest-path .runtime/photocraft-0.20.1/Cargo.toml -p photocraft-engine --all-targets -- -D warnings
 ```
 
 Follow upstream's broader checks when changing commands, document structures or UI. Native validation uses engine/UI tests and synthetic official-MCP checks. The older 0.12.0 suite had two unrelated localization assertion failures; current results and any limitations are recorded in [VALIDATION.md](VALIDATION.md).
@@ -72,7 +72,7 @@ another application during the check. Reports/screenshots stay in `.runtime`.
 ## Package the Windows ZIP
 
 ```powershell
-python scripts/build_editor_patch.py --original .runtime/official/0.18.0 --modified .runtime/photocraft-0.18.0/target/release --output .runtime/addon-patches --host-version 0.18.0 --upstream 8a87a457abb43ac344deeb3fdb67541b91a72ff1
+python scripts/build_editor_patch.py --original .runtime/official/0.20.1 --modified .runtime/photocraft-0.20.1/target/release --output .runtime/addon-patches --host-version 0.20.1 --upstream 327c4cc82e737a3e0af7c147a477126d77525495
 python scripts/package_windows.py --patches .runtime/addon-patches
 ```
 
@@ -86,8 +86,19 @@ The packager refuses to reuse an existing staging directory. Move a previous sta
 
 ## Release
 
+The Windows setup window can be checked without installing or loading models:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -MTA -File scripts/setup_window_smoke.ps1
+```
+
+This opens and cancels the native folder dialog through its own COM event callback,
+checks child exit codes and path quoting, and renders ready/success/warning/failure
+states offscreen. Pass `-Bundle <extracted ZIP folder>` to check the distributed
+bootstrap and UI. Screenshots and the report stay in `.runtime`.
+
 1. Finish host, native and installer checks; test the extracted archive with an isolated profile. Keep actual inference opt-in.
-2. Update the version in `packaging/installer.py`, `genstudio/__init__.py`, `packaging/Setup.ps1`, README download links and release notes together.
+2. Update the version in `packaging/installer.py`, `genstudio/__init__.py`, `packaging/SetupWindow.ps1`, README download links and release notes together.
 3. Commit the source. Create a matching version tag and upload the Windows ZIP and `SHA256SUMS.txt` as GitHub Release assets. Never commit binaries or weights to Git.
 4. Verify the public release metadata and asset names. Record tests and actual limitations in release notes.
 

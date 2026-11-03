@@ -12,7 +12,7 @@ import subprocess
 import sys
 import uuid
 
-VERSION = "0.9.6"
+VERSION = "0.9.7"
 REPOSITORY = "https://github.com/Philippsapegin/Photocraft_GenStudio"
 
 
@@ -161,7 +161,8 @@ def shortcut(path, target, arguments, working_dir, icon):
         data.unlink(missing_ok=True)
 
 
-def install(request, bundle, *, shortcuts=True):
+def install(request, bundle, *, shortcuts=True, warnings=None):
+    warnings = [] if warnings is None else warnings
     report("Verifying the release package...")
     manifest = verify_bundle(bundle)
     destination = valid_destination(request.get("installDir"), bundle)
@@ -266,12 +267,20 @@ def install(request, bundle, *, shortcuts=True):
                "installMode": "overlay", "executable": str(host / "photocraft.exe"),
                "host": str(host), "hostVersion": installed["hostVersion"], "profile": str(profile),
                "runtime": str(runtime), "package": str(version_dir),
-               "shortcutsInstalled": shortcuts, "desktopShortcut": request.get("desktopShortcut", True),
+               "shortcutsInstalled": False, "desktopShortcut": request.get("desktopShortcut", True),
                "source": REPOSITORY, "sha256": installed["files"]["photocraft.exe"]["targetSha256"]})
     if shortcuts:
         report("Updating the PhotoCraft launcher and removing obsolete PhotoCraft shortcuts...")
-        from genstudio.windows_shortcuts import repair
-        repair(destination, host, desktop=request.get("desktopShortcut", True))
+        try:
+            from genstudio.windows_shortcuts import repair
+            repair(destination, host, desktop=request.get("desktopShortcut", True))
+            metadata = read_json(destination / "genstudio-install.json")
+            metadata["shortcutsInstalled"] = True
+            write_json(destination / "genstudio-install.json", metadata)
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
+            message = "Shortcut setup needs attention: " + str(error)
+            warnings.append(message)
+            report("NOTE: " + message)
     # File checks only: no model imports, no CUDA, no engine start.
     report("Checking the model folder without loading weights...")
     sys.path.insert(0, str(runtime))
@@ -284,8 +293,10 @@ def install(request, bundle, *, shortcuts=True):
         else:
             resolve(settings["modelsDir"],settings.get("textEncoder",""),settings.get("vae",""),settings.get("model","qwen-image-2.1-turbo"))
         report("Model files found. No weights were loaded.")
-    except ValueError as error:
-        report("Setup completed; models still need attention: " + str(error))
+    except (ValueError, OSError) as error:
+        message = "Models still need attention: " + str(error)
+        warnings.append(message)
+        report("NOTE: " + message)
     report("Installed. Open PhotoCraft GenGate, then Filter > Plug-ins > GenGate.")
     return destination
 
@@ -296,11 +307,15 @@ def main():
     parser.add_argument("--bundle", type=Path, default=Path(__file__).resolve().parents[2])
     parser.add_argument("--no-shortcuts", action="store_true")
     args = parser.parse_args()
+    warnings = []
     try:
-        install(read_json(args.request), args.bundle.resolve(), shortcuts=not args.no_shortcuts)
+        install(read_json(args.request), args.bundle.resolve(), shortcuts=not args.no_shortcuts, warnings=warnings)
     except Exception as error:
+        report("GENGATE_SETUP_RESULT " + json.dumps({"status": "failed", "message": str(error)}))
         report("ERROR: " + str(error))
         return 1
+    report("GENGATE_SETUP_RESULT " + json.dumps({"status": "installedWithWarnings" if warnings else "installed", "warnings": warnings}))
+    report("Installed successfully" + (" (with notes; see above)." if warnings else "."))
     return 0
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.7 Beta
+
+- Support PhotoCraft 0.20.1, retaining its pooled compositor buffers, shared update-result dialog and compatibility warning, native Move startup default, Remove target guard and selected colour-channel sets.
+- Replace Windows installer chrome with a frameless dark window, custom fields/buttons/selectors, purple accent and persistent result status.
+- Fix Browse's empty-path exception; use owned STA Explorer folder dialogs with a compatibility fallback and recover picker errors without losing editable paths.
+- Preserve actual child exit codes and flush stdout/stderr before completion. Optional shortcut/model-discovery failures become explicit installed-with-notes results.
+
 ## 0.9.6 Beta
 
 - Add PhotoCraft 0.18.0 compatibility, preserving the native updater and independent GenGate update checks.
