@@ -42,7 +42,7 @@ class InstallerTests(unittest.TestCase):
              patch("genstudio.windows_shortcuts.repair", side_effect=OSError("synthetic shell failure")), \
              patch("genstudio.models.resolve", side_effect=PermissionError("synthetic model directory denied")):
             result = installer.install(request, self.bundle, warnings=warnings)
-        self.assertEqual(result, self.destination)
+        self.assertEqual(result.resolve(), self.destination.resolve())
         metadata = installer.read_json(self.destination / "genstudio-install.json")
         self.assertEqual(metadata["version"], installer.VERSION)
         self.assertFalse(metadata["shortcutsInstalled"])
