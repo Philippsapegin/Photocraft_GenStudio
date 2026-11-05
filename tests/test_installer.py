@@ -80,7 +80,7 @@ class InstallerTests(unittest.TestCase):
                 failed = False
                 def fail_once(path, data):
                     nonlocal failed
-                    if path == self.profile / "preferences.json" and not failed:
+                    if path.resolve() == (self.profile / "preferences.json").resolve() and not failed:
                         failed = True
                         raise OSError("synthetic disk failure")
                     return atomic(path, data)
@@ -102,7 +102,7 @@ class InstallerTests(unittest.TestCase):
             failed = False
             def fail_once(path, data):
                 nonlocal failed
-                if path == boundary and not failed:
+                if path.resolve() == boundary.resolve() and not failed:
                     failed = True
                     raise PermissionError("synthetic commit failure")
                 return atomic(path, data)
@@ -122,7 +122,7 @@ class InstallerTests(unittest.TestCase):
         denied = False
         def fail_cleanup(path, *args, **kwargs):
             nonlocal denied
-            if path == marker and not denied:
+            if path.resolve() == marker.resolve() and not denied:
                 denied = True
                 raise PermissionError("synthetic marker cleanup failure")
             return unlink(path, *args, **kwargs)
