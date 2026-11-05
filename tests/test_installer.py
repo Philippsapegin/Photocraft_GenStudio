@@ -52,6 +52,175 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual({name: editor_patch.sha256(self.host / name) for name in editor_patch.FILES},
                          {name: hashlib.sha256(content).hexdigest() for name, content in self.outputs.items()})
 
+    def request(self, **values):
+        return {"installDir": str(self.destination), "photocraftDir": str(self.host), "modelsDir": str(self.models),
+                "engine": "direct", "python": "existing/python.exe", **values}
+
+    def test_retry_after_interrupted_dependency_install_reuses_owned_stage(self):
+        with patch.object(installer, "install_direct", side_effect=RuntimeError("download interrupted")):
+            with self.assertRaisesRegex(RuntimeError, "download interrupted"):
+                installer.install(self.request(newRuntime=True), self.bundle, shortcuts=False)
+        stages = list((self.destination / "versions").iterdir())
+        self.assertEqual(len(stages), 1)
+        with patch.object(installer, "install_direct", return_value="private/python.exe"), patch("genstudio.models.resolve"):
+            installer.install(self.request(newRuntime=True), self.bundle, shortcuts=False)
+        self.assertEqual(list((self.destination / "versions").iterdir()), stages)
+        self.assertFalse((self.destination / ".gengate-setup.json").exists())
+
+    def test_launcher_metadata_and_native_files_roll_back_together(self):
+        for upgrade in (False, True):
+            with self.subTest(upgrade=upgrade), patch.object(installer, "check_python", return_value="existing/python.exe"), patch("genstudio.models.resolve"):
+                if upgrade:
+                    installer.install(self.request(), self.bundle, shortcuts=False)
+                tracked = [self.host / name for name in editor_patch.FILES] + [self.host / "runtime/config.photocraft.json",
+                           self.profile / "preferences.json", editor_patch.state_path(self.host)] + [self.destination / name for name in
+                           ("Launch.ps1", "PhotoCraft.cmd", "Uninstall.cmd", "Uninstall.ps1", "genstudio-install.json")]
+                before = {p: p.read_bytes() if p.exists() else None for p in tracked}
+                atomic = editor_patch._atomic
+                failed = False
+                def fail_once(path, data):
+                    nonlocal failed
+                    if path == self.profile / "preferences.json" and not failed:
+                        failed = True
+                        raise OSError("synthetic disk failure")
+                    return atomic(path, data)
+                # Force a preferences change on upgrade as well.
+                with patch.object(editor_patch, "_atomic", side_effect=fail_once):
+                    with self.assertRaisesRegex(OSError, "synthetic disk failure"):
+                        installer.install(self.request(), self.bundle, shortcuts=False)
+                self.assertEqual({p: p.read_bytes() if p.exists() else None for p in tracked}, before)
+                self.assertFalse((self.host / ".gengate/journal.json").exists())
+                installer.install(self.request(), self.bundle, shortcuts=False)
+
+    def test_first_install_write_failures_at_every_commit_boundary_are_retryable(self):
+        from genstudio.installation import ROOT_FILES
+        tracked = [self.destination / name for name in ROOT_FILES] + [self.host / "runtime/config.photocraft.json",
+                   self.profile / "preferences.json", *[self.host / name for name in editor_patch.FILES], editor_patch.state_path(self.host)]
+        before = {p: p.read_bytes() if p.exists() else None for p in tracked}
+        atomic = editor_patch._atomic
+        for boundary in tracked:
+            failed = False
+            def fail_once(path, data):
+                nonlocal failed
+                if path == boundary and not failed:
+                    failed = True
+                    raise PermissionError("synthetic commit failure")
+                return atomic(path, data)
+            with self.subTest(boundary=boundary.name), patch.object(installer, "check_python", return_value="existing/python.exe"), patch.object(editor_patch, "_atomic", side_effect=fail_once):
+                with self.assertRaisesRegex(PermissionError, "synthetic commit failure"):
+                    installer.install(self.request(), self.bundle, shortcuts=False)
+            self.assertTrue(failed)
+            self.assertEqual({p: p.read_bytes() if p.exists() else None for p in tracked}, before)
+        with patch.object(installer, "check_python", return_value="existing/python.exe"), patch("genstudio.models.resolve"):
+            installer.install(self.request(), self.bundle, shortcuts=False)
+        editor_patch.restore(self.host)
+        self.assertEqual({name:(self.host/name).read_bytes() for name in editor_patch.FILES},self.originals)
+
+    def test_completed_runtime_is_never_reused_when_marker_cleanup_was_denied(self):
+        marker = self.destination / ".gengate-setup.json"
+        unlink = Path.unlink
+        denied = False
+        def fail_cleanup(path, *args, **kwargs):
+            nonlocal denied
+            if path == marker and not denied:
+                denied = True
+                raise PermissionError("synthetic marker cleanup failure")
+            return unlink(path, *args, **kwargs)
+        warnings = []
+        with patch.object(installer, "check_python", return_value="existing/python.exe"), patch("genstudio.models.resolve"):
+            with patch.object(Path, "unlink", fail_cleanup):
+                installer.install(self.request(), self.bundle, shortcuts=False, warnings=warnings)
+            old = installer.read_json(self.destination / "genstudio-install.json")
+            old_config = Path(old["runtime"]) / "config.photocraft.json"
+            before = old_config.read_bytes()
+            self.assertTrue(marker.exists()); self.assertEqual(len(warnings),1)
+            installer.install(self.request(), self.bundle, shortcuts=False)
+            new = installer.read_json(self.destination / "genstudio-install.json")
+            self.assertNotEqual(old["runtime"],new["runtime"])
+            self.assertEqual(old_config.read_bytes(),before)
+            self.assertFalse(marker.exists())
+
+    def test_restart_recovery_restores_launcher_metadata_and_host_then_retries(self):
+        from genstudio.installation import stage
+        self.destination.mkdir()
+        package = stage(self.destination.resolve(), self.host.resolve(), self.profile.resolve(), installer.VERSION)
+        package.mkdir(parents=True)
+        native = self.host / "photocraft.exe"
+        before = editor_patch.sha256(native)
+        editor_patch._atomic(editor_patch.backup_file(self.host, before), native)
+        native.write_bytes(self.outputs[native.name])
+        launcher = self.destination / "Launch.ps1"; launcher.write_text("interrupted launcher")
+        metadata = self.destination / "genstudio-install.json"
+        installer.write_json(metadata, {"installMode": "overlay", "runtime": str(package / "runtime")})
+        plan = [{"path":str(native.resolve()), "before":before, "after":editor_patch.sha256(native)},
+                {"path":str(launcher.resolve()), "before":None, "after":editor_patch.sha256(launcher)},
+                {"path":str(metadata.resolve()), "before":None, "after":editor_patch.sha256(metadata)}]
+        editor_patch._atomic(self.host / ".gengate/journal.json", editor_patch.encoded({"format":2,
+                             "installationRoot":str(self.destination.resolve()), "changes":plan}))
+        with editor_patch.locked(self.host):
+            editor_patch.recover(self.host.resolve(), self.profile.resolve())
+        self.assertEqual(native.read_bytes(), self.originals[native.name])
+        self.assertFalse(launcher.exists()); self.assertFalse(metadata.exists())
+        with patch.object(installer, "check_python", return_value="existing/python.exe"), patch("genstudio.models.resolve"):
+            installer.install(self.request(), self.bundle, shortcuts=False)
+        self.assertTrue(metadata.exists())
+
+    def test_uninstall_recovers_interrupted_update_before_checking_runtime_owner(self):
+        with patch.object(installer, "check_python", return_value="existing/python.exe"), patch("genstudio.models.resolve"):
+            installer.install(self.request(), self.bundle, shortcuts=False)
+        metadata = self.destination / "genstudio-install.json"
+        old = installer.read_json(metadata); before = editor_patch.sha256(metadata)
+        editor_patch._atomic(editor_patch.backup_file(self.host, before), metadata)
+        from genstudio.installation import stage
+        package = stage(self.destination.resolve(), self.host.resolve(), self.profile.resolve(), installer.VERSION)
+        installer.write_json(metadata, {**old,"package":str(package),"runtime":str(package / "runtime")})
+        editor_patch._atomic(self.host / ".gengate/journal.json", editor_patch.encoded({"format":2,
+            "installationRoot":str(self.destination.resolve()), "changes":[{"path":str(metadata.resolve()),
+            "before":before,"after":editor_patch.sha256(metadata)}]}))
+        spec = importlib.util.spec_from_file_location("gengate_manage",Path(__file__).resolve().parents[1]/"packaging/manage.py")
+        manager = importlib.util.module_from_spec(spec);spec.loader.exec_module(manager)
+        with patch('sys.argv',['manage','--metadata',str(metadata),'--restore']), redirect_stdout(StringIO()):
+            self.assertEqual(manager.main(),0)
+        self.assertEqual({name:(self.host/name).read_bytes() for name in editor_patch.FILES},self.originals)
+        self.assertEqual(installer.read_json(metadata),old)
+
+    def test_cancelled_preparation_does_not_claim_a_foreign_folder_or_lose_user_files(self):
+        with patch.object(installer, "install_direct", side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                installer.install(self.request(newRuntime=True), self.bundle, shortcuts=False)
+        keep = self.destination / "my-notes.txt"; keep.write_text("keep")
+        with patch.object(installer, "install_direct", return_value="private/python.exe"), patch("genstudio.models.resolve"):
+            installer.install(self.request(newRuntime=True), self.bundle, shortcuts=False)
+        self.assertEqual(keep.read_text(), "keep")
+        foreign = self.root / "foreign"; foreign.mkdir(); (foreign / "document.psd").write_bytes(b"keep")
+        with self.assertRaisesRegex(ValueError, "other files"):
+            installer.valid_destination(str(foreign), self.bundle)
+
+    def test_direct_update_keeps_the_hidden_comfy_directory(self):
+        previous = {"engine":"direct","comfyDir":str(self.root / "ComfyUI"),"comfyPython":"comfy/python.exe", "modelsDir":str(self.models)}
+        installer.write_json(self.profile / "preferences.json", {"genStudio":previous})
+        with patch.object(installer,"check_python",return_value="direct/python.exe"),patch("genstudio.models.resolve"):
+            installer.install(self.request(comfyDir=""),self.bundle,shortcuts=False)
+        settings=installer.read_json(self.profile / "preferences.json")["genStudio"]
+        self.assertEqual(settings["comfyDir"],previous["comfyDir"])
+        self.assertEqual(settings["comfyPython"],previous["comfyPython"])
+
+    def test_update_preserves_both_engines_and_complete_preset_settings(self):
+        previous = {"engine": "comfy", "comfyUrl": "http://127.0.0.1:8188", "comfyPython": "comfy/python.exe",
+                    "directPython": "direct/python.exe", "comfyStartup": "off", "model": "fibo-2-edit-turbo",
+                    "modelsDir": str(self.models), "presets": {"fibo-2-edit-turbo": {"constantLora": "turbo.safetensors", "constantLoraSteps": 6}},
+                    "fillWorkflow": "my-fill.json", "removeWorkflow": "my-remove.json"}
+        installer.write_json(self.profile / "preferences.json", {"genStudio": previous, "unrelated": {"keep": True}})
+        comfy = self.root / "ComfyUI"; comfy.mkdir(); (comfy / "main.py").write_text("# fixture")
+        with patch.object(installer, "check_python", return_value="new-comfy/python.exe"), patch("genstudio.comfy_workflow.install_nodes"), patch("genstudio.models.resolve_components"):
+            installer.install(self.request(engine="comfy", comfyDir=str(comfy)), self.bundle, shortcuts=False)
+        prefs = installer.read_json(self.profile / "preferences.json")
+        settings = prefs["genStudio"]
+        for key in ("comfyUrl", "directPython", "comfyStartup", "model", "fillWorkflow", "removeWorkflow"):
+            self.assertEqual(settings[key], previous[key])
+        self.assertEqual(settings["presets"]["fibo-2-edit-turbo"]["constantLoraSteps"], 6)
+        self.assertTrue(prefs["unrelated"]["keep"])
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="Gen Studio install with spaces ")
         self.root = Path(self.temp.name)

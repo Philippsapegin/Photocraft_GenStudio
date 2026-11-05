@@ -102,12 +102,14 @@ class StudioTests(unittest.TestCase):
                     raise TimeoutError("worker loading")
                 return http(url.replace("http://127.0.0.1:8766",base),body,timeout)
             configured=[]
-            transport(directory,defaults(),body,events.append,configure=lambda *args:configured.append(args),request=request_local,interval=.01)
+            transport(directory,{**defaults(),"engine":"direct"},body,events.append,configure=lambda *args:configured.append(args),request=request_local,interval=.01)
             self.assertEqual(len(configured),1)
             self.assertEqual(len(stalled),1)
             self.assertEqual([c[1] for c in host.calls],[15,16])
             self.assertTrue(all(c[0]==1 and c[3:]==(256,320) for c in host.calls))
             self.assertEqual(events[-1],{"done":True})
+            metadata=json.loads((Path(directory)/"results.json").read_text())
+            self.assertEqual(metadata,{"count":2,"images":[{"seed":15},{"seed":16}]})
             self.assertFalse((Path(directory)/"result-mask.png").exists())
             for index in range(2):
                 with Image.open(Path(directory)/f"result-{index}.png") as image:self.assertEqual(image.size,(256,320))

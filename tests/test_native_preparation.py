@@ -35,6 +35,21 @@ class RemoveDispatchTests(unittest.TestCase):
 
 
 class UpdateTransportTests(unittest.TestCase):
+    def test_0202_job_dialog_keeps_batch_and_save_exclusions(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'jobs_ui.rs'
+            native = '    if j.command == "file.automate.batch" || j.elapsed_ms < DIALOG_DELAY_MS || app.jobs.saves.iter().any(|s| s.job == j.id) {\n        return;\n    }'
+            path.write_text(native, encoding='utf-8')
+            old = '    if j.elapsed_ms < DIALOG_DELAY_MS {'
+            new = '    if j.elapsed_ms < DIALOG_DELAY_MS || j.command == "paint.remove" && j.label == "Remove · Qwen" {'
+            replace(path, old, new)
+            first = path.read_text(encoding='utf-8')
+            self.assertIn('if j.command == "file.automate.batch" ||', first)
+            self.assertIn('|| app.jobs.saves.iter().any(|s| s.job == j.id)', first)
+            self.assertIn('j.label == "Remove · Qwen"', first)
+            replace(path, old, new)
+            self.assertEqual(path.read_text(encoding='utf-8'), first)
+
     def test_shared_update_result_keeps_the_native_dialog_and_adds_a_warning_before_install(self):
         original = '        #[cfg(not(target_arch = "wasm32"))]\n        app.updates_rt.updater.offer(release_of(release));\n    if app.ui.updates_open {\n        let dialog = craft_update::CheckResultDialog::new(&crate::UPDATE_APP, version);\n'
         changed = prepare_update_notice(original)

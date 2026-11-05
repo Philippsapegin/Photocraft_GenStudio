@@ -1,4 +1,4 @@
-"""Apply the current GenGate integration to pinned PhotoCraft 0.20.1 sources."""
+"""Apply the current GenGate integration to pinned PhotoCraft 0.20.1/0.20.2 sources."""
 from pathlib import Path
 import argparse
 import json
@@ -15,6 +15,7 @@ import prepare_gengate
 import prepare_segmentation
 import prepare_photocraft_012
 import prepare_updates
+import prepare_palette
 from photocraft_source import source_view
 
 
@@ -30,7 +31,7 @@ def replace(path, old, new):
 
 def prepare(source):
     if not (source / 'crates/engine/src/cmd.rs').is_file():
-        raise RuntimeError('This development integration targets PhotoCraft 0.20.1. Use the matching older GenGate release source for earlier editors.')
+        raise RuntimeError('This development integration targets PhotoCraft 0.20.1/0.20.2. Use the matching older GenGate release source for earlier editors.')
     source = source_view(source)
     prepare_photocraft_012.before(source)
     prepare_gengate.before(source)
@@ -85,6 +86,7 @@ def prepare(source):
         prepare_segmentation.prepare(source, replace)
         prepare_gengate.after(source)
         prepare_photocraft_012.after(source)
+        prepare_palette.prepare(Path(source), replace)
         prepare_updates.prepare(source, replace)
         return
     replace(engine / "lib.rs", "pub mod plugin_cmds;", "pub mod plugin_cmds;\npub mod genstudio;")
@@ -108,6 +110,7 @@ def prepare(source):
     prepare_segmentation.prepare(source, replace)
     prepare_gengate.after(source)
     prepare_photocraft_012.after(source)
+    prepare_palette.prepare(Path(source), replace)
     prepare_updates.prepare(source, replace)
 
 

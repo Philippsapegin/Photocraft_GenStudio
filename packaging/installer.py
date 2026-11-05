@@ -10,9 +10,8 @@ from pathlib import Path, PurePosixPath
 import shutil
 import subprocess
 import sys
-import uuid
 
-VERSION = "0.9.7"
+VERSION = "0.9.8"
 REPOSITORY = "https://github.com/Philippsapegin/Photocraft_GenStudio"
 
 
@@ -82,7 +81,9 @@ def valid_destination(value, bundle):
         raise ValueError("Choose a new subfolder for PhotoCraft GenGate.")
     if path == bundle.resolve() or path.is_relative_to(bundle.resolve()) or bundle.resolve().is_relative_to(path):
         raise ValueError("Choose a folder outside the extracted installer.")
-    if path.exists() and any(path.iterdir()) and not (path / "genstudio-install.json").is_file():
+    from genstudio.installation import pending
+    owned = pending(path)
+    if path.exists() and any(path.iterdir()) and not (path / "genstudio-install.json").is_file() and not owned:
         raise ValueError("This folder already contains other files. Choose an empty folder or a previous GenGate installation.")
     if (path / "genstudio-install.json").is_file() and read_json(path / "genstudio-install.json").get("installMode") != "overlay":
         raise ValueError("This is an old standalone editor installation. Choose a new GenGate add-on folder; the old installation will be kept.")
@@ -126,7 +127,7 @@ def run_logged(command):
 def install_direct(runtime):
     report("Installing a separate CUDA runtime. This downloads several GB of software, no model weights.")
     target = runtime / ".runtime/qwen-direct"
-    shutil.copytree(runtime / ".venv/Scripts", target)
+    shutil.copytree(runtime / ".venv/Scripts", target, dirs_exist_ok=True)
     python = target / "python.exe"
     site = target / "site-packages"
     # Install to this private directory; never change a user's system or ComfyUI Python.
@@ -138,13 +139,21 @@ def install_direct(runtime):
     return check_python(python, direct=True)
 
 
-def settings_for(request, runtime, python):
-    return {"engine": request["engine"], "comfyStartup": "firstRequest", "directStartup": "firstRequest",
-            "comfyUrl": request.get("comfyUrl") or "http://127.0.0.1:8190",
-            "comfyDir": request.get("comfyDir", ""),
-            "comfyPython": python if request["engine"] == "comfy" else "",
-            "directPython": python if request["engine"] == "direct" else "",
-            "modelsDir": str(Path(request["modelsDir"]).resolve()), "runtimeRoot": str(runtime)}
+def settings_for(request, runtime, python, previous=None):
+    from genstudio.settings import validate
+    result = validate(previous or {})
+    result.update(engine=request["engine"], modelsDir=str(Path(request["modelsDir"]).resolve()), runtimeRoot=str(runtime))
+    result["directPython" if request["engine"] == "direct" else "comfyPython"] = python
+    for key in ("comfyDir", "comfyUrl"):
+        if key in request:
+            # Direct setup hides this field; an empty GUI value must not erase
+            # the saved configuration of the inactive ComfyUI engine.
+            if key == "comfyDir" and request["engine"] == "direct" and request[key] == "" and result[key]:
+                continue
+            result[key] = request[key]
+    if previous and os.path.normcase(str(Path(previous.get("modelsDir") or ".").resolve())) != os.path.normcase(result["modelsDir"]):
+        result["textEncoder"] = result["vae"] = ""
+    return validate(result)
 
 
 def shortcut(path, target, arguments, working_dir, icon):
@@ -170,8 +179,18 @@ def install(request, bundle, *, shortcuts=True, warnings=None):
     host = editor_patch.host_folder(request.get("photocraftDir") or "__missing_photocraft__")
     if destination == host or host.is_relative_to(destination) or destination.is_relative_to(host):
         raise ValueError("Choose a separate folder for GenGate, outside the PhotoCraft application files.")
-    editor_patch.choose_patch(host, editor_patch.catalog_for(bundle))
-    editor_patch.assert_closed(host)
+    profile = editor_patch.profile_folder(host)
+    if not (host / ".gengate/journal.json").exists():
+        editor_patch.choose_patch(host, editor_patch.catalog_for(bundle))
+    with editor_patch.locked(host):
+        editor_patch.assert_closed(host)
+        editor_patch.recover(host, profile)
+        editor_patch.choose_patch(host, editor_patch.catalog_for(bundle))
+        return _install_locked(request, bundle, manifest, destination, host, profile, shortcuts, warnings)
+
+
+def _install_locked(request, bundle, manifest, destination, host, profile, shortcuts, warnings):
+    from genstudio import editor_patch
     engine = request.get("engine")
     if engine not in ("direct", "comfy"):
         raise ValueError("Choose Direct or ComfyUI.")
@@ -189,7 +208,6 @@ def install(request, bundle, *, shortcuts=True, warnings=None):
                 or address.password or address.query or address.fragment):
             raise ValueError("Use a local ComfyUI HTTP address with a port, e.g. http://127.0.0.1:8190.")
         lanpaint = Path(request["comfyDir"]) / "custom_nodes/LanPaint"
-    profile = editor_patch.profile_folder(host)
     prefs_path = profile / "preferences.json"
     # Parse before changing anything. Preserve all unrelated editor preferences.
     preferences = read_json(prefs_path) if prefs_path.exists() else {}
@@ -199,9 +217,9 @@ def install(request, bundle, *, shortcuts=True, warnings=None):
     if request.get("migrationProfile"):
         previous = read_json(Path(request["migrationProfile"]) / "preferences.json")
         old_settings = previous.get("genStudio", old_settings)
-    destination.mkdir(parents=True, exist_ok=True)
-    version_dir = destination / "versions" / (VERSION + "-" + uuid.uuid4().hex[:8])
-    version_dir.mkdir(parents=True)
+    from genstudio.installation import stage, MARKER
+    version_dir = stage(destination, host, profile, VERSION)
+    version_dir.mkdir(parents=True, exist_ok=True)
     report("Installing the GenGate add-on and local host. PhotoCraft is already installed.")
     # Copy only files covered by the manifest, with no developer configs or caches.
     for relative in manifest["files"]:
@@ -213,41 +231,7 @@ def install(request, bundle, *, shortcuts=True, warnings=None):
     runtime = version_dir / "runtime"
     if fresh:
         python = install_direct(runtime)
-    settings = settings_for(request, runtime, python)
-    # An existing profile keeps its startup choice; first installs use first request.
-    if not isinstance(old_settings, dict):
-        old_settings = {}
-    for key in ("comfyStartup", "directStartup"):
-        if old_settings.get(key) in ("off", "appStart", "firstRequest"):
-            settings[key] = old_settings[key]
-    from genstudio.models import MODELS
-    if isinstance(old_settings.get("model"), str) and old_settings["model"] in MODELS:
-        settings["model"] = old_settings["model"]
-    if isinstance(old_settings.get("reduceEditResolution"), bool):
-        settings["reduceEditResolution"] = old_settings["reduceEditResolution"]
-    if old_settings.get("studioMode") in ("preset", "workflow"):
-        settings["studioMode"] = old_settings["studioMode"]
-    for field in ("studioWorkflow", "fillWorkflow", "removeWorkflow"):
-        path = old_settings.get(field)
-        if isinstance(path, str) and len(path) <= 4096 and "\0" not in path:
-            settings[field] = path
-    if os.path.normcase(str(Path(old_settings.get("modelsDir") or ".").resolve())) == os.path.normcase(settings["modelsDir"]):
-        for key in ("textEncoder", "vae"):
-            value=old_settings.get(key)
-            if isinstance(value,str) and len(value)<=4096 and "\0" not in value:
-                settings[key]=value
-    if isinstance(old_settings.get("segmentation"),dict):
-        from genstudio.segmentation_models import validate as validate_segmentation
-        try:
-            settings["segmentation"]=validate_segmentation(old_settings["segmentation"])
-        except ValueError:
-            pass
-    if isinstance(old_settings.get("presets"), dict):
-        from genstudio.settings import validate as validate_settings
-        try:
-            settings["presets"] = validate_settings({**settings, "presets": old_settings["presets"]})["presets"]
-        except ValueError:
-            pass
+    settings = settings_for(request, runtime, python, old_settings if isinstance(old_settings, dict) else None)
     write_json(runtime / "config.photocraft.json", settings)
     if engine == "comfy" and not lanpaint.exists() and request.get("installLanPaint", False):
         report("Installing the bundled, pinned LanPaint extension into the selected ComfyUI...")
@@ -258,17 +242,23 @@ def install(request, bundle, *, shortcuts=True, warnings=None):
         install_nodes(request["comfyDir"])
     preferences["genStudio"] = settings
     report("Applying the verified PhotoCraft patch and keeping original files for restore...")
-    installed = editor_patch.apply(version_dir, host, settings, preferences, profile, VERSION)
-    shutil.copyfile(bundle / "Launch.ps1", destination / "Launch.ps1")
-    shutil.copyfile(bundle / "PhotoCraft.cmd", destination / "PhotoCraft.cmd")
-    for name in ("Uninstall.cmd", "Uninstall.ps1"):
-        shutil.copyfile(bundle / name, destination / name)
-    write_json(destination / "genstudio-install.json", {"version": VERSION,
-               "installMode": "overlay", "executable": str(host / "photocraft.exe"),
-               "host": str(host), "hostVersion": installed["hostVersion"], "profile": str(profile),
-               "runtime": str(runtime), "package": str(version_dir),
-               "shortcutsInstalled": False, "desktopShortcut": request.get("desktopShortcut", True),
-               "source": REPOSITORY, "sha256": installed["files"]["photocraft.exe"]["targetSha256"]})
+    def installation_changes(installed):
+        metadata = {"version": VERSION,
+                    "installMode": "overlay", "executable": str(host / "photocraft.exe"),
+                    "host": str(host), "hostVersion": installed["hostVersion"], "profile": str(profile),
+                    "runtime": str(runtime), "package": str(version_dir),
+                    "shortcutsInstalled": False, "desktopShortcut": request.get("desktopShortcut", True),
+                    "source": REPOSITORY, "sha256": installed["files"]["photocraft.exe"]["targetSha256"]}
+        return [(destination / name, bundle / name) for name in ("Launch.ps1", "PhotoCraft.cmd", "Uninstall.cmd", "Uninstall.ps1")] + [
+            (destination / "genstudio-install.json", editor_patch.encoded(metadata))]
+    editor_patch.apply(version_dir, host, settings, preferences, profile, VERSION,
+                       installation_root=destination, installation_changes=installation_changes, _lock_held=True)
+    try:
+        (destination / MARKER).unlink(missing_ok=True)
+    except OSError as error:
+        message = "Could not clear the completed setup record: " + str(error)
+        warnings.append(message)
+        report("NOTE: " + message)
     if shortcuts:
         report("Updating the PhotoCraft launcher and removing obsolete PhotoCraft shortcuts...")
         try:

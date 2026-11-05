@@ -179,6 +179,16 @@ def recover(host, profile):
     plan = read(journal)
     allowed = {host / name for name in FILES} | {
         host / "runtime/config.photocraft.json", state_path(host), profile / "preferences.json"}
+    if isinstance(plan, dict):
+        from .installation import ROOT_FILES, pending
+        root = Path(plan.get("installationRoot", "")).resolve()
+        owner = pending(root)
+        if (plan.get("format") != 2 or not owner or owner["host"] != str(host)
+                or owner["profile"] != str(profile) or root == host
+                or root.is_relative_to(host) or host.is_relative_to(root)):
+            raise ValueError("Invalid GenGate installation recovery record")
+        allowed |= {root / name for name in ROOT_FILES}
+        plan = plan["changes"]
     # Validate every path and rollback source before making any recovery changes.
     for item in plan:
         path = Path(item["path"])
@@ -200,7 +210,7 @@ def recover(host, profile):
     journal.unlink()
 
 
-def transaction(host, profile, changes):
+def transaction(host, profile, changes, installation_root=None):
     recover(host, profile)
     plan = []
     for path, data in changes:
@@ -216,7 +226,8 @@ def transaction(host, profile, changes):
                 _atomic(backup, path)
         plan.append({"path": str(path), "before": before, "after": after})
     journal = host / ".gengate/journal.json"
-    _atomic(journal, encoded(plan))
+    record = plan if installation_root is None else {"format": 2, "installationRoot": str(installation_root), "changes": plan}
+    _atomic(journal, encoded(record))
     try:
         for path, data in changes:
             item = next((item for item in plan if item["path"] == str(path)), None)
@@ -234,12 +245,13 @@ def transaction(host, profile, changes):
         raise
 
 
-def apply(package, host, settings, preferences, profile, version):
+def apply(package, host, settings, preferences, profile, version, *, installation_root=None, installation_changes=None, _lock_held=False):
     import bsdiff4
     host = host_folder(host)
     profile = profile.resolve()
     assert_closed(host)
-    with locked(host):
+    from contextlib import nullcontext
+    with nullcontext() if _lock_held else locked(host):
         recover(host, profile)
         entry, sources, current = choose_patch(host, catalog_for(package))
         old = state_for(host)
@@ -280,7 +292,9 @@ def apply(package, host, settings, preferences, profile, version):
                          "previousConfig": old.get("previousConfig", config.read_text(encoding="utf-8") if config.exists() else None)}
             changes = [(config, encoded(settings)), (prefs, encoded(preferences)), *prepared,
                        (state_path(host), encoded(new_state))]
-            transaction(host, profile, changes)
+            if installation_changes is not None:
+                changes = [*installation_changes(new_state), *changes]
+            transaction(host, profile, changes, installation_root)
         finally:
             for _, output in prepared:
                 output.unlink(missing_ok=True)

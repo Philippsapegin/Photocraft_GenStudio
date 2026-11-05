@@ -145,7 +145,7 @@ fn capture(s: &mut Session, _: &Value) -> Result<Value> {
     )
 }
 
-fn validate(p: &Value, workflow: bool) -> Result<()> {
+fn validate(p: &Value, workflow: bool, model: &str) -> Result<()> {
     let prompt = p["prompt"].as_str().ok_or_else(|| error("Enter a prompt"))?;
     if !workflow && prompt.trim().is_empty() || prompt.len() > 12000 || prompt.contains('\0') {
         return Err(error("Enter a prompt up to 12000 UTF-8 bytes"));
@@ -159,9 +159,12 @@ fn validate(p: &Value, workflow: bool) -> Result<()> {
     }
     let width = p["width"].as_u64().ok_or_else(|| error("Invalid width"))?;
     let height = p["height"].as_u64().ok_or_else(|| error("Invalid height"))?;
-    if !(256..=2048).contains(&width) || !(256..=2048).contains(&height) || width % 32 != 0 || height % 32 != 0 {
-        return Err(error("Use dimensions from 256 to 2048, in multiples of 32"));
+    let limit=if workflow {8192} else {2048};
+    let grid=if workflow {1} else if model.starts_with("qwen") {32} else {16};
+    if !(256..=limit).contains(&width) || !(256..=limit).contains(&height) || width%grid!=0 || height%grid!=0 || width*height>32<<20 {
+        return Err(error(format!("Use dimensions from 256 to {limit}, in multiples of {grid}; at most 32 million pixels")));
     }
+    if p.get("seed").is_some_and(|v| !v.is_null() && v.as_u64().is_none_or(|n| n > (1 << 53) - 9)) { return Err(error("Seed must be empty or an integer from 0 to 9007199254740983")); }
     if !p["batch"].as_u64().is_some_and(|n| (1..=8).contains(&n)) {
         return Err(error("Batch size must be between 1 and 8"));
     }
@@ -185,6 +188,8 @@ pub struct Generation {
     pub workflow: Option<crate::genstudio_workflow::Recipe>,
     #[serde(default)]
     pub seed: Option<u64>,
+    #[serde(default)]
+    pub engine: Option<crate::genstudio::Engine>,
 }
 pub fn layer_generation(layer: &photocraft_doc::Layer) -> Result<Option<Generation>> {
     let Some((_, bytes)) = layer.psd_blocks.iter().find(|(key, _)| *key == PROMPT_BLOCK) else { return Ok(None) };
@@ -207,6 +212,7 @@ pub fn layer_generation(layer: &photocraft_doc::Layer) -> Result<Option<Generati
         || value.prompt.len() > 12000
         || value.compiled_prompt.len() > 12000
         || value.negative_prompt.len() > 12000 || value.negative_prompt.contains('\0')
+        || value.seed.is_some_and(|n| n >= 1 << 53)
         || value.width > limit
         || value.height > limit
         || u64::from(value.width)*u64::from(value.height)>32<<20
@@ -221,15 +227,16 @@ struct Prepared {
     layers: Vec<photocraft_doc::Layer>,
     template: photocraft_doc::Document,
 }
-fn prepare_results(images: Vec<Vec<u8>>, template: photocraft_doc::Document, metadata: &Generation) -> Result<Prepared> {
+fn prepare_results(images: Vec<crate::genstudio_edit::StudioImage>, template: photocraft_doc::Document, metadata: &Generation) -> Result<Prepared> {
     use photocraft_color::PixelFormat;
     use photocraft_doc::{Layer, LayerContent};
     use std::sync::Arc;
     let mut layers = Vec::new();
-    let block = Arc::new(serde_json::to_vec(metadata).map_err(error)?);
-    for bytes in images {
+    for result in images {
+        let metadata = Generation { seed: result.seed.or(metadata.seed), ..metadata.clone() };
+        let block = Arc::new(serde_json::to_vec(&metadata).map_err(error)?);
         let image = photocraft_codecs::decode_with(
-            &bytes,
+            &result.bytes,
             &DecodeOptions { limits: Limits { max_width: 2048, max_height: 2048, max_pixels: 2048 * 2048, max_alloc: 64 << 20 }, ..Default::default() },
         )
         .map_err(error)?;
@@ -251,7 +258,7 @@ fn prepare_results(images: Vec<Vec<u8>>, template: photocraft_doc::Document, met
 }
 fn generate(s: &mut Session, p: &Value) -> Result<Value> {
     let settings = s.prefs().gen_studio.clone();
-    validate(p,settings.workflow_mode())?;
+    validate(p,settings.workflow_mode(),&settings.model)?;
     settings.validate().map_err(error)?;
     let loras: Vec<crate::genstudio_lora::Selection> = serde_json::from_value(p.get("loras").cloned().unwrap_or_else(|| json!([]))).map_err(error)?;
     crate::genstudio_lora::validate(&loras).map_err(error)?;
@@ -279,6 +286,7 @@ fn generate(s: &mut Session, p: &Value) -> Result<Value> {
         loras,
         workflow:None,
         seed:None,
+        engine:Some(crate::genstudio::Engine::Direct),
     };
     let target = s.active().map(|st| st.doc.id);
     let template = s.active().map(|st| (*st.doc).clone()).unwrap_or_else(|| {
@@ -289,7 +297,8 @@ fn generate(s: &mut Session, p: &Value) -> Result<Value> {
             photocraft_color::SampleType::U8,
         )
     });
-    let payload = p.clone();
+    let mut payload = p.clone();
+    if payload["seed"].is_null() && let Some(object) = payload.as_object_mut() { object.remove("seed"); }
     crate::jobs::run(
         s,
         "GenGate",
@@ -313,7 +322,7 @@ fn prepare_workflow_results(output:crate::genstudio_workflow::Output,template:ph
     let mut layers=Vec::new();
     for row in output.images {
         let meta=Generation{model:"workflow".into(),prompt:row.record.prompt.clone(),compiled_prompt:row.record.prompt,negative_prompt:row.record.negative_prompt,width:row.record.width,height:row.record.height,
-            loras:row.record.loras,workflow:Some(output.workflow.clone()),seed:Some(row.record.seed),..metadata.clone()};
+            loras:row.record.loras,workflow:Some(output.workflow.clone()),seed:Some(row.record.seed),engine:Some(crate::genstudio::Engine::Comfy),..metadata.clone()};
         let rect=photocraft_geom::Rect::new(0,0,meta.width as i32,meta.height as i32);
         let fmt=template.pixel_format();
         let mut layer=Layer::raster(&row.record.name,photocraft_color::PixelFormat::new(fmt.mode,fmt.sample,true));
@@ -490,7 +499,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "GenGate",
             menu: &[],
             shortcut: None,
-            params: "{prompt,references:[PNG base64]=[],width:1024,height:1024,batch:1..8}",
+            params: "{prompt,sourcePrompt?,negativePrompt?,references:[PNG base64]=[],width:256..8192,height:256..8192 (preset limit 2048; model grid applies),batch:1..8,seed?:0..9007199254740983 (omit/null=random),loras?:[]}",
             enabled: crate::commands::always,
             run: generate,
             journal: false,
@@ -534,22 +543,24 @@ mod tests {
             loras: vec![crate::genstudio_lora::Selection { path: "style/example.safetensors".into(), strength: 0.65 }],
             workflow:None,
             seed:None,
+        engine:Some(crate::genstudio::Engine::Direct),
         };
         let image = Image::from_u8(8, 8, ChannelLayout::Rgba, [20, 80, 120, 255].repeat(64)).unwrap();
         let template =
             photocraft_doc::Document::new("GenGate", photocraft_geom::Size::new(8, 8), photocraft_color::ColorMode::Rgb, photocraft_color::SampleType::U8);
-        let ready = prepare_results(vec![png(&image).unwrap()], template, &meta).unwrap();
+        let ready = prepare_results(vec![crate::genstudio_edit::StudioImage { bytes: png(&image).unwrap(), seed: Some(42) }], template, &meta).unwrap();
         let result = import_results(&mut s, None, ready).unwrap();
         assert_eq!(s.documents().len(), 1);
         assert_eq!(s.active().unwrap().doc.layers.len(), 1);
         assert!(s.active().unwrap().is_dirty());
         let id = s.active().unwrap().doc.id;
         let template = (*s.active().unwrap().doc).clone();
-        let ready = prepare_results(vec![png(&image).unwrap(), png(&image).unwrap()], template, &meta).unwrap();
+        let ready = prepare_results(vec![crate::genstudio_edit::StudioImage { bytes: png(&image).unwrap(), seed: Some(42) }, crate::genstudio_edit::StudioImage { bytes: png(&image).unwrap(), seed: Some(43) }], template, &meta).unwrap();
         import_results(&mut s, Some(id), ready).unwrap();
         assert_eq!(s.documents().len(), 1);
         assert_eq!(s.active().unwrap().doc.layers.len(), 3);
         assert_eq!(layer_info(&mut s, &json!({})).unwrap()["generation"]["prompt"], meta.prompt);
+        assert_eq!(layer_info(&mut s, &json!({})).unwrap()["generation"]["seed"], 43);
         s.execute("edit.undo", json!({})).unwrap();
         assert_eq!(s.active().unwrap().doc.layers.len(), 1);
         s.execute("edit.redo", json!({})).unwrap();
@@ -559,6 +570,7 @@ mod tests {
         let loaded = photocraft_format::load_from_bytes(&bytes).unwrap();
         assert_eq!(layer_generation(loaded.layers.last().unwrap()).unwrap().unwrap().prompt, meta.prompt);
         assert_eq!(layer_generation(loaded.layers.last().unwrap()).unwrap().unwrap().negative_prompt, meta.negative_prompt);
+        assert_eq!(layer_generation(loaded.layers.last().unwrap()).unwrap().unwrap().seed, Some(43));
         assert_eq!(layer_generation(loaded.layers.last().unwrap()).unwrap().unwrap().loras, meta.loras);
         let exported = photocraft_io::export(doc, "psd", &Default::default()).unwrap();
         let psd = photocraft_io::import("generated.psd", &exported.bytes).unwrap().document;
@@ -582,9 +594,10 @@ mod tests {
             loras: Vec::new(),
             workflow:None,
             seed:None,
+        engine:Some(crate::genstudio::Engine::Direct),
         };
         let image = Image::from_u8(8, 8, ChannelLayout::Rgba, [20, 80, 120, 255].repeat(64)).unwrap();
-        let prepared = prepare_results(vec![png(&image).unwrap()], template, &meta).unwrap();
+        let prepared = prepare_results(vec![crate::genstudio_edit::StudioImage { bytes: png(&image).unwrap(), seed: Some(42) }], template, &meta).unwrap();
         s.execute("file.new", json!({"width":16,"height":16})).unwrap();
         let other = s.active().unwrap().doc.id;
         import_results(&mut s, Some(target), prepared).unwrap();
@@ -598,7 +611,7 @@ mod tests {
     fn workflow_layers_keep_upscaled_size_mask_name_prompt_and_recipe_after_save(){
         let template=photocraft_doc::Document::new("Workflow",photocraft_geom::Size::new(8,8),photocraft_color::ColorMode::Rgb,photocraft_color::SampleType::U8);
         let recipe=crate::genstudio_workflow::Recipe{path:"custom.json".into(),sha256:"f".repeat(64)};
-        let meta=Generation{version:1,prompt:"source".into(),compiled_prompt:"source".into(), negative_prompt: String::new(),model:"qwen-image-2.1-turbo".into(),width:1024,height:1024,loras:vec![],workflow:None,seed:None};
+        let meta=Generation{version:1,prompt:"source".into(),compiled_prompt:"source".into(), negative_prompt: String::new(),model:"qwen-image-2.1-turbo".into(),width:1024,height:1024,loras:vec![],workflow:None,seed:None,engine:None};
         let image=Image::from_u8(4096,2,ChannelLayout::Rgba,[10,20,30,255].repeat(8192)).unwrap();
         let mask=Image::from_u8(4096,2,ChannelLayout::Gray,vec![128;8192]).unwrap();
         let record=crate::genstudio_workflow::ImageRecord{width:4096,height:2,prompt:"Workflow prompt".into(),negative_prompt:"bad text".into(),name:"Workflow result".into(),seed:17,loras:vec![],has_mask:true};

@@ -19,6 +19,18 @@ def main():
             raise ValueError("This is not a GenGate add-on installation.")
         host = Path(metadata["host"])
         state = editor_patch.state_for(host)
+        if (host / ".gengate/journal.json").exists():
+            # Root metadata can already point at the new runtime while an interrupted
+            # transaction still owns the old native state. Recover before ownership checks.
+            profile = Path(state.get("profile", metadata["profile"])).resolve()
+            with editor_patch.locked(host):
+                editor_patch.assert_closed(host)
+                editor_patch.recover(host, profile)
+            if not args.metadata.exists():
+                print(json.dumps({"restored": True, "reason": "Interrupted first installation rolled back."}), flush=True)
+                return 0
+            metadata = editor_patch.read(args.metadata)
+            state = editor_patch.state_for(host)
         if args.restore and state and state.get("runtime") != metadata.get("runtime"):
             raise ValueError("A newer GenGate installation owns this PhotoCraft. Use its Uninstall.cmd.")
         result = editor_patch.restore(host) if args.restore else editor_patch.ensure_current(host)

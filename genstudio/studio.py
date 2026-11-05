@@ -32,8 +32,11 @@ def request(value, model="qwen-image-2.1-turbo", *, workflow=False):
         raise ValueError('Add a source image to edit with FIBO 2.0 Edit Turbo.')
     from .lora import validate_studio
     loras = validate_studio(value.get('loras', []))
-    width = bounded_int(value.get("width", 1024), 256, 2048, "Width")
-    height = bounded_int(value.get("height", 1024), 256, 2048, "Height")
+    limit = 8192 if workflow else 2048
+    width = bounded_int(value.get("width", 1024), 256, limit, "Width")
+    height = bounded_int(value.get("height", 1024), 256, limit, "Height")
+    if width * height > 32 << 20:
+        raise ValueError("Use dimensions below 32 million pixels.")
     grid = 1 if workflow else spec["grid"]
     if width % grid or height % grid:
         raise ValueError(f"Generation dimensions must be multiples of {grid}.")

@@ -14,8 +14,10 @@ import time
 from unittest.mock import patch
 
 ROOT=Path(__file__).resolve().parents[1]
-sys.path.insert(0,str(ROOT))
-sys.path.insert(0,str(ROOT/"scripts"))
+runtime_args=argparse.ArgumentParser(add_help=False)
+runtime_args.add_argument("--runtime",type=Path,default=ROOT)
+RUNTIME=runtime_args.parse_known_args()[0].runtime.resolve()
+sys.path[:0]=[str(RUNTIME),str(ROOT/"scripts")]
 from PIL import Image
 from genfill.comfy import Cancelled
 from genfill.image_ops import png_bytes
@@ -78,7 +80,7 @@ def main():
     (profile/"preferences.json").write_text(json.dumps({"genStudio":settings,"interface":{"language":"en"},
         "dialogs":{"photoshopShortcuts":{"imported":False}}}),encoding="utf-8")
     env=os.environ.copy()
-    env.update(PHOTOCRAFT_CONFIG_DIR=str(profile),GENSTUDIO_SERVICE_URL=f"http://127.0.0.1:{server.server_port}",CUDA_VISIBLE_DEVICES="")
+    env.update(PHOTOCRAFT_CONFIG_DIR=str(profile),GENSTUDIO_SERVICE_URL=f"http://127.0.0.1:{server.server_port}",CUDA_VISIBLE_DEVICES="",GENGATE_NO_INFERENCE="1")
     env.pop("GENSTUDIO_NO_PROCESS",None)
     with socket.socket() as sock:
         sock.bind(("127.0.0.1",0));port=sock.getsockname()[1]
@@ -106,14 +108,25 @@ def main():
                 except OSError:return False
             until(listening,60)
             mcp=MCP([str(args.cli),"mcp","--bridge",f"127.0.0.1:{port}","--control-token-file",str(token)],bridge)
+            mcp.await_ui()
             control=lambda method,params=None:mcp.tool("control_call",{"method":method,"params":params or {}})
             menu=lambda name,params=None:control("ui.menu.invoke",{"id":name,"params":params or {}})
             submit=lambda:control("ui.menu.invoke",{"id":"genstudio.studio.submit","params":{},"wait":False})
             inspect=lambda:mcp.tool("ui_inspect")
-            studio=lambda:menu("genstudio.studio.inspect")
+            studio=lambda:menu("genstudio.studio.inspect") or {}
             jobs=lambda:mcp.run("jobs.list")["jobs"]
             idle=lambda:not any(job["command"]=="genstudio.studio.generate" and job["state"]=="running" for job in jobs())
             def shot(name):
+                state=inspect()
+                if state["genStudio"]["open"] and not state["dialogs"] and studio().get("palette",{}).get("native"):
+                    menu("genstudio.studio.configure",{"palette":{"capture":True}})
+                    def captured():
+                        value=menu("genstudio.studio.inspect",{"paletteCapture":True})
+                        return value["capture"] if not value["pending"] else None
+                    value=until(captured)
+                    assert value.get("ok"),value
+                    (folder/name).write_bytes(base64.b64decode(value["result"]["base64"]))
+                    return
                 for block in mcp.tool("ui_screenshot",{"max_side":1600})["content"]:
                     if block["type"]=="image":(folder/name).write_bytes(base64.b64decode(block["data"]))
             control("ui.resize",{"width":1440,"height":900})
@@ -141,10 +154,11 @@ def main():
             metadata=mcp.run("genstudio.studio.layer.inspect",{"layer":generated["layers"][0]})["generation"]
             assert metadata["prompt"]=="A quiet forest at sunrise"
             assert metadata["model"]==args.model
-            until(lambda:len(studio()["references"])==1 and not studio()["loading"])
-            assert studio()["references"][0]["name"]=="Generated image"
-            assert not studio()["textOnly"]
-            shot("studio-generated-reference.png")
+            until(lambda:not studio()["loading"])
+            assert not studio()["references"] and studio()["textOnly"]
+            assert metadata["seed"]==host.calls[0]["seed"]
+            assert metadata["engine"]=="direct"
+            shot("studio-after-generation.png")
             assert all(doc["dirty"] and doc["path"] is None for doc in inspect()["session"]["documents"])
             assert len(host.calls)==1 and host.calls[0]["references"]==0 and host.calls[0]["size"]==[1152,2048]
             report["text_only_new_document"]=complete
@@ -152,8 +166,8 @@ def main():
             menu("window.panel.activate",{"panel":"properties"})
             shot("studio-layer-prompt.png")
             menu("genstudio.open")
-            until(lambda:len(studio()["references"])==1 and not studio()["loading"])
-            assert studio()["references"][0]["name"]=="Generated image","reopening without a selection keeps the generated reference"
+            until(lambda:not studio()["loading"])
+            assert not studio()["references"],"reopening retains text-only generation"
             menu("genstudio.studio.configure",{"prompt":"A second image","batch":2})
             batch_job=submit()["job"];until(idle,60)
             batch=next(item for item in jobs() if item["id"]==batch_job)
@@ -162,7 +176,10 @@ def main():
             mcp.run("edit.undo");assert len(mcp.run("document.inspect")["layers"])==1
             mcp.run("edit.redo");assert len(mcp.run("document.inspect")["layers"])==3
             assert mcp.run("genstudio.studio.layer.inspect")["generation"]["prompt"]=="A second image"
+            batch_seeds=[mcp.run("genstudio.studio.layer.inspect",{"documentId":batch["result"]["documentId"],"layer":layer})["generation"]["seed"] for layer in batch["result"]["layers"]]
+            assert batch_seeds==[call["seed"] for call in host.calls[-2:]]
             report["batch_layers"]=batch
+            report["batch_seeds"]=batch_seeds
             # An empty reference with an existing document needs no selection.
             menu("genstudio.studio.reference.remove",{"slot":"main"})
             menu("genstudio.studio.configure",{"prompt":"Text only in the existing document","batch":1})
@@ -170,7 +187,8 @@ def main():
             plain=next(item for item in jobs() if item["id"]==plain_job)
             assert plain["state"]=="done" and not plain["result"]["createdDocument"],plain
             assert len(inspect()["session"]["documents"])==1 and len(mcp.run("document.inspect")["layers"])==4
-            until(lambda:len(studio()["references"])==1 and not studio()["loading"])
+            until(lambda:not studio()["loading"])
+            assert not studio()["references"]
             assert host.calls[-1]["references"]==0
             report["text_only_existing_document"]=plain
             menu("genstudio.open",{"open":False})
@@ -180,7 +198,7 @@ def main():
             menu("genstudio.open")
             until(lambda:len(studio()["references"])==1 and not studio()["loading"])
             assert studio()["references"][0]["name"]=="Selection"
-            assert not studio()["textOnly"] and "aspect" not in studio()["controls"] and "resolution" not in studio()["controls"]
+            assert not studio()["textOnly"] and "aspect" in studio()["controls"] and "resolution" not in studio()["controls"]
             assert inspect()["aiFillLayer"]["bar"] is None,"selection controls must not cover the Studio window"
             image=base64.b64encode(png_bytes(Image.new("RGBA",(96,96),(220,140,30,255)))).decode()
             for index in range(9):
@@ -208,7 +226,9 @@ def main():
             control("app.save",{"path":saved.name})
             control("app.open",{"path":saved.name})
             assert mcp.run("genstudio.studio.layer.inspect")["generation"]["prompt"]==source["generation"]["prompt"]
+            assert mcp.run("genstudio.studio.layer.inspect")["generation"]["seed"]==source["generation"]["seed"]
             report["prompt_roundtrip"]=True
+            report["seed_roundtrip"]=True
             report["selection_and_references"]=host.calls[-1]
             # A document selection must remain usable over an existing result.
             mcp.run("select.rect",{"x":80,"y":60,"width":96,"height":64})
@@ -216,7 +236,11 @@ def main():
             until(lambda:studio()["references"][0]["name"]=="Loaded file" and not studio()["loading"])
             until(lambda:studio().get("selectionAvailable"))
             rect=studio()["slots"][0]["rect"]
-            control("ui.click",{"x":rect[0]+rect[2]/2,"y":rect[1]+rect[3]-43})
+            point={"x":rect[0]+rect[2]/2,"y":rect[1]+rect[3]-43}
+            if studio().get("palette",{}).get("native"):
+                menu("genstudio.studio.configure",{"palette":{"input":[{"kind":"down",**point},{"kind":"up",**point}]}})
+            else:
+                control("ui.click",point)
             until(lambda:studio()["references"][0]["name"]=="Selection" and not studio()["loading"])
             assert not inspect()["dialogs"],"Use selection must not open a file picker"
             report["selection_replaces_populated_reference"]=True
@@ -226,9 +250,10 @@ def main():
             shot("studio-preferences.png")
             control("ui.dialog.cancel",{"dialog":preferences})
             menu("genstudio.studio.configure",{"advancedOpen":True})
-            preferences=menu("edit.preferences.genStudio")["dialog"]
+            # PhotoCraft blocks remote engine commands while a modal is open.
             until(lambda:bool(mcp.run("genstudio.engine.status")["models"].get("defaultTextEncoder")))
             report["catalog"]=mcp.run("genstudio.engine.status")["models"]
+            preferences=menu("edit.preferences.genStudio")["dialog"]
             time.sleep(.4)
             shot("studio-settings.png")
             control("ui.dialog.cancel",{"dialog":preferences})

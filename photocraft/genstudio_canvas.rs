@@ -20,12 +20,14 @@ pub struct Workspace {
     pub batch: u8,
     pub resolution: u32,
     pub aspect_ratio: String,
+    pub custom_size: Option<[u32; 2]>,
+    pub seed: Option<u64>,
     pub monospace: bool,
     pub loras: crate::genstudio_lora_ui::State,
 }
 impl Default for Workspace {
     fn default() -> Self {
-        Self { prompt: String::new(), negative_prompt: String::new(), negative_open: false, batch: 1, resolution: 1024, aspect_ratio: "1:1".into(), monospace: false, loras: Default::default() }
+        Self { prompt: String::new(), negative_prompt: String::new(), negative_open: false, batch: 1, resolution: 1024, aspect_ratio: "1:1".into(), custom_size: None, seed: None, monospace: false, loras: Default::default() }
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -62,6 +64,7 @@ impl Drop for LoadPermit {
 }
 #[derive(Default)]
 pub struct Cache {
+    pub(crate) palette: crate::genstudio_palette::Runtime,
     main: Option<Reference>,
     model: String,
     reference_limit: usize,
@@ -75,11 +78,35 @@ pub struct Cache {
     prompt_rect: Option<Rect>,
     file_hover: Option<Slot>,
     capture: Option<(JobId, u64)>,
-    generation: Option<(JobId, u64)>,
+    numeric: Option<NumericDraft>,
+    generation: Option<JobId>,
+    last_seed: Option<u64>,
+    numeric_position: crate::genstudio_ui::FloatingPosition,
     main_revision: u64,
     selection_doc: Option<std::sync::Weak<photocraft_doc::Document>>,
     layer_capture: Option<(JobId, Slot, bool, u64)>,
     window_rect: Option<Rect>,
+    viewport: Option<egui::ViewportId>,
+}
+struct NumericDraft { x: String, y: String }
+fn custom_label(state:&Workspace)->String {
+    state.custom_size.map_or_else(||"Custom".into(),|[x,y]|format!("{x}px:{y}px"))
+}
+fn checked_size(x:&str,y:&str,workflow:bool,model:&str)->Result<[u32;2],String> {
+    let parse=|text:&str|text.trim().parse::<u32>().map_err(|_|"Enter whole pixel dimensions".to_owned());
+    let size=[parse(x)?,parse(y)?];
+    let limit=if workflow {8192} else {2048};
+    let grid=if workflow {1} else if model.starts_with("qwen") {32} else {16};
+    if size.iter().any(|n|!(256..=limit).contains(n) || n%grid!=0) || u64::from(size[0])*u64::from(size[1])>32<<20 {
+        return Err(format!("Use 256 to {limit} px, multiples of {grid}; at most 32 million pixels"));
+    }
+    Ok(size)
+}
+fn output_size(state:&Workspace,image:Option<(u32,u32)>,workflow:bool,model:&str)->Result<(u32,u32),String> {
+    if state.aspect_ratio=="custom" {
+        let [x,y]=state.custom_size.ok_or("Save a Custom size first")?;
+        checked_size(&x.to_string(),&y.to_string(),workflow,model)?;Ok((x,y))
+    } else {Ok(dimensions(state.resolution,image,&state.aspect_ratio))}
 }
 #[derive(Clone)]
 struct RefDrag(u64);
@@ -334,9 +361,10 @@ pub fn menu(app: &mut PhotocraftApp, id: &str, p: &Value) -> Option<Result<Value
             else { apply_layer(app,target,restore,&result,ticket)?; }
             Ok(result)
         })()),
-        "genstudio.studio.inspect" => Some(Ok(app.studio.info.clone())),
+        "genstudio.studio.inspect" => Some(Ok(if p["paletteCapture"]==true {crate::genstudio_palette::capture_info(app)} else {app.studio.info.clone()})),
         "genstudio.studio.configure" => Some((|| {
             let mut state = app.ui.gen_studio.workspace.clone();
+            let palette=p.get("palette").map(crate::genstudio_palette::parse_request).transpose()?;
             if let Some(v) = p.get("prompt") {
                 state.prompt = v.as_str().filter(|s| s.len() <= 12000).ok_or("Invalid prompt")?.to_owned();
             }
@@ -352,13 +380,23 @@ pub fn menu(app: &mut PhotocraftApp, id: &str, p: &Value) -> Option<Result<Value
                 state.resolution = v.as_u64().filter(|n| *n == 1024 || *n == 2048).ok_or("Resolution must be 1024 or 2048")? as u32;
             }
             if let Some(v) = p.get("aspectRatio") {
-                state.aspect_ratio = v.as_str().filter(|s| ASPECTS.contains(s)).ok_or("Choose a supported aspect ratio")?.to_owned();
+                state.aspect_ratio = v.as_str().filter(|s| ASPECTS.contains(s) || *s == "custom").ok_or("Choose a supported aspect ratio")?.to_owned();
             }
+            if let Some(v) = p.get("customSize") {
+                let x=v["width"].as_u64().ok_or("Invalid custom width")?.to_string();
+                let y=v["height"].as_u64().ok_or("Invalid custom height")?.to_string();
+                let prefs=&app.session.prefs().gen_studio;
+                state.custom_size=Some(checked_size(&x,&y,prefs.workflow_mode(),&prefs.model)?);
+                state.aspect_ratio="custom".into();
+            }
+            if state.aspect_ratio=="custom" && state.custom_size.is_none() {return Err("Save a Custom size first".into());}
+            if let Some(v)=p.get("seed") {state.seed=if v.is_null() {None} else {Some(v.as_u64().filter(|n| *n <= (1 << 53)-9).ok_or("Invalid seed")?)};}
             if let Some(v) = p.get("monospace") {
                 state.monospace = v.as_bool().ok_or("Monospace must be boolean")?;
             }
             let settings_open = p.get("settingsOpen").map(|v| v.as_bool().ok_or("Settings open must be boolean")).transpose()?;
             let advanced_open = p.get("advancedOpen").map(|v| v.as_bool().ok_or("Advanced open must be boolean")).transpose()?;
+            if let Some(request)=palette {crate::genstudio_palette::configure(app,request)?;}
             if let Some(open) = settings_open {
                 app.ui.gen_studio.settings_open = open;
             }
@@ -414,20 +452,15 @@ pub fn menu(app: &mut PhotocraftApp, id: &str, p: &Value) -> Option<Result<Value
                 else {model_spec(&app.session.prefs().gen_studio.model).ok_or("Choose a supported model")?};
             let references: Vec<_> = app.studio.main.iter().chain(app.studio.extras.iter().take(model.reference_limit.saturating_sub(1)).filter_map(Option::as_ref)).collect();
             let prompt = if workflow {state.prompt.clone()}else{compiled_for(&state.prompt, references.len(), model)?};
-            let (width, height) = dimensions(state.resolution, app.studio.main.as_ref().map(|r| r.image.dimensions()), &state.aspect_ratio);
+            let (width, height) = output_size(state, app.studio.main.as_ref().map(|r| r.image.dimensions()), workflow, model.id)?;
             let references: Vec<_> = references.into_iter().map(|r| r.png.clone()).collect();
             let result = app.run(
                 "genstudio.studio.generate",
-                json!({"prompt":prompt,"sourcePrompt":state.prompt,"negativePrompt":if state.negative_open {state.negative_prompt.as_str()}else{""},"references":references,"width":width,"height":height,"batch":state.batch,
+                json!({"prompt":prompt,"sourcePrompt":state.prompt,"negativePrompt":if state.negative_open {state.negative_prompt.as_str()}else{""},"references":references,"width":width,"height":height,"batch":state.batch,"seed":state.seed,
                     "loras":crate::genstudio_lora_ui::selected(&state.loras,&app.session.prefs().gen_studio.models_dir)}),
             )?;
-            if app.studio.main.is_none() {
-                if let Some(id) = result["job"].as_u64() {
-                    app.studio.generation = Some((JobId(id), app.studio.main_revision));
-                } else {
-                    generated_reference(app, &result)?;
-                }
-            }
+            if let Some(id)=result["job"].as_u64() {app.studio.generation=Some(JobId(id));}
+            else {remember_seed(app,&result);}
             Ok(result)
         })()),
         _ => None,
@@ -452,19 +485,11 @@ fn dimensions(side: u32, image: Option<(u32, u32)>, aspect: &str) -> (u32, u32) 
     let round = |v: f64| ((v / 32.0).round() as u32 * 32).clamp(256, side);
     if ratio >= 1.0 { (side, round(f64::from(side) / ratio)) } else { (round(f64::from(side) * ratio), side) }
 }
-fn generated_reference(app: &mut PhotocraftApp, result: &Value) -> Result<(), String> {
-    let layer = result["layers"].as_array().and_then(|v| v.last()).and_then(Value::as_u64).ok_or("Generated layer is missing")?;
-    let captured = app.run("genstudio.studio.result.reference", json!({"documentId":result["documentId"],"layer":layer}))?;
-    app.studio.main_revision = app.studio.main_revision.wrapping_add(1);
-    app.studio.next = app.studio.next.wrapping_add(1);
-    let ticket = app.studio.next;
-    app.studio.loading.insert(Slot::Main, ticket);
-    if let Some(id) = captured["job"].as_u64() {
-        app.studio.capture = Some((JobId(id), ticket));
-    } else {
-        capture_result(&mut app.studio, &captured, ticket)?;
+fn remember_seed(app:&mut PhotocraftApp,result:&Value) {
+    let Some(layer)=result["layers"].as_array().and_then(|v|v.first()).and_then(Value::as_u64) else {return};
+    if let Ok(info)=app.run("genstudio.studio.layer.inspect",json!({"documentId":result["documentId"],"layer":layer})) {
+        app.studio.last_seed=info["generation"]["seed"].as_u64();
     }
-    Ok(())
 }
 fn apply_layer(app: &mut PhotocraftApp, target: Slot, restore: bool, result: &Value, ticket: u64) -> Result<(), String> {
     if app.studio.loading.get(&target)!=Some(&ticket) { return Ok(()); }
@@ -478,22 +503,36 @@ fn apply_layer(app: &mut PhotocraftApp, target: Slot, restore: bool, result: &Va
         }
         if let Some(path)=result["generation"]["workflow"]["path"].as_str().filter(|v|v.len()<=4096 && !v.contains('\0')) {
             app.session.edit_prefs(|p|{p.gen_studio.engine=photocraft_engine::genstudio::Engine::Comfy;p.gen_studio.studio_mode="workflow".into();p.gen_studio.studio_workflow=path.into();});
-        } else if result["generation"].is_object() {app.session.edit_prefs(|p|p.gen_studio.studio_mode="preset".into());}
+        } else if result["generation"].is_object() {
+            let engine=result["generation"].get("engine").cloned().filter(|v|!v.is_null())
+                .map(serde_json::from_value::<photocraft_engine::genstudio::Engine>).transpose().map_err(err)?
+                .unwrap_or(photocraft_engine::genstudio::Engine::Direct);
+            app.session.edit_prefs(|p|{p.gen_studio.engine=engine;p.gen_studio.studio_mode="preset".into();});
+        }
         for slot in app.studio.extras.iter_mut(){*slot=None;}
         app.studio.loading.retain(|slot,_|*slot==target);
         app.studio.main=None;
-        app.studio.capture=None;app.studio.generation=None;
+        app.studio.capture=None;
         app.ui.gen_studio.workspace.prompt=result["prompt"].as_str().unwrap_or_default().into();
         app.ui.gen_studio.workspace.negative_prompt=result["generation"]["negative_prompt"].as_str().unwrap_or_default().into();
         app.ui.gen_studio.workspace.negative_open=!app.ui.gen_studio.workspace.negative_prompt.is_empty();
-        app.ui.gen_studio.workspace.resolution=if result["generation"]["width"].as_u64().unwrap_or(1024)>1024 {2048}else{1024};
+        if let (Some(w),Some(h))=(result["generation"]["width"].as_u64(),result["generation"]["height"].as_u64()) {
+            app.ui.gen_studio.workspace.custom_size=Some([w as u32,h as u32]);
+            app.ui.gen_studio.workspace.aspect_ratio="custom".into();
+        }
+        app.ui.gen_studio.workspace.seed=result["generation"]["seed"].as_u64();
     }
     start_load(&mut app.studio,target,result["name"].as_str().unwrap_or("Layer").into(),false,move||Ok(bytes))
 }
-pub fn set_window_rect(app: &mut PhotocraftApp, rect: Rect) {app.studio.window_rect=Some(rect);}
+pub fn set_window_rect(app: &mut PhotocraftApp, ctx: &egui::Context, rect: Rect) {app.studio.window_rect=Some(rect);app.studio.viewport=Some(ctx.viewport_id());}
 pub fn layer_drop(app: &mut PhotocraftApp, ctx: &egui::Context, document: u64, layer: u64) -> bool {
-    if !app.ui.gen_studio.open || app.ui.gen_studio.collapsed {return false;}
-    let Some(at)=ctx.pointer_latest_pos() else{return false};
+    if !app.ui.gen_studio.open || app.ui.gen_studio.collapsed || !crate::menus::modal_allows(app,"genstudio.open") {return false;}
+    let target=app.studio.viewport.unwrap_or(ctx.viewport_id());
+    let at=crate::genstudio_palette::pointer_in(ctx,target).or_else(|| {
+        let point=app.services.cursor_pos.as_mut().and_then(|f|f(ctx))?;
+        crate::genstudio_palette::point_in(ctx,point,target)
+    });
+    let Some(at)=at else{return false};
     if !app.studio.window_rect.is_some_and(|rect|rect.contains(at)){return false;}
     let slot=app.studio.rects.iter().find(|(_,rect)|rect.contains(at)).map_or(Slot::Main,|(slot,_)|*slot);
     let mut params=json!({"documentId":document,"layer":layer,"restore":matches!(slot,Slot::Main)});
@@ -502,6 +541,10 @@ pub fn layer_drop(app: &mut PhotocraftApp, ctx: &egui::Context, document: u64, l
     true
 }
 pub fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    if let Some(id)=app.studio.generation && let Some(job)=app.session.jobs_with_recent().into_iter().find(|j|j.id==id && j.state!="running") {
+        app.studio.generation=None;
+        if job.state=="done" {remember_seed(app,&job.result.unwrap_or(Value::Null));}
+    }
     if let Some((id,slot,restore,ticket))=app.studio.layer_capture
         && let Some(job)=app.session.jobs_with_recent().into_iter().find(|j|j.id==id && j.state!="running") {
         app.studio.layer_capture=None;
@@ -510,19 +553,6 @@ pub fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
         } else {
             app.studio.loading.remove(&slot);
             crate::notices::error(app,job.error.unwrap_or("Layer capture cancelled".into()));
-        }
-    }
-    if let Some((id, revision)) = app.studio.generation
-        && let Some(job) = app.session.jobs_with_recent().into_iter().find(|j| j.id == id && j.state != "running")
-    {
-        app.studio.generation = None;
-        if job.state == "done"
-            && app.studio.main.is_none()
-            && app.studio.main_revision == revision
-            && !app.studio.loading.contains_key(&Slot::Main)
-            && let Err(e) = generated_reference(app, &job.result.unwrap_or(Value::Null))
-        {
-            crate::notices::error(app, e);
         }
     }
     if let Some((id, ticket)) = app.studio.capture
@@ -709,6 +739,8 @@ fn generation_blocker(workflow: bool, model: ModelSpec, prompt: &str, references
 }
 
 pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> Vec<(&'static str, Value)> {
+    numeric_dialog(app,ui.ctx());
+    let numeric_info=app.studio.info["numericDialog"].clone();
     let model = sync_model(app);
     let mut cache = std::mem::take(&mut app.studio);
     cache.rects.clear();
@@ -718,7 +750,7 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> Vec<(&'static str, Va
     let tokens = crate::theme::Tokens::get(ui.ctx());
     let width = ui.available_width();
     let main_width = (width * 0.42).max(170.0).min((width - 360.0).max(170.0));
-    let row_height = (ui.available_height() - 158.0).max(205.0);
+    let row_height = (ui.available_height() - 174.0).max(205.0);
     let control_height = ui.spacing().interact_size.y.max(24.0);
     let gap = 8.0;
     let prompt_width = (width - main_width - gap).max(240.0);
@@ -851,7 +883,7 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> Vec<(&'static str, Va
         });
         ui.painter().rect_stroke(group, tokens.radius_sm, egui::Stroke::new(1.0, tokens.field_border), egui::StrokeKind::Inside);
         controls["batch"] = rect_json(group);
-        if text_only {
+        if text_only && state.aspect_ratio != "custom" {
             let resolution = ui
                 .add_sized(vec2(32.0, control_height), egui::Button::new(if state.resolution == 2048 { "2k" } else { "1k" }))
                 .on_hover_text("Output resolution");
@@ -859,14 +891,20 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> Vec<(&'static str, Va
             if resolution.clicked() {
                 state.resolution = if state.resolution == 2048 { 1024 } else { 2048 };
             }
-            let aspect = egui::ComboBox::from_id_salt("genstudio-aspect").width(60.0).selected_text(&state.aspect_ratio).show_ui(ui, |ui| {
-                for ratio in ASPECTS {
-                    ui.selectable_value(&mut state.aspect_ratio, ratio.to_owned(), ratio);
-                }
-            });
-            aspect.response.clone().accessible_name("Aspect ratio");
-            controls["aspect"] = rect_json(aspect.response.rect);
         }
+        let label=if state.aspect_ratio=="custom" {egui::RichText::new(custom_label(state)).family(egui::FontFamily::Name("semibold".into())).strong()} else if text_only {egui::RichText::new(&state.aspect_ratio)} else {egui::RichText::new("Source")};
+        let aspect=egui::ComboBox::from_id_salt("genstudio-aspect").width(if state.aspect_ratio=="custom" {115.0} else {60.0}).selected_text(label).show_ui(ui,|ui| {
+            if text_only {
+                for ratio in ASPECTS {ui.selectable_value(&mut state.aspect_ratio,ratio.to_owned(),ratio);}
+            } else if ui.selectable_label(state.aspect_ratio!="custom","Source").on_hover_text("Use the source image's aspect ratio").clicked() {
+                state.aspect_ratio="1:1".into();
+            }
+            let text=if state.custom_size.is_some() {egui::RichText::new(custom_label(state)).family(egui::FontFamily::Name("semibold".into())).strong()} else {egui::RichText::new("Custom")};
+            if ui.selectable_label(state.aspect_ratio=="custom",text).clicked() {
+                let [x,y]=state.custom_size.unwrap_or([768,512]);cache.numeric=Some(NumericDraft{x:x.to_string(),y:y.to_string()});ui.close();
+            }
+        });
+        aspect.response.clone().accessible_name("Aspect ratio");controls["aspect"]=rect_json(aspect.response.rect);
         let neg=ui.add_sized(vec2(38.0,control_height),egui::Button::new("Neg").selected(state.negative_open)).on_hover_text("Show or hide negative prompt");
         controls["negativeToggle"]=rect_json(neg.rect);
         if neg.clicked(){state.negative_open=!state.negative_open;}
@@ -882,7 +920,8 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> Vec<(&'static str, Va
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let running = app.session.jobs().iter().any(|j| j.command == "genstudio.studio.generate" && j.state == "running");
             let custom=app.session.prefs().gen_studio.workflow_mode();
-            let blocked = generation_blocker(custom, model, &state.prompt, ids(&cache).len(), !cache.loading.is_empty(), running);
+            let size_error=output_size(state,cache.main.as_ref().map(|r|r.image.dimensions()),custom,model.id).err();
+            let blocked = generation_blocker(custom, model, &state.prompt, ids(&cache).len(), !cache.loading.is_empty(), running).or(size_error.as_deref());
             let ready = blocked.is_none();
             controls["generateEnabled"] = json!(ready);
             controls["generateDisabledReason"] = json!(blocked);
@@ -923,13 +962,49 @@ pub fn show(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> Vec<(&'static str, Va
         .enumerate()
         .map(|(i, r)| json!({"id":r.id,"number":i+1,"chip":model.chip(i+1),"name":r.name,"width":r.image.width(),"height":r.image.height()}))
         .collect();
-    cache.info = json!({"model":model.id,"referenceLimit":model.reference_limit,"referenceSyntax":model.chip(1),"aspectRatio":state.aspect_ratio,"textOnly":text_only,"fileHover":cache.file_hover.map(|slot|match slot {Slot::Main=>json!("main"),Slot::Extra(i)=>json!(i)}),"selectionAvailable":selection_available,"controls":controls,"prompt":state.prompt,"negativePrompt":state.negative_prompt,"negativeOpen":state.negative_open,"batch":state.batch,"resolution":state.resolution,"monospace":state.monospace,"references":list,
+    cache.info = json!({"model":model.id,"referenceLimit":model.reference_limit,"referenceSyntax":model.chip(1),"aspectRatio":state.aspect_ratio,"customSize":state.custom_size,"sizeLabel":custom_label(state),"seed":state.seed,"lastSeed":cache.last_seed,"textOnly":text_only,"fileHover":cache.file_hover.map(|slot|match slot {Slot::Main=>json!("main"),Slot::Extra(i)=>json!(i)}),"selectionAvailable":selection_available,"controls":controls,"prompt":state.prompt,"negativePrompt":state.negative_prompt,"negativeOpen":state.negative_open,"batch":state.batch,"resolution":state.resolution,"monospace":state.monospace,"references":list,
             "loading":!cache.loading.is_empty(),"promptRect":cache.prompt_rect.map(|r|[r.min.x,r.min.y,r.width(),r.height()]),
         "slots":cache.rects.iter().map(|(s,r)|json!({"slot":match s {Slot::Main=>json!("main"),Slot::Extra(i)=>json!(i)},"rect":[r.min.x,r.min.y,r.width(),r.height()]})).collect::<Vec<_>>()});
     app.studio = cache;
     app.studio.info["workflow"]=app.studio.workflow_controls.clone();
     app.studio.info["loras"]=crate::genstudio_lora_ui::info(app);
+    app.studio.info["numericDialog"]=numeric_info;
     actions
+}
+fn numeric_dialog(app:&mut PhotocraftApp,ctx:&egui::Context) {
+    app.studio.info["numericDialog"]=Value::Null;
+    let Some(mut draft)=app.studio.numeric.take() else {return};
+    let title="Custom size";
+    let prefs=&app.session.prefs().gen_studio;
+    let mut open=true;let mut save=false;let mut header=None;
+    let window=egui::Window::new(title).id(egui::Id::new("gengate-numeric-settings")).title_bar(false).collapsible(false).movable(false).resizable(false).min_width(320.0)
+        .frame(egui::Frame::window(&ctx.global_style()).inner_margin(egui::Margin::symmetric(8,4)));
+    let response=app.studio.numeric_position.prepare(ctx,window).show(ctx,|ui| {
+        let title_job=crate::genstudio_ui::floating_title(ui,title);
+        let h=crate::genstudio_ui::floating_header(ui,"gengate-numeric-settings",title,title_job,None);
+        open=!h.close.clicked();header=Some(h);
+        egui::Frame::NONE.inner_margin(egui::Margin::symmetric(8,12)).show(ui,|ui| {
+            let mut fields=Vec::new();
+            egui::Grid::new("gengate-numeric-fields").show(ui,|ui| {
+                ui.label("X");
+                fields.push(ui.add(egui::TextEdit::singleline(&mut draft.x).desired_width(240.0).min_size(vec2(240.0,26.0)).char_limit(20).hint_text("Width in pixels")).rect);ui.end_row();
+                ui.label("Y");fields.push(ui.add(egui::TextEdit::singleline(&mut draft.y).desired_width(240.0).min_size(vec2(240.0,26.0)).char_limit(20).hint_text("Height in pixels")).rect);ui.end_row();
+            });
+            let valid=checked_size(&draft.x,&draft.y,prefs.workflow_mode(),&prefs.model);
+            if let Err(message)=&valid {ui.small(message);}
+            let button=ui.add_enabled(valid.is_ok(),egui::Button::new("Save"));save=button.clicked();
+            app.studio.info["numericDialog"]=json!({"title":title,"fields":fields.iter().map(|r|rect_json(*r)).collect::<Vec<_>>(),"saveRect":rect_json(button.rect),"valid":valid.is_ok()});
+        });
+    });
+    if let (Some(response),Some(header))=(response,header) {
+        app.studio.numeric_position.finish(ctx,response.response.rect,&header);
+        app.studio.info["numericDialog"]["rect"]=rect_json(response.response.rect);
+        app.studio.info["numericDialog"]["closeRect"]=rect_json(header.close.rect);
+    }
+    if save && let Ok(size)=checked_size(&draft.x,&draft.y,prefs.workflow_mode(),&prefs.model) {
+            app.ui.gen_studio.workspace.custom_size=Some(size);app.ui.gen_studio.workspace.aspect_ratio="custom".into();open=false;
+    }
+    if open {app.studio.numeric=Some(draft);}
 }
 pub fn dropped(app: &mut PhotocraftApp, ctx: &egui::Context, files: &[egui::DroppedFileHandle], at: Option<egui::Pos2>) -> bool {
     if !app.ui.gen_studio.open {
@@ -1116,6 +1191,36 @@ mod tests {
         app
     }
     #[test]
+    fn layer_drop_maps_root_pointer_to_a_palette_on_a_different_dpi() {
+        let mut app=fixture();
+        app.session.execute("file.new",json!({"width":64,"height":48})).unwrap();
+        app.session.execute("layer.new.layer",json!({"name":"Cross-window reference"})).unwrap();
+        app.session.execute("edit.fill",json!({"color":"#cc5533"})).unwrap();
+        let document=app.session.active().unwrap().doc.id.0;
+        let layer=app.session.active().unwrap().active_layer.unwrap().0;
+        let count=app.session.active().unwrap().doc.layers.len();
+        app.ui.gen_studio.open=true;
+        let viewport=crate::genstudio_palette::id();
+        app.studio.viewport=Some(viewport);
+        app.studio.window_rect=Some(Rect::from_min_size(pos2(0.0,0.0),vec2(940.0,650.0)));
+        app.studio.rects=vec![(Slot::Main,Rect::from_min_size(pos2(0.0,40.0),vec2(300.0,300.0)))];
+        let mut input=egui::RawInput::default();
+        input.viewports.insert(egui::ViewportId::ROOT,egui::ViewportInfo{native_pixels_per_point:Some(1.0),inner_rect:Some(Rect::from_min_size(pos2(100.0,100.0),vec2(800.0,600.0))),..Default::default()});
+        input.viewports.insert(viewport,egui::ViewportInfo{parent:Some(egui::ViewportId::ROOT),native_pixels_per_point:Some(1.5),inner_rect:Some(Rect::from_min_size(pos2(800.0,100.0),vec2(940.0,650.0))),..Default::default()});
+        // 1200,250 desktop pixels -> 0,66.67 palette points, beyond the root window.
+        input.events.push(egui::Event::PointerMoved(pos2(1100.0,150.0)));
+        let ctx=egui::Context::default();
+        let _=ctx.run_ui(input,|ui|assert!(layer_drop(&mut app,ui.ctx(),document,layer)));
+        for _ in 0..100 {
+            tick(&mut app,&ctx);
+            if app.studio.main.is_some(){break;}
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert_eq!(app.studio.main.as_ref().map(|r|r.name.as_str()),Some("Cross-window reference"));
+        assert_eq!(app.session.active().unwrap().doc.layers.len(),count);
+        assert!(app.ui.gen_studio.workspace.prompt.is_empty());
+    }
+    #[test]
     fn a_lora_drag_appends_triggers_without_moving_reference_chips_or_changing_adapters() {
         let mut app=fixture();app.ui.gen_studio.open=true;
         let mut harness=egui_kittest::Harness::builder().with_size(vec2(1200.0,900.0)).build_ui_state(|ui,app:&mut PhotocraftApp|{
@@ -1190,7 +1295,89 @@ mod tests {
         assert_eq!(app.ui.gen_studio.workspace.batch, 1);
     }
     #[test]
-    fn selection_button_lives_inside_empty_canvas_and_reference_hides_size_controls() {
+    fn restoring_direct_and_workflow_layers_switches_engine_and_recovers_dimensions_seed() {
+        use photocraft_engine::genstudio::Engine;
+        let image=Image::from_u8(8,8,photocraft_codecs::ChannelLayout::Rgba,[20,80,120,255].repeat(64)).unwrap();
+        let mut app=fixture();
+        for engine in [Some("direct"),None,Some("comfy")] {
+            app.studio.loading.insert(Slot::Main,1);
+            app.session.edit_prefs(|p|p.gen_studio.engine=Engine::Comfy);
+            let workflow=if engine==Some("comfy") {json!({"path":"workflow.json","sha256":"f".repeat(64)})} else {Value::Null};
+            let result=json!({"image":core::encoded(&image).unwrap(),"prompt":"Saved prompt","name":"Layer",
+                "generation":{"engine":engine,"model":"qwen-image-2.1-turbo","negative_prompt":"text","width":768,"height":512,"seed":42,"workflow":workflow,"loras":[]}});
+            apply_layer(&mut app,Slot::Main,true,&result,1).unwrap();
+            assert_eq!(app.session.prefs().gen_studio.engine,if engine==Some("comfy") {Engine::Comfy} else {Engine::Direct});
+            assert_eq!(app.ui.gen_studio.workspace.seed,Some(42));
+            assert_eq!(app.ui.gen_studio.workspace.custom_size,Some([768,512]));
+            assert_eq!(app.ui.gen_studio.workspace.prompt,"Saved prompt");
+            assert_eq!(app.ui.gen_studio.workspace.negative_prompt,"text");
+        }
+    }
+    #[test]
+    fn custom_dimensions_and_seed_validate_atomically_and_round_trip() {
+        let mut app=fixture();
+        app.session.edit_prefs(|p|p.gen_studio.engine=photocraft_engine::genstudio::Engine::Direct);
+        assert!(menu(&mut app,"genstudio.studio.configure",&json!({"customSize":{"width":768,"height":512},"seed":0})).unwrap().is_ok());
+        assert_eq!(output_size(&app.ui.gen_studio.workspace,Some((800,800)),false,"qwen-image-2.1-turbo").unwrap(),(768,512));
+        assert_eq!(custom_label(&app.ui.gen_studio.workspace),"768px:512px");
+        for invalid in [json!({"customSize":{"width":0,"height":512},"seed":7}),json!({"customSize":{"width":767,"height":512}}),json!({"seed":-1}),json!({"seed":1u64<<53})] {
+            assert!(menu(&mut app,"genstudio.studio.configure",&invalid).unwrap().is_err());
+            assert_eq!(app.ui.gen_studio.workspace.seed,Some(0));
+            assert_eq!(app.ui.gen_studio.workspace.custom_size,Some([768,512]));
+        }
+        assert_eq!(checked_size("784","512",false,"fibo-2-edit-turbo").unwrap(),[784,512]);
+        assert!(checked_size("784","512",false,"qwen-image-2.1-turbo").is_err());
+        let data=serde_json::to_vec(&app.ui.gen_studio.workspace).unwrap();
+        let loaded:Workspace=serde_json::from_slice(&data).unwrap();
+        assert_eq!(loaded.custom_size,Some([768,512]));assert_eq!(loaded.seed,Some(0));
+    }
+    #[test]
+    fn custom_dialog_opens_saves_and_reopens_without_changing_size_on_cancel() {
+        use egui_kittest::kittest::Queryable;
+        let mut h=egui_kittest::Harness::builder().with_size(vec2(1200.0,800.0)).wgpu().build_ui_state(|ui,app:&mut PhotocraftApp| {
+            if ui.ctx().fonts(|f|f.families().contains(&egui::FontFamily::Name("medium".into()))) {show(app,ui);}
+        },fixture());
+        PhotocraftApp::setup_context(&h.ctx,crate::theme::ThemeKind::Studio);h.run_steps(5);
+        h.get_by_label("Aspect ratio").click();h.run_steps(3);
+        h.get_by_label("Custom").scroll_to_me();h.run_steps(3);
+        h.get_by_label("Custom").click();h.run_steps(3);
+        if let Some(dir)=std::env::var_os("GENSTUDIO_UI_FIXTURES") {
+            let dir=std::path::PathBuf::from(dir);std::fs::create_dir_all(&dir).unwrap();
+            h.render().unwrap().save(dir.join("custom-size-dialog.png")).unwrap();
+        }
+        assert_eq!(h.state().studio.info["numericDialog"]["fields"].as_array().map(Vec::len),Some(2),"{}",h.state().studio.info);
+        h.get_by_label("Save").click();h.run_steps(3);
+        assert_eq!(h.state().ui.gen_studio.workspace.custom_size,Some([768,512]));
+        assert_eq!(h.state().ui.gen_studio.workspace.aspect_ratio,"custom");
+        assert!(h.state().studio.info["controls"]["resolution"].is_null());
+        h.get_by_label("Aspect ratio").click();h.run_steps(3);
+        h.get_by_label("768px:512px").scroll_to_me();h.run_steps(3);
+        h.get_by_label("768px:512px").click();h.run_steps(3);
+        h.state_mut().studio.numeric.as_mut().unwrap().x="0".into();h.run_steps(3);
+        assert_eq!(h.state().studio.info["numericDialog"]["valid"],false);
+        assert_eq!(h.state().ui.gen_studio.workspace.custom_size,Some([768,512]));
+        h.state_mut().studio.numeric=None;h.run_steps(2);
+        assert_eq!(h.state().ui.gen_studio.workspace.custom_size,Some([768,512]));
+    }
+    #[test]
+    fn a_source_image_offers_source_ratio_or_exact_custom_pixels() {
+        use egui_kittest::kittest::Queryable;
+        let mut app=fixture();
+        let image=Image::from_u8(16,8,photocraft_codecs::ChannelLayout::Rgba,[120,80,20,255].repeat(128)).unwrap();
+        app.studio.main=Some(Reference{id:1,name:"Fixture".into(),png:core::encoded(&image).unwrap(),image,texture:None,selection:false});
+        let mut h=egui_kittest::Harness::builder().with_size(vec2(1200.0,800.0)).build_ui_state(|ui,app:&mut PhotocraftApp| {
+            if ui.ctx().fonts(|f|f.families().contains(&egui::FontFamily::Name("medium".into()))) {show(app,ui);}
+        },app);
+        PhotocraftApp::setup_context(&h.ctx,crate::theme::ThemeKind::Studio);h.run_steps(5);
+        h.get_by_label("Aspect ratio").click();h.run_steps(3);
+        assert!(h.query_by_label("Source").is_some());assert!(h.query_by_label("16:9").is_none());
+        h.get_by_label("Custom").click();h.run_steps(3);h.get_by_label("Save").click();h.run_steps(3);
+        assert_eq!(output_size(&h.state().ui.gen_studio.workspace,Some((16,8)),false,"qwen-image-2.1-turbo").unwrap(),(768,512));
+        h.get_by_label("Aspect ratio").click();h.run_steps(3);h.get_by_label("Source").click();h.run_steps(3);
+        assert_eq!(output_size(&h.state().ui.gen_studio.workspace,Some((16,8)),false,"qwen-image-2.1-turbo").unwrap(),(1024,512));
+    }
+    #[test]
+    fn selection_button_and_custom_size_remain_available_with_a_reference() {
         use egui_kittest::kittest::Queryable;
         let mut app = fixture();
         app.run("file.new", json!({"width":64,"height":64})).unwrap();
@@ -1234,7 +1421,7 @@ mod tests {
             h.state().studio.rects[0].1.contains_rect(h.get_by_label("Use selection").rect()),
             "a loaded reference must still offer the document selection"
         );
-        assert!(h.state().studio.info["controls"]["aspect"].is_null());
+        assert!(h.state().studio.info["controls"]["aspect"].is_array());
         assert!(h.state().studio.info["controls"]["resolution"].is_null());
         h.state_mut().studio.main = None;
         h.state_mut().session.execute("select.deselect", json!({})).unwrap();

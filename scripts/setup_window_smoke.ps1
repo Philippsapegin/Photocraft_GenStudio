@@ -38,6 +38,10 @@ foreach($state in @('ready','success','warning','failed')){
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File (Join-Path $uiRoot 'Setup.ps1') -ValidateOnly -SelfTest -ValidationState $state -ValidationScreenshot $image
     if($LASTEXITCODE){throw ('UI validation failed: '+$state)}
 }
+if(-not $Bundle){
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File (Join-Path $uiRoot 'Setup.ps1') -Preview -ValidateOnly -SelfTest -ValidationScreenshot (Join-Path $folder 'preview.png')
+    if($LASTEXITCODE){throw 'Dev preview allowed an installation or editor launch'}
+}
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File (Join-Path $uiRoot 'Setup.ps1') -ValidateOnly -ValidationScale 1.5 -ValidationScreenshot (Join-Path $folder 'ready-150.png')
 if($LASTEXITCODE){throw 'UI validation failed at 150 percent'}
 $report=@{passed=$true;folder=$folder;uiRoot=$uiRoot;modernExplorerProbe=$true;emptyInitialFolder=$true;modernExplorerOpenedAndCancelled=$true;runnerExitCodes=@(0,1);states=@('ready','success','warning','failed');scales=@(1,1.5);realInference=$false}

@@ -12,6 +12,10 @@ pub struct State {
     #[serde(skip)]
     pub updates_notified: Option<String>,
     pub open: bool,
+    pub palette_position: Option<[f32;2]>,
+    pub palette_size: Option<[f32;2]>,
+    #[serde(skip)]
+    pub palette_live: bool,
     pub collapsed: bool,
     pub settings_open: bool,
     pub advanced_open: bool,
@@ -141,6 +145,7 @@ pub fn menu(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<
         return Some(Ok(json!({"open":false})));
     }
     app.ui.gen_studio.open = open;
+    app.ui.gen_studio.palette_live = false;
     if open {
         crate::genstudio_canvas::opened(app);
     }
@@ -167,7 +172,7 @@ pub(crate) fn floating_header(ui: &mut egui::Ui, key: &str, caption: &str, title
     let gap = ui.spacing().item_spacing.x;
     let collapsed = collapse == Some(true);
     let height = button.max(title.size().y);
-    let width = if collapsed { title.size().x + 2.0 * (button + gap) } else { ui.available_width() };
+    let width = if collapsed { (title.size().x + 2.0 * (button + gap)).min(ui.available_width()) } else { ui.available_width() };
     let (header, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
     let band = header.expand2(egui::vec2(8.0, 4.0));
     let mut corners = ui.visuals().window_corner_radius;
@@ -198,7 +203,7 @@ pub(crate) fn floating_header(ui: &mut egui::Ui, key: &str, caption: &str, title
     let title_rect = header.with_min_x(title_left).with_max_x(close_rect.left() - gap);
     let drag = ui.interact(title_rect, ui.id().with((key, "title-drag")), egui::Sense::click_and_drag());
     ui.scope_builder(egui::UiBuilder::new().max_rect(title_rect).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
-        ui.add(egui::Label::new(title).selectable(false));
+        ui.add(egui::Label::new(title).truncate().selectable(false));
     });
     toggle |= collapse.is_some() && drag.double_clicked();
     FloatingHeader { drag, close, toggle, band }
@@ -250,6 +255,9 @@ fn workspace_header(ui: &mut egui::Ui, model: &str, collapsed: bool) -> Floating
 
 pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     crate::gengate_updates_ui::show(app,ctx);
+    crate::genstudio_palette::show(app,ctx);
+}
+pub(crate) fn show_in_viewport(app: &mut PhotocraftApp, ctx: &egui::Context, native: bool) {
     if let Some(job) = app.session.jobs().into_iter().find(|job| job.state == "running" && job.message.starts_with("Starting"))
         && ((job.command.starts_with("genstudio.fill.") || job.command == "genstudio.studio.generate")
             || job.label == "Remove · Ai Fill"
@@ -329,7 +337,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         expanded.store(ctx);
         let collapsed = app.ui.gen_studio.collapsed;
         let (pointer, down) = ctx.input(|i| (i.pointer.interact_pos(), i.pointer.primary_down()));
-        if let (Some(at), Some([x, y])) = (pointer, app.ui.gen_studio.drag_offset) {
+        if !native && let (Some(at), Some([x, y])) = (pointer, app.ui.gen_studio.drag_offset) {
             // Apply the absolute grab position before drawing this frame. Reading
             // the previous Area rect inside the body dropped every other delta.
             app.ui.gen_studio.window_position = Some([at.x - x, at.y - y]);
@@ -340,6 +348,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         if !down {
             app.ui.gen_studio.drag_offset = None;
         }
+        let palette_frame=egui::Frame::window(&ctx.global_style()).inner_margin(egui::Margin::symmetric(8,4));
         let mut window = egui::Window::new(&caption)
             .title_bar(false)
             .movable(false)
@@ -348,16 +357,20 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             .default_size(egui::vec2(940.0, 650.0))
             .min_size(egui::vec2(680.0, 460.0))
             .max_height((ctx.content_rect().height() - 32.0).max(360.0))
-            .frame(egui::Frame::window(&ctx.global_style()).inner_margin(egui::Margin::symmetric(8, 4)))
+            .frame(palette_frame)
             .resizable(true);
         if collapsed {
             window = window.auto_sized();
         }
-        if let Some([x, y]) = app.ui.gen_studio.window_position.take() {
+        if native {
+            window=window.order(egui::Order::Background).fixed_pos(egui::Pos2::ZERO).fixed_size(ctx.content_rect().size());
+        }
+        if !native && let Some([x, y]) = app.ui.gen_studio.window_position.take() {
             window = window.current_pos(egui::pos2(x, y));
         }
         let mut header = None;
         let response = window.show(ctx, |ui| {
+            if native {ui.set_min_size(ui.available_size());}
             let title = workspace_header(ui, &model, collapsed);
             open = !title.close.clicked();
             header = Some(title);
@@ -393,8 +406,9 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             let drag = &header.drag;
             let toggle = header.toggle;
             let rect = response.response.rect;
-            crate::genstudio_canvas::set_window_rect(app,rect);
-            if down
+            crate::genstudio_canvas::set_window_rect(app,ctx,rect);
+            if native && drag.drag_started() {ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);}
+            if !native && down
                 && drag.is_pointer_button_down_on()
                 && app.ui.gen_studio.drag_offset.is_none()
                 && let Some(origin) = ctx.input(|i| i.pointer.press_origin())
@@ -418,7 +432,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             crate::notices::error(app, e);
         }
     }
-    crate::genstudio_lora_ui::show(app,ctx);
+    if !native || !app.ui.gen_studio.collapsed {crate::genstudio_lora_ui::show(app,ctx);}
 }
 
 fn component(ui: &mut egui::Ui, label: &str, value: &mut String, catalog: &Value, key: &str, default: &str, strength: Option<(&mut f64,&mut Option<u32>)>) -> bool {

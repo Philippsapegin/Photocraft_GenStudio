@@ -92,10 +92,11 @@ def build(args):
     from genstudio.editor_patch import catalog_for
     patches = args.patches.resolve()
     catalog = catalog_for(patches)
-    target = ROOT / "dist" / ("GenGate-" + installer.VERSION + "-windows-x64-addon")
+    target = args.output_dir.resolve() / ("GenGate-" + installer.VERSION + "-windows-x64-addon")
     # A new package is staged next to earlier packages, never recursively removed.
-    if target.exists():
-        raise ValueError("Package staging directory already exists; move it aside before rebuilding: " + str(target))
+    for path in (target, target.parent / (target.name + '.zip'), target.parent / 'SHA256SUMS.txt'):
+        if path.exists():
+            raise ValueError("Release output already exists; use a fresh --output-dir: " + str(path))
     target.mkdir(parents=True)
     runtime = target / "runtime"
     runtime.mkdir()
@@ -189,9 +190,14 @@ def build(args):
         shutil.copyfile(path, destination)
     shutil.copyfile(ROOT / "LICENSE", licenses / "GenGate-GPL-3.0.txt")
     shutil.copyfile(ROOT / "THIRD_PARTY.md", licenses / "THIRD_PARTY.md")
-    if any(entry["hostVersion"] in ("0.12.0", "0.15.1", "0.16.0", "0.17.0", "0.18.0", "0.19.0", "0.20.1") for entry in catalog["patches"]):
+    if (upstream / '.gengate-build/eframe').is_dir():
+        for name in ('LICENSE-MIT', 'LICENSE-APACHE'):
+            destination = licenses / 'eframe' / name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(upstream / '.gengate-build/eframe' / name, destination)
+    if any(entry["hostVersion"] in ("0.12.0", "0.15.1", "0.16.0", "0.17.0", "0.18.0", "0.19.0", "0.20.1", "0.20.2") for entry in catalog["patches"]):
         from prepare_craft_fonts import prepare as prepare_fonts
-        fonts = prepare_fonts("0.17.0" if any(entry["hostVersion"] in ("0.17.0", "0.18.0", "0.19.0", "0.20.1") for entry in catalog["patches"]) else "0.16.0")
+        fonts = prepare_fonts("0.17.0" if any(entry["hostVersion"] in ("0.17.0", "0.18.0", "0.19.0", "0.20.1", "0.20.2") for entry in catalog["patches"]) else "0.16.0")
         for path in (fonts / "fonts").rglob("OFL.txt"):
             destination = licenses / "craft-fonts" / path.relative_to(fonts)
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -226,9 +232,10 @@ def build(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    base = ROOT / ".runtime/photocraft-0.20.1"
+    base = ROOT / ".runtime/photocraft-0.20.2"
     parser.add_argument("--upstream", type=Path, default=base)
     parser.add_argument("--patches", type=Path, required=True, help="Verified editor-patches.json and binary deltas")
     parser.add_argument("--core", type=Path)
     parser.add_argument("--lanpaint", type=Path)
+    parser.add_argument("--output-dir", type=Path, default=ROOT / "dist", help="Fresh release directory; existing assets are never overwritten")
     build(parser.parse_args())

@@ -58,6 +58,21 @@ class MCP:
         text = next((c["text"] for c in result.get("content", []) if c["type"] == "text"), "null")
         return json.loads(text)
 
+    def await_ui(self, timeout=60):
+        # A listening port can precede the first UI frame during font/GPU setup.
+        # Retry only a read whose bridge explicitly says it was never sent.
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                return self.tool("ui_inspect")
+            except RuntimeError as error:
+                message = str(error)
+                if ("control authentication timed out" not in message
+                        or "request was not sent" not in message
+                        or time.monotonic() >= deadline):
+                    raise
+                time.sleep(.08)
+
     def run(self, name, params=None):
         return self.tool("command_run", {"id": name, "params": params or {}})
 

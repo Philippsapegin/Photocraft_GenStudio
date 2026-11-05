@@ -38,7 +38,7 @@ def generate(folder, settings, body, emit, *, configure=None, request=http_json,
                     (folder / f"result-{index}.png").write_bytes(base64.b64decode(image["image"], validate=True))
                     if custom and image.get("mask"):
                         (folder / f"result-{index}-mask.png").write_bytes(base64.b64decode(image["mask"], validate=True))
-                metadata = {"count": len(images)}
+                metadata = {"count": len(images), "images": [{"seed": image["seed"]} for image in images]}
                 if custom:
                     metadata.update(workflow=result.get("workflow", {}), images=[{k: v for k, v in row.items() if k not in ("image", "mask")} | {"hasMask": bool(row.get("mask"))} for row in images])
                 (folder / "results.json").write_text(json.dumps(metadata), encoding="utf-8")

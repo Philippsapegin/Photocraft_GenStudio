@@ -30,7 +30,8 @@ def anchors(path, text, old, new):
     if path.name == 'jobs_ui.rs' and '|| app.jobs.saves.iter().any(|s| s.job == j.id)' in text:
         suffix = ' || app.jobs.saves.iter().any(|s| s.job == j.id)'
         if old == '    if j.elapsed_ms < DIALOG_DELAY_MS {':
-            return old.replace(' {', suffix + ' {'), new.replace(' {', suffix + ' {')
+            prefix = 'j.command == "file.automate.batch" || ' if 'if j.command == "file.automate.batch" || j.elapsed_ms' in text else ''
+            return tuple(value.replace('if j.elapsed_ms', 'if ' + prefix + 'j.elapsed_ms').replace(' {', suffix + ' {') for value in (old, new))
     if path.name == 'lib.rs' and 'remove_pending_target:' in text:
         return old.replace('remove_pending_doc:', 'remove_pending_target:'), new.replace('remove_pending_doc:', 'remove_pending_target:')
     if path.name == 'retouch_ui.rs' and 'o.sample_all.remove' in text and 'json!({"sampleAllLayers": o.sample_all_layers' in old:

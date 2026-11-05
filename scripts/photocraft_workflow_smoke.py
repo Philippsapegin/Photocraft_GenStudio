@@ -72,11 +72,28 @@ def main():
                 except OSError:return False
             until(ready)
             mcp=MCP([str(args.cli),'mcp','--bridge',f'127.0.0.1:{port}','--control-token-file',str(token)],bridge)
+            mcp.await_ui()
             control=lambda method,p=None:mcp.tool('control_call',{'method':method,'params':p or {}})
             menu=lambda name,p=None:control('ui.menu.invoke',{'id':name,'params':p or {}})
-            studio=lambda:menu('genstudio.studio.inspect')
-            def click(rect):control('ui.click',{'x':rect[0]+rect[2]/2,'y':rect[1]+rect[3]/2})
+            studio=lambda:menu('genstudio.studio.inspect') or {}
+            def click(rect):
+                point={'x':rect[0]+rect[2]/2,'y':rect[1]+rect[3]/2}
+                if studio().get('palette',{}).get('native'):
+                    menu('genstudio.studio.configure',{'palette':{'input':[{'kind':'down',**point},{'kind':'up',**point}]}})
+                    until(lambda:studio().get('palette',{}).get('pendingInput')==0)
+                    time.sleep(.08)
+                else:control('ui.click',point)
             def screenshot(name):
+                state=mcp.tool('ui_inspect')
+                if state['genStudio']['open'] and not state['dialogs'] and studio().get('palette',{}).get('native'):
+                    menu('genstudio.studio.configure',{'palette':{'capture':True}})
+                    def captured():
+                        value=menu('genstudio.studio.inspect',{'paletteCapture':True})
+                        return value['capture'] if not value['pending'] else None
+                    value=until(captured)
+                    assert value.get('ok'),value
+                    (folder/name).write_bytes(base64.b64decode(value['result']['base64']))
+                    return
                 for b in mcp.tool('ui_screenshot',{'max_side':1600})['content']:
                     if b['type']=='image':(folder/name).write_bytes(base64.b64decode(b['data']))
             def finished():
@@ -94,6 +111,9 @@ def main():
                 control('ui.set',{'theme':theme})
                 for width in (1100,1600):
                     control('ui.resize',{'width':width,'height':1000})
+                    if studio().get('palette',{}).get('native'):
+                        menu('genstudio.studio.configure',{'palette':{'size':[width,900]}})
+                        until(lambda:abs(studio()['palette']['size'][0]-width)<3)
                     screenshot(f'negative-{theme}-{width}.png')
             control('ui.set',{'theme':'studio'})
             click(studio()['controls']['negativeToggle']);until(lambda:not studio()['negativeOpen'])

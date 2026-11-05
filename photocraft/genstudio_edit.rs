@@ -158,13 +158,18 @@ pub(crate) fn transport(settings: &Settings, folder: &std::path::Path, payload: 
     Ok(())
 }
 
+pub(crate) struct StudioImage {
+    pub bytes: Vec<u8>,
+    pub seed: Option<u64>,
+}
+
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn studio(_: &Settings, _: &serde_json::Value, _: &JobCtx) -> Result<Vec<Vec<u8>>> {
+pub(crate) fn studio(_: &Settings, _: &serde_json::Value, _: &JobCtx) -> Result<Vec<StudioImage>> {
     Err(err("Local generation requires the desktop app"))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn studio(settings: &Settings, payload: &serde_json::Value, ctx: &JobCtx) -> Result<Vec<Vec<u8>>> {
+pub(crate) fn studio(settings: &Settings, payload: &serde_json::Value, ctx: &JobCtx) -> Result<Vec<StudioImage>> {
     use std::fs;
     if std::env::var_os("GENSTUDIO_NO_PROCESS").is_some_and(|v| v == "1") {
         return Err(err("Engine process launch is disabled for validation"));
@@ -176,17 +181,31 @@ pub(crate) fn studio(settings: &Settings, payload: &serde_json::Value, ctx: &Job
     let folder = tempfile::Builder::new().prefix("photocraft-studio-").tempdir().map_err(err)?;
     transport(settings, folder.path(), &serde_json::json!({"settings":settings,"studio":payload}), ctx)?;
     let count = payload["batch"].as_u64().unwrap_or(1).clamp(1, 8);
+    use std::io::Read;
+    let mut records = Vec::new();
+    fs::File::open(folder.path().join("results.json")).map_err(err)?.take(65537).read_to_end(&mut records).map_err(err)?;
+    if records.len() > 65536 { return Err(err("Studio result metadata is too large")); }
+    let records: serde_json::Value = serde_json::from_slice(&records).map_err(err)?;
+    let seeds = result_seeds(&records, count as usize)?;
     let size = (payload["width"].as_u64().unwrap_or(1024) as u32, payload["height"].as_u64().unwrap_or(1024) as u32);
     let mut images = Vec::new();
     for index in 0..count {
         ctx.check()?;
         let path = folder.path().join(format!("result-{index}.png"));
         let image = read_png(&path, size)?;
-        images.push(photocraft_codecs::encode(&image, Format::Png, &EncodeOptions::default()).map_err(err)?);
+        images.push(StudioImage { bytes: photocraft_codecs::encode(&image, Format::Png, &EncodeOptions::default()).map_err(err)?, seed: seeds.get(index as usize).copied() });
     }
     // Retain tempdir ownership until every image was validated and copied.
     let _ = fs::metadata(folder.path()).map_err(err)?;
     Ok(images)
+}
+
+#[cfg(any(test, not(target_arch = "wasm32")))]
+fn result_seeds(records: &serde_json::Value, count: usize) -> Result<Vec<u64>> {
+    let rows = records["images"].as_array().filter(|rows| rows.len() == count && count <= 8 && count > 0)
+        .ok_or_else(|| err("The engine returned incomplete result metadata; update the Studio runtime"))?;
+    if records["count"].as_u64() != Some(count as u64) { return Err(err("The engine returned an incomplete batch")); }
+    rows.iter().map(|row| row["seed"].as_u64().filter(|n| *n < 1 << 53).ok_or_else(|| err("The engine returned an invalid seed"))).collect()
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -241,6 +260,14 @@ mod geometry_tests {
     use super::*;
     use photocraft_geom::Rect;
 
+    #[test]
+    fn actual_batch_seeds_require_complete_bounded_metadata() {
+        use serde_json::json;
+        assert_eq!(result_seeds(&json!({"count":2,"images":[{"seed":0},{"seed":1}]}),2).unwrap(),vec![0,1]);
+        for bad in [json!({"count":2,"images":[{"seed":0}]}),json!({"count":1,"images":[{}]}),json!({"count":1,"images":[{"seed":1u64<<53}]}),json!({"count":1,"images":[{"seed":-1}]})] {
+            assert!(result_seeds(&bad,1).is_err());
+        }
+    }
     #[test]
     fn context_grows_to_the_grid_without_moving_the_original_mask() {
         let canvas = Rect::new(0, 0, 4000, 3000);

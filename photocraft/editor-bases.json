@@ -70,5 +70,14 @@
       "photocraft.exe": "e14eb29519d42f4014eeecc1cd89d0d917088e5bb4076a785bb0f98f273009a7",
       "photocraft-cli.exe": "e56a7ad28cc37b633015175e9e716e196d074c3581c22fe8724c1a2ae80c68ac"
     }
+  },
+  "0.20.2": {
+    "upstream": "7c12f647150f8e7b2e07718f7993b1fcaa57fefe",
+    "archive": "https://github.com/storytold/photocraft/releases/download/v0.20.2/photocraft-0.20.2-windows-x64-portable.zip",
+    "archiveSha256": "d51c2dcd80599259f223c47351566400025d680aab82286f58e97a0bdae159d7",
+    "files": {
+      "photocraft.exe": "3d683b8043fc933a72895bd81c07addab350d553c8fbd2173ba4e0a0d94e25c6",
+      "photocraft-cli.exe": "29e74c2d3bb08356a1e06debd4b088a691b75b28dd6e8a52caf301c836ae2d8d"
+    }
   }
 }

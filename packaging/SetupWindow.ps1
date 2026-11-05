@@ -1,4 +1,4 @@
-param([switch]$ValidateOnly, [string]$ValidationScreenshot = '', [ValidateSet('ready','success','warning','failed')][string]$ValidationState = 'ready', [double]$ValidationScale = 1, [switch]$SelfTest)
+param([switch]$Preview, [switch]$ValidateOnly, [string]$ValidationScreenshot = '', [ValidateSet('ready','success','warning','failed')][string]$ValidationState = 'ready', [double]$ValidationScale = 1, [switch]$SelfTest)
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -6,13 +6,13 @@ Add-Type -Path (Join-Path $PSScriptRoot 'SetupUi.cs') -ReferencedAssemblies Syst
 [System.Windows.Forms.Application]::EnableVisualStyles()
 $bundle = $PSScriptRoot
 $python = Join-Path $bundle 'runtime\.venv\Scripts\python.exe'
-if (-not (Test-Path -LiteralPath $python) -and -not $ValidateOnly) {
+if (-not (Test-Path -LiteralPath $python) -and -not ($ValidateOnly -or $Preview)) {
     [System.Windows.Forms.MessageBox]::Show('Extract the complete GenGate add-on ZIP, then run Setup.cmd. Install PhotoCraft separately first.', 'GenGate') | Out-Null
     exit 1
 }
 $form = New-Object GenGateSetup.ChromeForm
 $form.Preview = [bool]$ValidateOnly
-$form.Text = 'GenGate 0.9.7 - Setup'
+$form.Text = 'GenGate 0.9.8 - Setup'
 $form.Font = New-Object System.Drawing.Font('Segoe UI',9.5)
 $form.ClientSize = New-Object System.Drawing.Size(820,([Math]::Min(870,[System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea.Height-60)))
 $form.MinimumSize = New-Object System.Drawing.Size(760,640)
@@ -30,7 +30,7 @@ function Button([string]$text,[int]$x,[int]$y,[int]$width=94) {
 $header=New-Object System.Windows.Forms.Panel; $header.Width=$form.ClientSize.Width; $header.Dock='Top'; $header.Height=58; $header.BackColor=[GenGateSetup.Palette]::Surface
 $brand=Label 'GG' 23 15 35 29; $brand.BackColor=[GenGateSetup.Palette]::Accent; $brand.ForeColor=[GenGateSetup.Palette]::Background; $brand.TextAlign='MiddleCenter'
 $title=Label 'GenGate' 70 12 180 24; $title.Font=New-Object System.Drawing.Font('Segoe UI',12,[System.Drawing.FontStyle]::Bold)
-$version=Label 'ADD-ON SETUP  /  0.9.7' 70 36 250 18; $version.Font=New-Object System.Drawing.Font('Segoe UI',8); $version.ForeColor=[GenGateSetup.Palette]::Muted
+$version=Label 'ADD-ON SETUP  /  0.9.8' 70 36 250 18; $version.Font=New-Object System.Drawing.Font('Segoe UI',8); $version.ForeColor=[GenGateSetup.Palette]::Muted
 $minimize=Button '_' 724 12 32; $minimize.Anchor='Top,Right'; $minimize.Add_Click({$form.WindowState='Minimized'})
 $titleClose=Button 'x' 764 12 32; $titleClose.Anchor='Top,Right'
 $header.Controls.AddRange(@($brand,$title,$version,$minimize,$titleClose)); $header.Add_MouseDown({if($_.Button -eq 'Left'){$form.DragWindow()}}); $title.Add_MouseDown({if($_.Button -eq 'Left'){$form.DragWindow()}})
@@ -66,7 +66,7 @@ function Browse($field,[bool]$folder=$true) {
 }
 $intro=AddRow '' 51
 $lead=Label 'Local AI tools, inside PhotoCraft.' 0 0 720 25; $lead.Font=New-Object System.Drawing.Font('Segoe UI',12)
-$intro.Controls.Add($lead); $hint=Label 'PhotoCraft 0.20.1  |  Windows x64  |  No editor or model weights bundled' 0 29 730 22; $hint.ForeColor=[GenGateSetup.Palette]::Muted; $hint.Font=New-Object System.Drawing.Font('Segoe UI',8.5); $intro.Controls.Add($hint)
+$intro.Controls.Add($lead); $hint=Label 'PhotoCraft 0.20.2  |  Windows x64  |  No editor or model weights bundled' 0 29 730 22; $hint.ForeColor=[GenGateSetup.Palette]::Muted; $hint.Font=New-Object System.Drawing.Font('Segoe UI',8.5); $intro.Controls.Add($hint)
 $hostCandidates=@((Join-Path $env:LOCALAPPDATA 'Programs\PhotoCraft'),(Join-Path $env:ProgramFiles 'PhotoCraft'))
 foreach($drive in (Get-PSDrive -PSProvider FileSystem)){$hostCandidates+=Join-Path $drive.Root 'Programs\PhotoCraft'}
 $hostDefault='';foreach($candidate in $hostCandidates){if((Test-Path -LiteralPath (Join-Path $candidate 'photocraft.exe')) -and (Test-Path -LiteralPath (Join-Path $candidate 'photocraft-cli.exe'))){$hostDefault=$candidate;break}}
@@ -113,7 +113,14 @@ if($hostDefault){
         if($config.engine -eq 'comfy'){$engine.SelectedIndex=1;$enginePython.Text=$config.comfyPython}
         elseif($config.directPython){$enginePython.Text=$config.directPython;$runtime.SelectedIndex=1}
         $state=Get-Content -LiteralPath (Join-Path $hostDefault '.gengate\state.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-        if($state.package){$installDir.Text=Split-Path (Split-Path $state.package -Parent) -Parent}
+        if($state.package){
+            $installDir.Text=Split-Path (Split-Path $state.package -Parent) -Parent
+            $previousInstall=Join-Path $installDir.Text 'genstudio-install.json'
+            if(Test-Path -LiteralPath $previousInstall){
+                $previousMetadata=Get-Content -LiteralPath $previousInstall -Raw -Encoding UTF8 | ConvertFrom-Json
+                if($null -ne $previousMetadata.desktopShortcut){$desktop.Checked=[bool]$previousMetadata.desktopShortcut}
+            }
+        }
     } catch { } # First installs have no previous configuration.
 }
 UpdateFields
@@ -152,6 +159,7 @@ $timer.Add_Tick({
     }
 })
 $install.Add_Click({
+    if($Preview){return} # Dev-only inspection: never install or launch PhotoCraft.
     if($script:finished){try{& (Join-Path $installDir.Text 'Launch.ps1');$form.Close()}catch{SetStatus 'warning' 'Installed; PhotoCraft could not open' $_.Exception.Message};return}
     if(-not $photocraftDir.Text.Trim() -or -not $modelsDir.Text.Trim()){SetStatus 'warning' 'Choose the installation folders' 'Select PhotoCraft and a shared models folder. An empty models folder is allowed.';return}
     if(($engine.SelectedIndex -eq 1 -or $runtime.SelectedIndex -eq 1) -and -not $enginePython.Text.Trim()){SetStatus 'warning' 'Choose engine Python' 'Select an existing python.exe, or install a separate CUDA runtime.';return}
@@ -170,9 +178,29 @@ function CloseSetup {
 }
 $close.Add_Click({CloseSetup});$titleClose.Add_Click({CloseSetup});$form.Add_KeyDown({if($_.KeyCode -eq 'Escape'){CloseSetup}})
 $form.Add_FormClosing({if($script:child -and -not $script:child.HasExited){$_.Cancel=$true;CloseSetup}})
+function SetValidationState {
+    switch($ValidationState){'success'{CompleteSetup 0} 'warning'{$script:result=[pscustomobject]@{status='installedWithWarnings'};CompleteSetup 0} 'failed'{CompleteSetup 1} default{SetStatus 'ready' 'Ready to install' 'Close PhotoCraft before installing. Existing settings and models are kept.'}}
+}
 if($ValidateOnly){
     $form.StartPosition='Manual';$form.Location=New-Object System.Drawing.Point(-30000,-30000);$form.Show();[System.Windows.Forms.Application]::DoEvents()
     if($SelfTest){
+        if($Preview){
+            $saved=@($photocraftDir.Text,$installDir.Text,$modelsDir.Text,$enginePython.Text)
+            $probeRoot=Join-Path ([IO.Path]::GetTempPath()) ('gengate-preview-probe-'+[guid]::NewGuid().ToString('N'))
+            $photocraftDir.Text=Join-Path $probeRoot 'PhotoCraft';$installDir.Text=Join-Path $probeRoot 'GenGate'
+            $modelsDir.Text=Join-Path $probeRoot 'Models';$enginePython.Text=Join-Path $probeRoot 'python.exe'
+            try{
+                $beforeStatus=$status.Text
+                $install.PerformClick()
+                if($script:child -or $script:requestFile -or $script:logFile -or $script:finished -or $status.Text -ne $beforeStatus){throw 'Preview attempted an installation'}
+                $script:finished=$true;$install.Text='Open PhotoCraft'
+                $install.PerformClick()
+                if(-not $form.Visible -or $status.Text -ne $beforeStatus){throw 'Preview attempted to open PhotoCraft'}
+            }finally{
+                $photocraftDir.Text=$saved[0];$installDir.Text=$saved[1];$modelsDir.Text=$saved[2];$enginePython.Text=$saved[3]
+                $script:finished=$false;$install.Text='Install'
+            }
+        }
         $engineBefore=$engine.SelectedIndex;$runtimeBefore=$runtime.SelectedIndex
         $engine.SelectedIndex=1
         if(-not $pythonRow.Row.Visible -or -not $comfyRow.Row.Visible -or -not $lanpaint.Visible -or $runtime.Enabled){throw 'ComfyUI fields are inconsistent'}
@@ -181,8 +209,8 @@ if($ValidateOnly){
             $scroll.ScrollTo([int]::MaxValue)
             if($body.Height -gt $scroll.Height -and $scroll.Offset -le 0){throw 'Setup options did not scroll'}
             $scroll.ScrollTo(0)
-            $preview=New-Object System.Drawing.Bitmap($form.Width,$form.Height)
-            try{$form.DrawToBitmap($preview,(New-Object System.Drawing.Rectangle(0,0,$form.Width,$form.Height)));$preview.Save([IO.Path]::ChangeExtension($ValidationScreenshot,'comfy.png'),[System.Drawing.Imaging.ImageFormat]::Png)}finally{$preview.Dispose()}
+            $previewBitmap=New-Object System.Drawing.Bitmap($form.Width,$form.Height)
+            try{$form.DrawToBitmap($previewBitmap,(New-Object System.Drawing.Rectangle(0,0,$form.Width,$form.Height)));$previewBitmap.Save([IO.Path]::ChangeExtension($ValidationScreenshot,'comfy.png'),[System.Drawing.Imaging.ImageFormat]::Png)}finally{$previewBitmap.Dispose()}
         }
         $engine.SelectedIndex=0;$runtime.SelectedIndex=0
         if($pythonRow.Row.Visible -or $comfyRow.Row.Visible -or $lanpaint.Visible -or -not $runtime.Enabled){throw 'Separate Direct runtime fields are inconsistent'}
@@ -206,7 +234,7 @@ if($ValidateOnly){
         $photocraftDir.Text=$before
         $script:finished=$false;$install.Text='Install';$log.Text='Ready. Your existing PhotoCraft settings and model files are kept.'
     }
-    switch($ValidationState){'success'{CompleteSetup 0} 'warning'{$script:result=[pscustomobject]@{status='installedWithWarnings'};CompleteSetup 0} 'failed'{CompleteSetup 1} default{SetStatus 'ready' 'Ready to install' 'Close PhotoCraft before installing. Existing settings and models are kept.'}}
+    SetValidationState
     if($ValidationScale -ne 1){
         $fonts=New-Object 'System.Collections.Generic.Dictionary[System.Windows.Forms.Control,System.Drawing.Font]'
         function RememberFonts($parent){$fonts[$parent]=$parent.Font;foreach($c in $parent.Controls){RememberFonts $c}}
@@ -219,4 +247,5 @@ if($ValidateOnly){
     }
     $form.Dispose();$timer.Dispose();Write-Output 'Setup form validated';exit 0
 }
+if($Preview){SetValidationState}
 try{[void]$form.ShowDialog()}finally{$timer.Dispose();$form.Dispose();if($script:child){$script:child.Dispose()}}
