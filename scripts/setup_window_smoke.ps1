@@ -44,6 +44,12 @@ if(-not $Bundle){
 }
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File (Join-Path $uiRoot 'Setup.ps1') -ValidateOnly -ValidationScale 1.5 -ValidationScreenshot (Join-Path $folder 'ready-150.png')
 if($LASTEXITCODE){throw 'UI validation failed at 150 percent'}
-$report=@{passed=$true;folder=$folder;uiRoot=$uiRoot;modernExplorerProbe=$true;emptyInitialFolder=$true;modernExplorerOpenedAndCancelled=$true;runnerExitCodes=@(0,1);states=@('ready','success','warning','failed');scales=@(1,1.5);realInference=$false}
+$resumeFile=Join-Path $folder 'update-resume.json'
+@{photocraftDir=(Join-Path $folder 'PhotoCraft');installDir=(Join-Path $folder 'GenGate');modelsDir=(Join-Path $folder 'Models');comfyDir=(Join-Path $folder 'ComfyUI');comfyPython=(Join-Path $folder 'python.exe');installDirect=$false} | ConvertTo-Json | Set-Content -LiteralPath $resumeFile -Encoding UTF8
+foreach($state in @('ready','failed')){
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File (Join-Path $uiRoot 'Setup.ps1') -ValidateOnly -UpdateEditor -ResumeRequest $resumeFile -ValidationState $state -ValidationScreenshot (Join-Path $folder ('update-'+$state+'.png'))
+    if($LASTEXITCODE){throw ('Update form validation failed: '+$state)}
+}
+$report=@{passed=$true;folder=$folder;uiRoot=$uiRoot;modernExplorerProbe=$true;emptyInitialFolder=$true;modernExplorerOpenedAndCancelled=$true;checkboxMouseAndKeyboard=$true;captionButtons=$true;runnerExitCodes=@(0,1);states=@('ready','success','warning','failed');scales=@(1,1.5);updateResume=$true;realInference=$false}
 $report | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Root '.runtime\release097-setup-ui.json') -Encoding UTF8
 $report | ConvertTo-Json

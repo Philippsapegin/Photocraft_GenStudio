@@ -10,6 +10,13 @@ using System.Threading;
 using System.Windows.Forms;
 
 namespace GenGateSetup {
+    public static class Permissions {
+        public static bool RequiresElevation(string folder){
+            try{using(var file=new FileStream(Path.Combine(folder,"photocraft.exe"),FileMode.Open,FileAccess.Write,FileShare.ReadWrite|FileShare.Delete))return false;}
+            catch(UnauthorizedAccessException){return true;}
+            catch(IOException){return false;}
+        }
+    }
     public static class Palette {
         public static readonly Color Background = Color.FromArgb(27, 27, 29);
         public static readonly Color Surface = Color.FromArgb(36, 36, 39);
@@ -54,25 +61,21 @@ namespace GenGateSetup {
             if(Focused&&ShowFocusCues){var r=ClientRectangle;r.Inflate(-4,-4);ControlPaint.DrawFocusRectangle(e.Graphics,r,Palette.Text,bg);}
         }
     }
-    public class FlatCombo : Control {
-        public System.Collections.Generic.List<string> Items {get;private set;}
-        int selected=-1;
-        public event EventHandler SelectedIndexChanged;
-        public int SelectedIndex {get{return selected;}set{if(value<0||value>=Items.Count)throw new ArgumentOutOfRangeException("value");if(selected==value)return;selected=value;Invalidate();if(SelectedIndexChanged!=null)SelectedIndexChanged(this,EventArgs.Empty);}}
-        public FlatCombo(){Items=new System.Collections.Generic.List<string>();DoubleBuffered=true;TabStop=true;Cursor=Cursors.Hand;BackColor=Palette.Background;ForeColor=Palette.Text;AccessibleRole=AccessibleRole.ComboBox;}
-        void OpenMenu(){if(!Enabled)return;Focus();var menu=new ContextMenuStrip();menu.ShowImageMargin=false;menu.BackColor=Palette.Surface;menu.ForeColor=Palette.Text;menu.Renderer=new ToolStripProfessionalRenderer(new MenuColors());for(int i=0;i<Items.Count;i++){int index=i;var item=new ToolStripMenuItem(Items[i]);item.Checked=i==selected;item.Click+=delegate{SelectedIndex=index;};menu.Items.Add(item);}menu.Closed+=delegate{menu.Dispose();};menu.Show(this,0,Height);}
-        protected override void OnMouseDown(MouseEventArgs e){base.OnMouseDown(e);if(e.Button==MouseButtons.Left)OpenMenu();}
-        protected override bool IsInputKey(Keys key){return key==Keys.Up||key==Keys.Down||base.IsInputKey(key);}
-        protected override void OnKeyDown(KeyEventArgs e){base.OnKeyDown(e);if(e.KeyCode==Keys.Space||e.KeyCode==Keys.Enter){OpenMenu();e.Handled=true;}else if(e.KeyCode==Keys.Down&&selected<Items.Count-1){SelectedIndex=selected+1;e.Handled=true;}else if(e.KeyCode==Keys.Up&&selected>0){SelectedIndex=selected-1;e.Handled=true;}}
-        protected override void OnPaint(PaintEventArgs e){e.Graphics.Clear(BackColor);e.Graphics.SmoothingMode=SmoothingMode.AntiAlias;using(var p=Palette.Round(new Rectangle(0,0,Width-1,Height-1),5))using(var b=new SolidBrush(Palette.Surface))using(var pen=new Pen(Focused?Palette.Accent:Palette.Edge)){e.Graphics.FillPath(b,p);e.Graphics.DrawPath(pen,p);}if(selected>=0)TextRenderer.DrawText(e.Graphics,Items[selected],Font,new Rectangle(10,0,Width-38,Height),Enabled?Palette.Text:Palette.Muted,TextFormatFlags.Left|TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis);using(var pen=new Pen(Palette.Muted,1.5f)){e.Graphics.DrawLines(pen,new Point[]{new Point(Width-22,Height/2-2),new Point(Width-17,Height/2+3),new Point(Width-12,Height/2-2)});}}
-    }
-    public class MenuColors : ProfessionalColorTable {
-        public override Color ToolStripDropDownBackground {get{return Palette.Surface;}}
-        public override Color MenuBorder {get{return Palette.Edge;}}
-        public override Color MenuItemSelected {get{return Color.FromArgb(70,61,101);}}
-        public override Color MenuItemBorder {get{return Palette.Accent;}}
-        public override Color MenuItemSelectedGradientBegin {get{return MenuItemSelected;}}
-        public override Color MenuItemSelectedGradientEnd {get{return MenuItemSelected;}}
+    public class CaptionButton : Button {
+        public bool CloseButton;
+        bool hover;
+        public CaptionButton(){FlatStyle=FlatStyle.Flat;FlatAppearance.BorderSize=0;UseVisualStyleBackColor=false;TabStop=true;}
+        protected override void OnMouseEnter(EventArgs e){hover=true;Invalidate();base.OnMouseEnter(e);}
+        protected override void OnMouseLeave(EventArgs e){hover=false;Invalidate();base.OnMouseLeave(e);}
+        protected override void OnPaint(PaintEventArgs e){
+            e.Graphics.Clear(hover?(CloseButton?Color.FromArgb(185,52,65):Color.FromArgb(54,54,59)):Palette.Surface);
+            float side=Math.Max(8,Height*.28f),x=(Width-side)/2,y=(Height-side)/2;
+            using(var pen=new Pen(Palette.Text,Math.Max(1,Height/32f))){
+                if(CloseButton){e.Graphics.DrawLine(pen,x,y,x+side,y+side);e.Graphics.DrawLine(pen,x+side,y,x,y+side);}
+                else e.Graphics.DrawLine(pen,x,Height/2f,x+side,Height/2f);
+            }
+            if(Focused&&ShowFocusCues){var r=ClientRectangle;r.Inflate(-4,-4);ControlPaint.DrawFocusRectangle(e.Graphics,r);}
+        }
     }
     public class AccentCheck : CheckBox {
         public AccentCheck(){SetStyle(ControlStyles.UserPaint|ControlStyles.OptimizedDoubleBuffer,true);Cursor=Cursors.Hand;}
