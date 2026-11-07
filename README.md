@@ -10,7 +10,7 @@ A work-in-progress suite for [PhotoCraft](https://github.com/storytold/photocraf
 - **Floating Studio:** move the palette beyond the editor window or onto another monitor; its position and size are remembered.
 - **Custom dimensions:** enter exact output width and height in the aspect-ratio list. Repeat generation keeps your original references.
 - **Negative prompt:** Studio's Neg button splits the text area; both source texts are stored with generated layers and restored from them.
-- **Updates:** a warning before PhotoCraft updates replace GenGate's native additions, and independent GenGate release notifications. [Updating safely](docs/UPDATES.md).
+- **Updates:** a shared updater for PhotoCraft and GenGate that keeps engine settings and model folders, plus independent GenGate release notifications. [Updating safely](docs/UPDATES.md).
 - **Preset-based setup:** compatible model components are selected automatically. Advanced settings let you choose your own model, text encoder, VAE and FLUX prompt upsampler, including INT8 and other supported formats.
 - **Native tools, uncluttered workspace:** editing tools stay inside PhotoCraft; configuration lives in **Edit → Preferences → GenGate Settings**.
 - **Constant LoRA:** an optional adapter with adjustable strength for Ai Fill and Remove Brush. It is separate from full image generation.
@@ -46,7 +46,7 @@ Download **[GenGate 0.9.9 Beta](https://github.com/Philippsapegin/Photocraft_Gen
 
 1. Install PhotoCraft separately. Extract **GenGate-0.9.9-windows-x64-addon.zip** and run **Setup.cmd**. This add-on contains binary patches and its local host, **no complete PhotoCraft editor**.
 2. Select your existing **PhotoCraft folder**, a separate GenGate installation folder and a **Models folder**. Reuse your `ComfyUI/models` directory or create a separate one. Models are used in place, without duplicate downloads.
-3. Choose **Direct** or **ComfyUI**. Direct can install a separate CUDA runtime or reuse an existing compatible CUDA Python. A fresh runtime downloads several GB of software.
+3. **Install Direct engine** is enabled by default. It prepares a separate CUDA runtime (several GB) or reuses your previously configured compatible Direct runtime. Optionally select your **ComfyUI folder** and **ComfyUI Python** to configure both engines. Disable Direct only for a ComfyUI-only installation; both ComfyUI fields are then required. Choose the active engine later in PhotoCraft preferences.
 4. Save and close PhotoCraft before installing. Open **PhotoCraft** from Start or the desktop and choose a **Preset** in **Preferences → GenGate Settings**. Setup consolidates the editor shortcuts and removes old GenStudio/GenGate launcher duplicates. Engine startup can be off, on application launch, or on the first AI request.
 
 [Release notes](docs/RELEASE_NOTES_0.9.9.md).
@@ -56,6 +56,8 @@ ComfyUI Studio runs the graph currently open in the browser. Ai Fill and Remove 
 **Compatibility (0.9.9 package):** official **PhotoCraft 0.21.0 Windows x64** binaries. For official PhotoCraft 0.20.2, use [GenGate 0.9.8](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/tag/v0.9.8); for 0.20.1, use [GenGate 0.9.7](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/tag/v0.9.7); for 0.18.0, use [GenGate 0.9.6](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/tag/v0.9.6); for 0.17.0, use [GenGate 0.9.5](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/tag/v0.9.5); for 0.16.0, use [GenGate 0.9.4](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/tag/v0.9.4). Other builds need separate patch adaptation. Setup checks file hashes and refuses unknown builds. It never downgrades an updated editor.
 
 To update GenGate, close PhotoCraft and run Setup into the same **GenGate** folder. The editor's existing profile is preserved. The PhotoCraft shortcut checks for replaced editor files and reapplies a compatible patch; an unknown PhotoCraft update opens normally with a compatibility notice and requires an updated GenGate patch.
+
+If Setup finds an older PhotoCraft, choose **Update PhotoCraft**. It downloads and verifies the supported official release, waits for you to save and close the editor, then updates PhotoCraft and applies GenGate with your saved settings. The editor's **Update and Restart** action opens this same helper. If the offered PhotoCraft version needs a newer GenGate, update GenGate first. See [update details](docs/UPDATES.md).
 
 Run **Uninstall.cmd** in the GenGate folder to restore the original editor. Newer PhotoCraft files, documents and shared models are kept. Software files and recovery backups are retained for reinstalling or manual removal.
 
