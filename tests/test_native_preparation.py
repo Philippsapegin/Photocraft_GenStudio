@@ -101,11 +101,12 @@ class UpdateTransportTests(unittest.TestCase):
             replace(path, old, new)
             self.assertEqual(path.read_text(encoding='utf-8'), changed)
 
-    def test_shared_update_result_keeps_the_native_dialog_and_adds_a_warning_before_install(self):
+    def test_shared_update_result_routes_available_updates_through_gengate(self):
         original = '        #[cfg(not(target_arch = "wasm32"))]\n        app.updates_rt.updater.offer(release_of(release));\n    if app.ui.updates_open {\n        let dialog = craft_update::CheckResultDialog::new(&crate::UPDATE_APP, version);\n'
         changed = prepare_update_notice(original)
         self.assertIn('craft_update::CheckResultDialog::new', changed)
-        self.assertLess(changed.index('photocraft_notice'), changed.index('app.updates_rt.updater.offer('))
+        self.assertLess(changed.index('photocraft_notice'), changed.index('gengate_updates_ui::open_photocraft_update'))
+        self.assertNotIn('app.updates_rt.updater.offer(', changed)
         self.assertEqual(prepare_update_notice(changed), changed)
 
     def test_019_native_move_default_and_composite_guard_are_preserved(self):

@@ -1,5 +1,6 @@
 """Add independent GenGate checks beside PhotoCraft's native updater."""
 from pathlib import Path
+import re
 import shutil
 import sys
 
@@ -19,7 +20,7 @@ def prepare_update_notice(text):
             .open(&mut open).collapsible(false).resizable(false).default_width(440.0).show(ctx, |ui| {
                 ui.label(format!("PhotoCraft {} is available.", release.version));
                 crate::gengate_updates_ui::photocraft_notice(app, ui);
-                if ui.button("Update and Restart").clicked() { app.updates_rt.updater.offer(release_of(&release)); }
+                if ui.button("Update and Restart").clicked() { crate::gengate_updates_ui::open_photocraft_update(app,&release.version); }
             });
         app.ui.updates_open = open;
         return;
@@ -30,6 +31,9 @@ def prepare_update_notice(text):
             anchor='                    ui.label(crate::i18n::fmt(crate::i18n::t("PhotoCraft {version} is available."), &[("version", &release.version)]));'
             if text.count(anchor)!=1:raise RuntimeError('PhotoCraft update notice changed')
             text=text.replace(anchor,anchor+'\n                    crate::gengate_updates_ui::photocraft_notice(app,ui);')
+    text=text.replace('app.updates_rt.updater.offer(release_of(&release));','crate::gengate_updates_ui::open_photocraft_update(app,&release.version);')
+    if text.count('release_of(')==1:
+        text=re.sub(r'/// The release the engine found[^\n]*\n#\[cfg\(not\(target_arch = "wasm32"\)\)\]\nfn release_of\([\s\S]*?\n}\n\n','',text,count=1)
     text=text.replace('assert!(app.updates_rt.updater.prompt_open(), "startup prompt initialized on available release");',
                       'assert!(!app.updates_rt.updater.prompt_open(), "GenGate warning appears before the native update prompt");')
     text=text.replace('// Rendering show() renders the prompt modal', '// Rendering show() displays the compatibility notice first')

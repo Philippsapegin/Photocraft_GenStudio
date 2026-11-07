@@ -50,10 +50,46 @@ fn details(app:&mut PhotocraftApp,ui:&mut egui::Ui) {
 
 pub fn photocraft_notice(app:&mut PhotocraftApp,ui:&mut egui::Ui) {
     ui.add_space(8.0);
-    ui.colored_label(crate::theme::Tokens::get(ui.ctx()).warning,"Updating PhotoCraft may remove GenGate.");
-    ui.label("PhotoCraft replaces the editor files that contain GenGate. Check for a compatible GenGate update before updating PhotoCraft, then reinstall the add-on afterwards.");
+    ui.label("GenGate will verify the official PhotoCraft update and keep your engine, model folders and settings. Save your work, then close PhotoCraft when the update window asks.");
     details(app,ui);
     ui.separator();
+}
+
+#[cfg(any(target_os="windows",test))]
+fn updater_arguments(runtime:&std::path::Path,exe:&std::path::Path,version:&str)->Result<Vec<std::ffi::OsString>,String> {
+    use std::ffi::OsString;
+    if version.len()>128 || !version.bytes().all(|b|b.is_ascii_alphanumeric()||matches!(b,b'.'|b'-'|b'+')) || !version.starts_with(|c:char|c.is_ascii_digit()) {return Err("Invalid PhotoCraft update version".into());}
+    let bundle=runtime.parent().ok_or("The GenGate update package is missing")?;
+    let host=exe.parent().ok_or("The PhotoCraft folder is missing")?;
+    let mut args:Vec<OsString>=["-NoProfile","-ExecutionPolicy","Bypass","-STA","-WindowStyle","Hidden","-File"].into_iter().map(OsString::from).collect();
+    args.push(runtime.join("packaging/Setup.ps1").into_os_string());
+    args.push("-BundleRoot".into());args.push(bundle.as_os_str().to_owned());
+    args.push("-EditorFolder".into());args.push(host.as_os_str().to_owned());
+    args.push("-TargetVersion".into());args.push(version.into());args.push("-UpdateEditor".into());
+    Ok(args)
+}
+
+pub fn open_photocraft_update(app:&mut PhotocraftApp,version:&str) {
+    fn launch(runtime:&std::path::Path,version:&str)->Result<(),String> {
+        #[cfg(target_os="windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            let exe=std::env::current_exe().map_err(|e|e.to_string())?;
+            let args=updater_arguments(runtime,&exe,version)?;
+            if !runtime.join("packaging/Setup.ps1").is_file(){return Err("GenGate Setup is missing. Run the latest GenGate installer.".into());}
+            if std::env::var_os("GENSTUDIO_NO_PROCESS").is_some_and(|v|v=="1"){return Err("External update launch is disabled for validation".into());}
+            std::process::Command::new("powershell.exe").args(args).creation_flags(0x08000000)
+                .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())
+                .spawn().map_err(|e|format!("Could not open GenGate Setup: {e}"))?;
+            Ok(())
+        }
+        #[cfg(not(target_os="windows"))]
+        {let _=(runtime,version);Err("Use the GenGate Windows installer to update this editor.".into())}
+    }
+    app.ui.status=match launch(std::path::Path::new(&app.session.prefs().gen_studio.runtime_root),version) {
+        Ok(())=>"Update window opened. Save your work and close PhotoCraft there to continue.".into(),
+        Err(error)=>error,
+    };
 }
 
 pub fn show(app:&mut PhotocraftApp,ctx:&egui::Context) {
@@ -70,6 +106,16 @@ mod tests {
     use crate::Services;
     use photocraft_engine::{Session,gengate_updates::release};
     #[test]
+    fn editor_update_uses_the_same_setup_with_literal_paths_and_target() {
+        let args=updater_arguments(std::path::Path::new("addon/versions/current/runtime"),std::path::Path::new("editor/photocraft.exe"),"0.21.0").unwrap();
+        let strings:Vec<_>=args.iter().map(|s|s.to_string_lossy().into_owned()).collect();
+        assert!(strings.windows(2).any(|w|w==["-BundleRoot","addon/versions/current"]));
+        assert!(strings.windows(2).any(|w|w==["-EditorFolder","editor"]));
+        assert!(strings.windows(2).any(|w|w==["-TargetVersion","0.21.0"]));
+        assert_eq!(strings.last().unwrap(),"-UpdateEditor");
+        for bad in ["", "0.21.0 -File evil.ps1", "https://evil", "-UpdateEditor"] {assert!(updater_arguments(std::path::Path::new("runtime"),std::path::Path::new("editor/app.exe"),bad).is_err());}
+    }
+    #[test]
     fn photocraft_warning_offers_the_available_addon_update() {
         use egui_kittest::kittest::Queryable;
         let mut app=PhotocraftApp::new(Session::new(),Services::default());
@@ -80,7 +126,7 @@ mod tests {
             photocraft_notice(app,ui);
         },app);
         h.run_steps(6);
-        assert!(h.query_by_label("Updating PhotoCraft may remove GenGate.").is_some());
+        assert!(h.query_by_label("GenGate will verify the official PhotoCraft update and keep your engine, model folders and settings. Save your work, then close PhotoCraft when the update window asks.").is_some());
         assert!(h.query_by_label("GenGate 99.0.0 is available.").is_some());
         assert!(h.query_by_label("Update GenGate…").is_some());
     }
