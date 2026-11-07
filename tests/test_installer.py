@@ -17,6 +17,126 @@ spec.loader.exec_module(installer)
 
 
 class InstallerTests(unittest.TestCase):
+    def test_incompatible_editor_returns_guidance_instead_of_installation_failure(self):
+        guidance = {'state':'updatePhotoCraft','compatible':False,'message':'Update PhotoCraft first.'}
+        output = StringIO()
+        with patch('sys.argv',['installer','--request','fixture.json']), patch.object(installer,'read_json',return_value=self.request()), \
+             patch.object(installer,'install',side_effect=editor_patch.CompatibilityError('mismatch')), \
+             patch('genstudio.setup_compatibility.preflight',return_value=guidance), redirect_stdout(output):
+            code = installer.main()
+        self.assertEqual(code, 2)
+        self.assertNotIn('ERROR:', output.getvalue())
+        self.assertIn('needsPhotoCraft', output.getvalue())
+        self.assertEqual(output.getvalue().splitlines()[-1], guidance['message'])
+
+    def comfy_fixture(self):
+        folder = self.root / 'ComfyUI'
+        (folder / 'custom_nodes/LanPaint').mkdir(parents=True)
+        (folder / 'main.py').write_text('# synthetic ComfyUI, never execute')
+        return folder
+
+    def test_checkbox_setup_installs_direct_and_comfy_together(self):
+        comfy = self.comfy_fixture()
+        request = self.request(installDirect=True, comfyDir=str(comfy), comfyPython='comfy/python.exe')
+        with patch.object(installer, 'check_python', return_value='comfy/python.exe') as inspect, \
+             patch.object(installer, 'install_direct', return_value='private/direct.exe') as direct, \
+             patch('genstudio.models.resolve'):
+            installer.install(request, self.bundle, shortcuts=False)
+        settings = installer.read_json(self.profile / 'preferences.json')['genStudio']
+        self.assertEqual(settings['engine'], 'direct')
+        self.assertEqual(settings['directPython'], 'private/direct.exe')
+        self.assertEqual(settings['comfyPython'], 'comfy/python.exe')
+        self.assertEqual(settings['comfyDir'], str(comfy))
+        self.assertTrue((comfy / 'custom_nodes/GenGate/gengate-nodes.json').is_file())
+        direct.assert_called_once()
+        inspect.assert_called_once_with('comfy/python.exe')
+
+    def test_checkbox_comfy_only_skips_cuda_and_uses_one_photocraft_identity(self):
+        comfy = self.comfy_fixture()
+        installer.write_json(self.profile / 'preferences.json', {'genStudio': {
+            'directPython': 'old/direct.exe', 'directStartup': 'appStart'}})
+        request = self.request(installDirect=False, comfyDir=str(comfy), comfyPython='comfy/python.exe', desktopShortcut=False)
+        with patch.object(installer, 'check_python', return_value='comfy/python.exe') as inspect, \
+             patch.object(installer, 'install_direct', side_effect=AssertionError('No CUDA installation')), \
+             patch('genstudio.windows_shortcuts.repair') as repair, \
+             patch('genstudio.models.resolve', side_effect=AssertionError('ComfyUI workflow owns its models')):
+            installer.install(request, self.bundle)
+        settings = installer.read_json(self.profile / 'preferences.json')['genStudio']
+        self.assertEqual(settings['engine'], 'comfy')
+        self.assertEqual(settings['directPython'], '')
+        self.assertEqual(settings['directStartup'], 'off')
+        self.assertEqual(settings['comfyPython'], 'comfy/python.exe')
+        metadata = installer.read_json(self.destination / 'genstudio-install.json')
+        self.assertFalse(metadata['directInstalled'])
+        self.assertTrue(metadata['desktopShortcut'])
+        repair.assert_called_once_with(self.destination.resolve(), self.host.resolve(), desktop=True)
+        inspect.assert_called_once_with('comfy/python.exe')
+
+    def test_checkbox_comfy_configuration_is_validated_before_any_install(self):
+        for direct, folder, python in ((False, '', ''), (False, 'folder', ''), (True, '', 'python.exe'), (True, 'missing', 'python.exe')):
+            with self.subTest(direct=direct, folder=folder), patch.object(installer, 'install_direct') as download:
+                with self.assertRaisesRegex(ValueError, 'ComfyUI'):
+                    installer.install(self.request(installDirect=direct, comfyDir=folder, comfyPython=python), self.bundle, shortcuts=False)
+                download.assert_not_called()
+            self.assertFalse(self.destination.exists())
+            self.assertEqual({name: (self.host/name).read_bytes() for name in editor_patch.FILES}, self.originals)
+
+    def test_checkbox_update_reuses_direct_and_keeps_active_comfy(self):
+        existing = self.root / 'private Python.exe'
+        existing.write_bytes(b'never execute')
+        previous = {'engine': 'comfy', 'directPython': str(existing), 'comfyPython': 'comfy/python.exe',
+                    'comfyDir': 'my ComfyUI', 'directStartup': 'off', 'fillWorkflow': 'keep.json'}
+        installer.write_json(self.profile / 'preferences.json', {'genStudio': previous, 'unrelated': 'keep'})
+        with patch.object(installer, 'check_python', return_value=str(existing)) as inspect, \
+             patch.object(installer, 'install_direct', side_effect=AssertionError('Existing Direct must be reused')), \
+             patch('genstudio.models.resolve'):
+            installer.install(self.request(installDirect=True, comfyDir='', comfyPython=''), self.bundle, shortcuts=False)
+        prefs = installer.read_json(self.profile / 'preferences.json')
+        for key, value in previous.items():
+            self.assertEqual(prefs['genStudio'][key], value)
+        self.assertEqual(prefs['unrelated'], 'keep')
+        inspect.assert_called_once_with(str(existing), direct=True)
+
+    def test_update_recovers_python_and_folders_from_installed_runtime(self):
+        existing = self.root / 'private Python.exe'
+        existing.write_bytes(b'never execute')
+        prior_runtime = self.destination / 'versions/previous/runtime'
+        prior_runtime.mkdir(parents=True)
+        saved = {'engine':'direct', 'directPython':str(existing), 'directStartup':'off',
+                 'modelsDir':str(self.models), 'comfyDir':'saved comfy', 'comfyPython':'saved python',
+                 'fillWorkflow':'keep.json', 'runtimeRoot':str(prior_runtime)}
+        installer.write_json(prior_runtime / 'config.photocraft.json', saved)
+        installer.write_json(self.destination / 'genstudio-install.json', {'installMode':'overlay',
+            'host':str(self.host), 'runtime':str(prior_runtime)})
+        installer.write_json(self.profile / 'preferences.json', {'unrelated':'keep'})
+        with patch.object(installer, 'check_python', return_value=str(existing)), \
+             patch.object(installer, 'install_direct', side_effect=AssertionError('No repeated Direct download')), \
+             patch('genstudio.models.resolve'):
+            installer.install(self.request(installDirect=True, comfyDir='', comfyPython=''), self.bundle, shortcuts=False)
+        value = installer.read_json(self.profile / 'preferences.json')
+        for key in ('modelsDir','comfyDir','comfyPython','directPython','fillWorkflow'):
+            self.assertEqual(value['genStudio'][key], saved[key])
+        self.assertEqual(value['unrelated'], 'keep')
+
+    def test_prepared_direct_runtime_is_reused_after_a_retry(self):
+        runtime=self.root/'prepared runtime';python=runtime/'.runtime/qwen-direct/python.exe'
+        python.parent.mkdir(parents=True);python.write_bytes(b'never execute')
+        with patch.object(installer,'check_python',return_value=str(python)) as inspect, patch.object(installer,'run_logged') as download:
+            self.assertEqual(installer.install_direct(runtime),str(python))
+        inspect.assert_called_once_with(python,direct=True)
+        download.assert_not_called()
+
+    def test_checkbox_default_prepares_private_direct_without_comfy(self):
+        with patch.object(installer, 'check_python', side_effect=AssertionError('No external Python selected')), \
+             patch.object(installer, 'install_direct', return_value='private/direct.exe') as download, \
+             patch('genstudio.models.resolve'):
+            installer.install(self.request(installDirect=True, comfyDir='', comfyPython=''), self.bundle, shortcuts=False)
+        settings = installer.read_json(self.profile / 'preferences.json')['genStudio']
+        self.assertEqual(settings['engine'], 'direct')
+        self.assertEqual(settings['directPython'], 'private/direct.exe')
+        self.assertEqual(settings['comfyPython'], '')
+        download.assert_called_once()
+
     def test_terminal_result_distinguishes_installed_notes_and_real_failure(self):
         for warnings, failure, status, code in (([], None, 'installed', 0),
                                                (['synthetic shortcut warning'], None, 'installedWithWarnings', 0),

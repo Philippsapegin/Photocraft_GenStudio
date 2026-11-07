@@ -116,6 +116,7 @@ def build(args):
     shutil.copyfile(ROOT / "photocraft/direct-requirements.txt", destination / "direct-requirements.txt")
     shutil.copyfile(ROOT / "photocraft/flux-requirements.txt", destination / "flux-requirements.txt")
     shutil.copyfile(ROOT / "photocraft/flux3-models.json", destination / "flux3-models.json")
+    shutil.copyfile(ROOT / "photocraft/editor-bases.json", destination / "editor-bases.json")
     for name in ('fibo2-models.json', 'fibo-requirements.txt'):
         shutil.copyfile(ROOT / 'photocraft' / name, destination / name)
     for name in ("segmentation-models.json", "segmentation-requirements.txt"):
@@ -168,8 +169,8 @@ def build(args):
     subprocess.run([str(python_dir / 'python.exe'), '-m', 'pip', 'install', '--disable-pip-version-check',
         '--only-binary=:all:', '--no-deps', '--target', str(runtime / '.runtime/fibo-core/deps'),
         '-r', str(runtime / 'photocraft/fibo-requirements.txt')], check=True)
-    # LanPaint is source code, including its license. Install it into ComfyUI only
-    # if the user explicitly selects the setup checkbox and it does not exist.
+    # LanPaint is source code, including its license. Install it only when
+    # ComfyUI is configured and the extension does not already exist.
     copy_tree(lanpaint_source(args.lanpaint), runtime / "third_party/LanPaint",
               exclude=("examples", "example_workflows", "Example.JPG", "Nodes.JPG", ".github", ".vscode"))
     licenses = target / "licenses"

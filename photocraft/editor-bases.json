@@ -87,6 +87,99 @@
     "files": {
       "photocraft.exe": "da92c5e369fdd74f679018b6d605f6337435fa0fc1b00b09773012cbba8b9ca6",
       "photocraft-cli.exe": "0f99d6f89826f7eba632ca1261dcc80d008917646806c559ca03d5e32c479e0a"
+    },
+    "portableFiles": {
+      "ATTRIBUTION.md": {
+        "sha256": "ebd6a550566921c2050fbe3c73ad6e5e9433e060538e1e455efdf3a8e3668f35",
+        "size": 33003
+      },
+      "LICENSE-APACHE": {
+        "sha256": "eb3d7b5485466acbd81f2b496f595ab637d2792e268206b27d99e793bdb67549",
+        "size": 10351
+      },
+      "LICENSE-MIT": {
+        "sha256": "77c414bd870a0cc1a5ec06e7aeae0d379713d1d5d2d38e8d0903002e4d572537",
+        "size": 1123
+      },
+      "NOTICE": {
+        "sha256": "995e7e3974e8828421e33997db176c1598dd830ca97f1b276d030e26b2246309",
+        "size": 4789
+      },
+      "OFL-biz-ud-mincho.txt": {
+        "sha256": "9c244a5edd2525aa4aa43dd714d7de00f3b3591a522d82d724db3644b5a95568",
+        "size": 4501
+      },
+      "OFL-biz-ud-pgothic.txt": {
+        "sha256": "062c81ae55b5ddd56c08331c8fe86598c1ef7f4453560c74706427a008b68534",
+        "size": 4501
+      },
+      "OFL-lxgw-wenkai-lite.txt": {
+        "sha256": "7752fbb4e6c855f73a57a30caac80f583115658c656e11383d741571ddfa8882",
+        "size": 5270
+      },
+      "OFL-nanum-gothic.txt": {
+        "sha256": "6bca0c1a8c713fa5e703c5427a273ea736181c558312962569c28b4cb390fee3",
+        "size": 4630
+      },
+      "OFL-noto-sans-arabic.txt": {
+        "sha256": "3b7e321615e412e5fbb9eab5bf1c0a4cb84c732d3d5a9e9e3822972d5fb70b97",
+        "size": 4475
+      },
+      "OFL-noto-sans-cjk-sc.txt": {
+        "sha256": "88f117575237307bdd86a17ef15e21790fc9a662fe4dfb103ca1ca077f0d9982",
+        "size": 4393
+      },
+      "OFL-noto-sans-devanagari.txt": {
+        "sha256": "41221cfdd268fa8e338829cccec0526e0200a0ce9e0bc3c627254c12a99d3a98",
+        "size": 4479
+      },
+      "OFL-noto-sans-georgian.txt": {
+        "sha256": "2c9d69cc13d29394783a99d12a823fd6bc4b2069e6ce795a5515ae187e858da7",
+        "size": 4477
+      },
+      "OFL-noto-sans-hebrew.txt": {
+        "sha256": "1acb8a4cf8e3d441eb573174faab52139071fee5cfa5e3e3f148becf90a54631",
+        "size": 4475
+      },
+      "OFL-noto-sans-symbols-2.txt": {
+        "sha256": "dee1e0758c6ce86a7aee4aa812387de573fbe1b9a78bfc8332515fac2762aba5",
+        "size": 4476
+      },
+      "OFL-noto-sans-symbols.txt": {
+        "sha256": "dee1e0758c6ce86a7aee4aa812387de573fbe1b9a78bfc8332515fac2762aba5",
+        "size": 4476
+      },
+      "OFL-noto-sans-thai.txt": {
+        "sha256": "0e4067898723c9acddf967edda99a5ed2088cd857a8e9949084f609358efe38a",
+        "size": 4473
+      },
+      "OFL-shippori-mincho.txt": {
+        "sha256": "0aef534f5885c2f30b360ed5fb09ea4661a40ec62845c35f8354e26d7977d87d",
+        "size": 4492
+      },
+      "photocraft-cli.exe": {
+        "sha256": "0f99d6f89826f7eba632ca1261dcc80d008917646806c559ca03d5e32c479e0a",
+        "size": 117072760
+      },
+      "photocraft.exe": {
+        "sha256": "da92c5e369fdd74f679018b6d605f6337435fa0fc1b00b09773012cbba8b9ca6",
+        "size": 153668984
+      },
+      "portable.txt": {
+        "sha256": "411be83de7d405daed2d918c6ccf87d97cd554e1306f2995821896f0e4487f19",
+        "size": 610
+      },
+      "README.md": {
+        "sha256": "a230e5012cdcac95a2b6a577b44ca124fe6f429f487f4dad72a4a835d72fad82",
+        "size": 37187
+      }
+    },
+    "publisher": "Learning Machines Inc",
+    "msi": {
+      "url": "https://github.com/storytold/photocraft/releases/download/v0.21.0/photocraft-0.21.0-windows-x64.msi",
+      "sha256": "2147a3b0993f80dee764fc984e2b72258b73cff7a0501a58c5f33027b96e1ec1",
+      "size": 111988736,
+      "upgradeCode": "{D9660F32-2D0A-4ABE-B73D-17BE25F1542C}"
     }
   }
 }

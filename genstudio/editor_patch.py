@@ -15,6 +15,10 @@ FILES = ("photocraft.exe", "photocraft-cli.exe")
 MAX_BINARY = 256 * 1024 * 1024
 
 
+class CompatibilityError(ValueError):
+    """No patch applies to the editor currently on disk."""
+
+
 def sha256(path):
     with Path(path).open("rb") as stream:
         return hashlib.file_digest(stream, "sha256").hexdigest()
@@ -114,7 +118,7 @@ def choose_patch(host, catalog):
         if len(sources) == len(FILES):
             return entry, sources, current
     versions = ", ".join(p["hostVersion"] for p in catalog["patches"])
-    raise ValueError("This PhotoCraft build has no compatible GenGate patch (supported: " + versions
+    raise CompatibilityError("This PhotoCraft build has no compatible GenGate patch (supported: " + versions
                      + "). PhotoCraft may have updated. Get a compatible GenGate update; the editor will not be downgraded.")
 
 
@@ -183,11 +187,17 @@ def recover(host, profile):
         from .installation import ROOT_FILES, pending
         root = Path(plan.get("installationRoot", "")).resolve()
         owner = pending(root)
-        if (plan.get("format") != 2 or not owner or owner["host"] != str(host)
+        if (plan.get("format") not in (2, 3) or not owner or owner["host"] != str(host)
                 or owner["profile"] != str(profile) or root == host
                 or root.is_relative_to(host) or host.is_relative_to(root)):
             raise ValueError("Invalid GenGate installation recovery record")
         allowed |= {root / name for name in ROOT_FILES}
+        if plan.get('format') == 3:
+            manifest = official_manifest(plan.get('officialVersion'))
+            for relative in plan.get('officialFiles', []):
+                if relative not in manifest or relative in FILES or relative == 'portable.txt':
+                    raise ValueError('Invalid official PhotoCraft recovery file')
+                allowed.add(safe_path(host, relative))
         plan = plan["changes"]
     # Validate every path and rollback source before making any recovery changes.
     for item in plan:
@@ -203,6 +213,8 @@ def recover(host, profile):
                 raise ValueError("GenGate recovery backup is missing or corrupt")
     for item in reversed(plan):
         path = Path(item["path"])
+        if (sha256(path) if path.is_file() else None) == item['before']:
+            continue
         if item["before"]:
             _atomic(path, backup_file(host, item["before"]))
         else:
@@ -210,7 +222,15 @@ def recover(host, profile):
     journal.unlink()
 
 
-def transaction(host, profile, changes, installation_root=None):
+def official_manifest(version):
+    path = Path(__file__).resolve().parents[1] / 'photocraft/editor-bases.json'
+    value = read(path).get(version, {}).get('portableFiles')
+    if not isinstance(value, dict) or not value:
+        raise ValueError('No verified PhotoCraft file manifest is available for this version')
+    return value
+
+
+def transaction(host, profile, changes, installation_root=None, *, official_version=None, official_files=(), cancel=None):
     recover(host, profile)
     plan = []
     for path, data in changes:
@@ -227,9 +247,15 @@ def transaction(host, profile, changes, installation_root=None):
         plan.append({"path": str(path), "before": before, "after": after})
     journal = host / ".gengate/journal.json"
     record = plan if installation_root is None else {"format": 2, "installationRoot": str(installation_root), "changes": plan}
+    if official_version is not None:
+        if installation_root is None:
+            raise ValueError('An editor update requires an owned GenGate installation stage')
+        record.update(format=3, officialVersion=official_version, officialFiles=list(official_files))
     _atomic(journal, encoded(record))
     try:
         for path, data in changes:
+            if cancel is not None:
+                cancel()
             item = next((item for item in plan if item["path"] == str(path)), None)
             if item is None:
                 continue
@@ -245,7 +271,7 @@ def transaction(host, profile, changes, installation_root=None):
         raise
 
 
-def apply(package, host, settings, preferences, profile, version, *, installation_root=None, installation_changes=None, _lock_held=False):
+def apply(package, host, settings, preferences, profile, version, *, installation_root=None, installation_changes=None, _lock_held=False, official=None):
     import bsdiff4
     host = host_folder(host)
     profile = profile.resolve()
@@ -253,7 +279,12 @@ def apply(package, host, settings, preferences, profile, version, *, installatio
     from contextlib import nullcontext
     with nullcontext() if _lock_held else locked(host):
         recover(host, profile)
-        entry, sources, current = choose_patch(host, catalog_for(package))
+        if official is None:
+            entry, sources, current = choose_patch(host, catalog_for(package))
+        else:
+            entry, sources, _ = choose_patch(official.root, catalog_for(package))
+            current = {name: sha256(host / name) for name in FILES}
+            official.validate()
         old = state_for(host)
         prepared = []
         scratch = host / ".gengate/staging"
@@ -264,6 +295,8 @@ def apply(package, host, settings, preferences, profile, version, *, installatio
                 if source.stat().st_size != spec["baseSize"] or sha256(source) != spec["baseSha256"]:
                     raise ValueError("Original PhotoCraft changed during setup")
                 backup = backup_file(host, spec["baseSha256"])
+                if backup.exists() and sha256(backup) != spec['baseSha256']:
+                    raise ValueError('A GenGate original-file backup was modified')
                 if not backup.exists():
                     _atomic(backup, source)
                 if current[name] == spec["targetSha256"]:
@@ -294,7 +327,11 @@ def apply(package, host, settings, preferences, profile, version, *, installatio
                        (state_path(host), encoded(new_state))]
             if installation_changes is not None:
                 changes = [*installation_changes(new_state), *changes]
-            transaction(host, profile, changes, installation_root)
+            extras = official.extra_changes(host) if official is not None else []
+            transaction(host, profile, [*changes, *extras], installation_root,
+                        official_version=entry['hostVersion'] if extras else None,
+                        official_files=[str(p.relative_to(host).as_posix()) for p, _ in extras],
+                        cancel=official.cancel if official is not None else None)
         finally:
             for _, output in prepared:
                 output.unlink(missing_ok=True)
