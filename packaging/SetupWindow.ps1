@@ -12,7 +12,7 @@ if (-not (Test-Path -LiteralPath $python) -and -not ($ValidateOnly -or $Preview)
 }
 $form = New-Object GenGateSetup.ChromeForm
 $form.Preview = [bool]$ValidateOnly
-$form.Text = 'GenGate 0.9.8 - Setup'
+$form.Text = 'GenGate 0.9.9 - Setup'
 $form.Font = New-Object System.Drawing.Font('Segoe UI',9.5)
 $form.ClientSize = New-Object System.Drawing.Size(820,([Math]::Min(870,[System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea.Height-60)))
 $form.MinimumSize = New-Object System.Drawing.Size(760,640)
@@ -30,7 +30,7 @@ function Button([string]$text,[int]$x,[int]$y,[int]$width=94) {
 $header=New-Object System.Windows.Forms.Panel; $header.Width=$form.ClientSize.Width; $header.Dock='Top'; $header.Height=58; $header.BackColor=[GenGateSetup.Palette]::Surface
 $brand=Label 'GG' 23 15 35 29; $brand.BackColor=[GenGateSetup.Palette]::Accent; $brand.ForeColor=[GenGateSetup.Palette]::Background; $brand.TextAlign='MiddleCenter'
 $title=Label 'GenGate' 70 12 180 24; $title.Font=New-Object System.Drawing.Font('Segoe UI',12,[System.Drawing.FontStyle]::Bold)
-$version=Label 'ADD-ON SETUP  /  0.9.8' 70 36 250 18; $version.Font=New-Object System.Drawing.Font('Segoe UI',8); $version.ForeColor=[GenGateSetup.Palette]::Muted
+$version=Label 'ADD-ON SETUP  /  0.9.9' 70 36 250 18; $version.Font=New-Object System.Drawing.Font('Segoe UI',8); $version.ForeColor=[GenGateSetup.Palette]::Muted
 $minimize=Button '_' 724 12 32; $minimize.Anchor='Top,Right'; $minimize.Add_Click({$form.WindowState='Minimized'})
 $titleClose=Button 'x' 764 12 32; $titleClose.Anchor='Top,Right'
 $header.Controls.AddRange(@($brand,$title,$version,$minimize,$titleClose)); $header.Add_MouseDown({if($_.Button -eq 'Left'){$form.DragWindow()}}); $title.Add_MouseDown({if($_.Button -eq 'Left'){$form.DragWindow()}})
@@ -66,7 +66,7 @@ function Browse($field,[bool]$folder=$true) {
 }
 $intro=AddRow '' 51
 $lead=Label 'Local AI tools, inside PhotoCraft.' 0 0 720 25; $lead.Font=New-Object System.Drawing.Font('Segoe UI',12)
-$intro.Controls.Add($lead); $hint=Label 'PhotoCraft 0.20.2  |  Windows x64  |  No editor or model weights bundled' 0 29 730 22; $hint.ForeColor=[GenGateSetup.Palette]::Muted; $hint.Font=New-Object System.Drawing.Font('Segoe UI',8.5); $intro.Controls.Add($hint)
+$intro.Controls.Add($lead); $hint=Label 'PhotoCraft 0.21.0  |  Windows x64  |  No editor or model weights bundled' 0 29 730 22; $hint.ForeColor=[GenGateSetup.Palette]::Muted; $hint.Font=New-Object System.Drawing.Font('Segoe UI',8.5); $intro.Controls.Add($hint)
 $hostCandidates=@((Join-Path $env:LOCALAPPDATA 'Programs\PhotoCraft'),(Join-Path $env:ProgramFiles 'PhotoCraft'))
 foreach($drive in (Get-PSDrive -PSProvider FileSystem)){$hostCandidates+=Join-Path $drive.Root 'Programs\PhotoCraft'}
 $hostDefault='';foreach($candidate in $hostCandidates){if((Test-Path -LiteralPath (Join-Path $candidate 'photocraft.exe')) -and (Test-Path -LiteralPath (Join-Path $candidate 'photocraft-cli.exe'))){$hostDefault=$candidate;break}}

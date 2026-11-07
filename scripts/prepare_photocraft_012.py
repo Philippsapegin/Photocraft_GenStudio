@@ -12,6 +12,8 @@ def table(text, name):
 
 
 def anchors(path, text, old, new):
+    if path.name in ('prefs.rs', 'menu_catalog.rs', 'menus.rs') and ('"Plugins"' in text or '"Plugins…"' in text):
+        old, new = old.replace('"Plug-ins', '"Plugins'), new.replace('"Plug-ins', '"Plugins')
     checkbox = 'crate::widgets::checkbox(ui, &mut o.remove_new_layer, tl!("Create a new layer"));'
     guarded = 'ui.add_enabled_ui(composite, |ui| crate::widgets::checkbox(ui, &mut o.remove_new_layer, tl!("Create a new layer")));'
     if path.name == 'retouch_ui.rs' and guarded in text and checkbox in old:
@@ -29,6 +31,8 @@ def anchors(path, text, old, new):
         new = new.replace('        draw_drag_preview(app, &painter, &xf);', '    draw_drag_preview(app, painter, xf);').replace('crate::genstudio_fill_ui::show(app, ui, &xf, idx)', 'crate::genstudio_fill_ui::show(app, ui, xf, idx)').replace('crate::genstudio_ai_ui::show_bar(app, ui, &xf, idx)', 'crate::genstudio_ai_ui::show_bar(app, ui, xf, idx)').replace('        if app.session.active_index()', '    if app.session.active_index()')
     if path.name == 'jobs_ui.rs' and '|| app.jobs.saves.iter().any(|s| s.job == j.id)' in text:
         suffix = ' || app.jobs.saves.iter().any(|s| s.job == j.id)'
+        if '|| place || app.jobs.saves.iter().any(|s| s.job == j.id)' in text:
+            suffix = ' || place' + suffix
         if old == '    if j.elapsed_ms < DIALOG_DELAY_MS {':
             prefix = 'j.command == "file.automate.batch" || ' if 'if j.command == "file.automate.batch" || j.elapsed_ms' in text else ''
             return tuple(value.replace('if j.elapsed_ms', 'if ' + prefix + 'j.elapsed_ms').replace(' {', suffix + ' {') for value in (old, new))
@@ -54,8 +58,22 @@ def before(source):
         menu.write_text(text.replace(ALIAS, shared.replace('SHELL_COMMANDS', 'UI_COMMANDS', 1)), encoding='utf-8')
 
 
+def prepare_preferences_tests(source):
+    # The host's stock-menu oracle needs the one Preferences row added by this
+    # integration, while retaining all native rows and both separators.
+    path = source / 'crates/ui-egui/src/preferences_submenu_tests.rs'
+    if not path.exists():
+        return
+    from prepare_photocraft import replace
+    for native, extension in (('"Plugins…",', '"GenGate Settings…",'),
+                              ('"edit.preferences.plugIns",', '"edit.preferences.genStudio",')):
+        anchor = '            ' + native
+        replace(path, anchor, anchor + '\n            ' + extension)
+
+
 def after(source):
     prepare_windows_input(source)
+    prepare_preferences_tests(source)
     shell = source / 'crates/engine/src/shell_commands.rs'
     menu = source / 'crates/ui-egui/src/menus.rs'
     if not shell.exists():

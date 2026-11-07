@@ -10,6 +10,6 @@ Before updating PhotoCraft, check that a GenGate package supports the intended e
 
 If an official PhotoCraft build saved preferences without the unknown GenGate section, the installer can recover the previous add-on settings from its separately installed runtime. Unrelated PhotoCraft preferences are retained.
 
-GenGate **0.9.8** supports official PhotoCraft **0.20.2 Windows x64**, pinned at `7c12f647150f8e7b2e07718f7993b1fcaa57fefe`. GenGate **0.9.7** remains available for PhotoCraft **0.20.1**, **0.9.6** for **0.18.0**, **0.9.5** for **0.17.0**, and **0.9.4** for **0.16.0**.
+GenGate **0.9.9** supports official PhotoCraft **0.21.0 Windows x64**, pinned at `efb7ebd0c0dab1fc108ee4642aa47c22694271a8`. GenGate **0.9.8** remains available for PhotoCraft **0.20.2**, **0.9.7** for **0.20.1**, **0.9.6** for **0.18.0**, **0.9.5** for **0.17.0**, and **0.9.4** for **0.16.0**.
 
-The current build scripts default to 0.20.2 and retain the explicit 0.17/0.18/0.19/0.20.1 source options. Earlier editor integrations remain available from their corresponding GenGate release tags and archived packages.
+The current build scripts default to 0.21.0 and retain the explicit 0.17/0.18/0.19/0.20.1/0.20.2 source options. Earlier editor integrations remain available from their corresponding GenGate release tags and archived packages.

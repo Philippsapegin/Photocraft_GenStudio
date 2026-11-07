@@ -28,9 +28,9 @@ FONTS = {
 }
 
 
-def prepare(host_version="0.20.2"):
-    revision = REVISION if host_version in ("0.17.0", "0.18.0", "0.19.0", "0.20.1", "0.20.2") else LEGACY_REVISION
-    fonts = FONTS if host_version in ("0.17.0", "0.18.0", "0.19.0", "0.20.1", "0.20.2") else LEGACY_FONTS
+def prepare(host_version="0.21.0"):
+    revision = REVISION if host_version in ("0.17.0", "0.18.0", "0.19.0", "0.20.1", "0.20.2", "0.21.0") else LEGACY_REVISION
+    fonts = FONTS if host_version in ("0.17.0", "0.18.0", "0.19.0", "0.20.1", "0.20.2", "0.21.0") else LEGACY_FONTS
     base = "https://raw.githubusercontent.com/storytold/craft-fonts/" + revision + "/"
     destination = ROOT / ".runtime" / ("craft-fonts-" + revision[:12])
 
@@ -70,7 +70,7 @@ def prepare(host_version="0.20.2"):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--json", action="store_true", help="ASCII JSON for PowerShell 5 path transport")
-    parser.add_argument("--host-version", default="0.20.2", choices=("0.12.0","0.15.1","0.16.0","0.17.0","0.18.0","0.19.0","0.20.1","0.20.2"))
+    parser.add_argument("--host-version", default="0.21.0", choices=("0.12.0","0.15.1","0.16.0","0.17.0","0.18.0","0.19.0","0.20.1","0.20.2", "0.21.0"))
     args = parser.parse_args()
     path = str(prepare(args.host_version))
     print(json.dumps(path) if args.json else path, flush=True)

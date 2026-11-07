@@ -1,4 +1,4 @@
-//! Filter > Plug-ins > GenGate. Native widgets, shared with the editor's theme.
+//! GenGate generation workspace. Native widgets, shared with the editor's theme.
 use crate::PhotocraftApp;
 use photocraft_engine::genstudio::{Engine, Settings, Startup};
 use serde_json::{Value, json};
@@ -1018,7 +1018,8 @@ mod tests {
         crate::menus::invoke(&mut app, &ctx, "genstudio.open", json!({})).unwrap();
         assert!(app.ui.gen_studio.open);
         let item = crate::menus::menu_items(&app).into_iter().find(|i| i.id == "genstudio.open").unwrap();
-        assert_eq!(item.path, ["Filter", "Plug-ins"]);
+        let plugins = photocraft_engine::prefs::SECTIONS.iter().find(|(id, _)| *id == "plugIns").unwrap().1;
+        assert_eq!(item.path, ["Filter", plugins]);
         crate::menus::invoke(&mut app, &ctx, "genstudio.open", json!({"open":false})).unwrap();
         crate::menus::invoke(&mut app, &ctx, "genstudio.settings.open", json!({})).unwrap();
         assert!(!app.ui.gen_studio.open);

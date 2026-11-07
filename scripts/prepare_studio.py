@@ -6,6 +6,18 @@ import re
 ROOT=Path(__file__).resolve().parents[1]
 
 
+def studio_enabled(text, commands):
+    """Rebuild only our generated true arms after a partial/ repeated prepare."""
+    ids=['genstudio.studio.'+name for name in commands]+['genstudio.settings.open']+['genstudio.loras.'+name for name in ('open','configure','settings','metadata.save','append')]
+    quoted='(?:'+'|'.join(re.escape('"'+name+'"') for name in ids)+')'
+    start=text.index('pub fn is_enabled')
+    head,tail=text[:start],text[start:]
+    tail=re.sub(r'(?m)^        '+quoted+r'(?:\s*\|\s*'+quoted+r')*\s*=> true,\r?\n','',tail)
+    tail=re.sub(r'(    match id \{\n)(?:[ \t]*\n)*',r'\1',tail,count=1)
+    arms=''.join('        "'+name+'" => true,\n' for name in ids)
+    return head+tail.replace('    match id {\n','    match id {\n'+arms+'\n',1)
+
+
 def prepare(source,replace):
     engine=source/"crates/engine/src"
     ui=source/"crates/ui-egui/src"
@@ -83,7 +95,8 @@ def prepare(source,replace):
         catalog.write_text(text,encoding="utf-8")
     menu=ui/"menus.rs"
     text=menu.read_text(encoding="utf-8")
-    anchor='    ("genstudio.open", "Gen Studio…", &["Filter", "Plug-ins"], None),'
+    plugin_label='Plugins' if '&["Filter", "Plugins"]' in text else 'Plug-ins'
+    anchor=f'    ("genstudio.open", "Gen Studio…", &["Filter", "{plugin_label}"], None),'
     if '"genstudio.studio.inspect"' not in text:
         entries="\n".join(f'    ("genstudio.studio.{name}", "Gen Studio {name}", &[], None),' for name in commands)
         text=text.replace(anchor,anchor+"\n"+entries)
@@ -105,7 +118,7 @@ def prepare(source,replace):
             menu.write_text(text,encoding='utf-8')
 
     text=menu.read_text(encoding="utf-8")
-    if '"genstudio.settings.open"' not in text:
+    if '"genstudio.settings.open",' not in text:
         text=text.replace(anchor,anchor+'\n    ("genstudio.settings.open", "Gen Studio Settings", &[], None),')
         pos=text.index('pub fn is_enabled')
         text=text[:pos]+text[pos:].replace('    match id {','    match id {\n        "genstudio.settings.open" => true,',1)
@@ -119,7 +132,9 @@ def prepare(source,replace):
         else:text+="\n"+line+"\n"
         catalog.write_text(text,encoding="utf-8")
 
-    text=menu.read_text(encoding="utf-8").replace('"Gen Studio Settings", &["Filter", "Plug-ins"]','"Gen Studio Settings", &[]')
+    text=menu.read_text(encoding="utf-8")
+    for plugin_label in ('Plug-ins', 'Plugins'):
+        text=text.replace(f'"Gen Studio Settings", &["Filter", "{plugin_label}"]','"Gen Studio Settings", &[]')
     menu.write_text(text,encoding="utf-8")
     path=ui/"prefs_ui.rs"
     text=path.read_text(encoding="utf-8")
@@ -173,3 +188,4 @@ def prepare(source,replace):
         for label in ('LoRA folder','Layer to GenGate','LoRAs open','LoRAs configure','LoRAs settings','LoRAs metadata.save','LoRAs append','Loras'):
             if '\t'+label+'\t' not in text:text+='\n\t'+label+'\t'+label+'\n'
         catalog.write_text(text,encoding='utf-8')
+    menu.write_text(studio_enabled(menu.read_text(encoding='utf-8'),commands),encoding='utf-8')

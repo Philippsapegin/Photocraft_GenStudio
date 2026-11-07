@@ -11,7 +11,7 @@ import shutil
 import subprocess
 import sys
 
-VERSION = "0.9.8"
+VERSION = "0.9.9"
 REPOSITORY = "https://github.com/Philippsapegin/Photocraft_GenStudio"
 
 
@@ -287,7 +287,7 @@ def _install_locked(request, bundle, manifest, destination, host, profile, short
         message = "Models still need attention: " + str(error)
         warnings.append(message)
         report("NOTE: " + message)
-    report("Installed. Open PhotoCraft GenGate, then Filter > Plug-ins > GenGate.")
+    report("Installed. Open PhotoCraft GenGate, then Filter > Plugins > GenGate.")
     return destination
 
 

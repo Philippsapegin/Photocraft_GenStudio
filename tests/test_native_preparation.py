@@ -8,8 +8,9 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
 from prepare_updates import prepare_desktop_transport, prepare_update_notice
-from prepare_photocraft_012 import anchors
+from prepare_photocraft_012 import anchors, prepare_preferences_tests
 from prepare_photocraft import replace
+from prepare_studio import studio_enabled
 spec = importlib.util.spec_from_file_location("prepare_selection_fill", ROOT / "scripts/prepare_selection_fill.py")
 preparer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(preparer)
@@ -35,6 +36,41 @@ class RemoveDispatchTests(unittest.TestCase):
 
 
 class UpdateTransportTests(unittest.TestCase):
+    def test_021_preferences_oracle_keeps_native_rows_and_adds_gengate_once(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            path = root / 'crates/ui-egui/src/preferences_submenu_tests.rs'
+            path.parent.mkdir(parents=True)
+            original = '            "Plugins…",\n            "Type…",\n            "edit.preferences.plugIns",\n            "edit.preferences.type",'
+            path.write_text(original, encoding='utf-8')
+            prepare_preferences_tests(root)
+            changed = path.read_text(encoding='utf-8')
+            self.assertEqual(changed, original.replace('"Plugins…",', '"Plugins…",\n            "GenGate Settings…",').replace('"edit.preferences.plugIns",', '"edit.preferences.plugIns",\n            "edit.preferences.genStudio",'))
+            prepare_preferences_tests(root)
+            self.assertEqual(path.read_text(encoding='utf-8'), changed)
+
+    def test_repeated_studio_preparation_removes_duplicate_enabled_arms(self):
+        original='pub fn is_enabled() {\n    match id {\n        "genstudio.studio.inspect" => true,\n        "genstudio.studio.inspect" | "genstudio.studio.submit" => true,\n        "native.command" => true,\n    }\n}'
+        changed=studio_enabled(original,('inspect','submit'))
+        self.assertEqual(changed.count('"genstudio.studio.inspect" => true,'),1)
+        self.assertEqual(changed.count('"genstudio.studio.submit" => true,'),1)
+        self.assertIn('"native.command" => true,',changed)
+        self.assertEqual(studio_enabled(changed,('inspect','submit')),changed)
+
+    def test_021_plugin_labels_preserve_the_native_spelling(self):
+        for name, native, old in (
+                ('prefs.rs', '        section!("edit.preferences.plugIns", "Plugins…"),', '        section!("edit.preferences.plugIns", "Plug-ins…"),'),
+                ('menu_catalog.rs', '    (&["Edit", "Preferences"], "Plugins…", None, "edit.preferences.plugIns"),', '    (&["Edit", "Preferences"], "Plug-ins…", None, "edit.preferences.plugIns"),'),
+                ('menus.rs', '("genstudio.open", "Gen Studio…", &["Filter", "Plugins"], None),', '("genstudio.open", "Gen Studio…", &["Filter", "Plug-ins"], None),')):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as folder:
+                path = Path(folder) / name
+                path.write_text(native, encoding='utf-8')
+                replace(path, old, old + '\n// GenGate hook')
+                changed = path.read_text(encoding='utf-8')
+                self.assertEqual(changed, native + '\n// GenGate hook')
+                replace(path, old, old + '\n// GenGate hook')
+                self.assertEqual(path.read_text(encoding='utf-8'), changed)
+
     def test_0202_job_dialog_keeps_batch_and_save_exclusions(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / 'jobs_ui.rs'
@@ -49,6 +85,21 @@ class UpdateTransportTests(unittest.TestCase):
             self.assertIn('j.label == "Remove · Qwen"', first)
             replace(path, old, new)
             self.assertEqual(path.read_text(encoding='utf-8'), first)
+
+    def test_021_job_dialog_keeps_place_progress_in_status_bar(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'jobs_ui.rs'
+            native = '    if j.command == "file.automate.batch" || j.elapsed_ms < DIALOG_DELAY_MS || place || app.jobs.saves.iter().any(|s| s.job == j.id) {\n        return;\n    }'
+            path.write_text(native, encoding='utf-8')
+            old = '    if j.elapsed_ms < DIALOG_DELAY_MS {'
+            new = '    if j.elapsed_ms < DIALOG_DELAY_MS || j.command == "paint.remove" && j.label == "Remove · Qwen" {'
+            replace(path, old, new)
+            changed = path.read_text(encoding='utf-8')
+            self.assertIn('|| place || app.jobs.saves.iter().any(|s| s.job == j.id)', changed)
+            self.assertIn('if j.command == "file.automate.batch" ||', changed)
+            self.assertIn('j.label == "Remove · Qwen"', changed)
+            replace(path, old, new)
+            self.assertEqual(path.read_text(encoding='utf-8'), changed)
 
     def test_shared_update_result_keeps_the_native_dialog_and_adds_a_warning_before_install(self):
         original = '        #[cfg(not(target_arch = "wasm32"))]\n        app.updates_rt.updater.offer(release_of(release));\n    if app.ui.updates_open {\n        let dialog = craft_update::CheckResultDialog::new(&crate::UPDATE_APP, version);\n'

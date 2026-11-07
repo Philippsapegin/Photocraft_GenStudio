@@ -1,4 +1,4 @@
-"""Apply the current GenGate integration to pinned PhotoCraft 0.20.1/0.20.2 sources."""
+"""Apply the current GenGate integration to pinned PhotoCraft 0.20.2/0.21.0 sources."""
 from pathlib import Path
 import argparse
 import json
@@ -31,7 +31,7 @@ def replace(path, old, new):
 
 def prepare(source):
     if not (source / 'crates/engine/src/cmd.rs').is_file():
-        raise RuntimeError('This development integration targets PhotoCraft 0.20.1/0.20.2. Use the matching older GenGate release source for earlier editors.')
+        raise RuntimeError('This development integration targets PhotoCraft 0.20.2/0.21.0. Use the matching older GenGate release source for earlier editors.')
     source = source_view(source)
     prepare_photocraft_012.before(source)
     prepare_gengate.before(source)
@@ -53,12 +53,16 @@ def prepare(source):
     # lives in the editor's Preferences alongside the other settings sections.
     prefs = engine / "prefs.rs"
     existing = prefs.read_text(encoding="utf-8")
+    plugin_label = "Plugins" if '("plugIns", "Plugins")' in existing else "Plug-ins"
     existing = existing.replace('pub const SECTIONS: [(&str, &str); 18]', 'pub const SECTIONS: [(&str, &str); 19]')
     if '    ("genStudio", "Gen Studio"),' not in existing:
-        existing = existing.replace('    ("plugIns", "Plug-ins"),','    ("plugIns", "Plug-ins"),\n    ("genStudio", "Gen Studio"),')
+        plugin_section = f'    ("plugIns", "{plugin_label}"),'
+        existing = existing.replace(plugin_section, plugin_section + '\n    ("genStudio", "Gen Studio"),')
     prefs.write_text(existing, encoding="utf-8")
     menu_source = ui / "menus.rs"
     menu_text = menu_source.read_text(encoding="utf-8").replace('        "genstudio.open" | "genstudio.models.browse" => true,\n', '')
+    if plugin_label == "Plugins":
+        menu_text = menu_text.replace('&["Filter", "Plug-ins"]', '&["Filter", "Plugins"]')
     enabled_line='        "genstudio.open" | "genstudio.models.browse" | "genstudio.progress.set" => true,'
     if enabled_line not in menu_text:
         anchor = '        "window.panel.activate" | "window.panel.layout"' + (' | "ui.dock"' if '"window.panel.layout" | "ui.dock"' in menu_text else '') + ' => true,'

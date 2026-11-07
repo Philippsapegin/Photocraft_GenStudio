@@ -9,4 +9,4 @@ Model files remain in the user-selected source directory and are not redistribut
 
 The original GenGate menu catalogs `menu-locales.json`, `progress-locales.json` and `selection-locales.json` are by GenGate contributors, licensed MIT OR Apache-2.0 with the Rust integration. The preparer adds their entries to PhotoCraft's catalogs and records them in its `ATTRIBUTION.md`, retaining existing translation licenses.
 
-The current native build targets [PhotoCraft v0.20.2](https://github.com/storytold/photocraft/tree/7c12f647150f8e7b2e07718f7993b1fcaa57fefe), under the same MIT OR Apache-2.0 licenses. Supported official release hashes are recorded in `editor-bases.json`; native source and font inputs remain outside the add-on archive.
+The current native build targets [PhotoCraft v0.21.0](https://github.com/storytold/photocraft/tree/efb7ebd0c0dab1fc108ee4642aa47c22694271a8), under the same MIT OR Apache-2.0 licenses. Supported official release hashes are recorded in `editor-bases.json`; native source and font inputs remain outside the add-on archive.

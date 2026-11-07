@@ -1,5 +1,16 @@
 # Release validation
 
+## GenGate 0.9.9 / PhotoCraft 0.21.0 - 2026-11-07
+
+- Pinned official source `efb7ebd0c0dab1fc108ee4642aa47c22694271a8`; verified portable archive SHA-256 `93b4e90a0ba74cdbf61ce36e227128ed78f5a0e43f814aa71563b1bf46e8b6a4` and both original executables. Retained the official font and egui/winit revisions; built new editor/CLI deltas and verified exact forward reconstruction.
+- Adapted Plugins menu/preference spelling and preserved the new status-bar progress behavior for placed files. Generated Studio command registration is idempotent across fresh and partial preparation, including grouped enabled arms. New synthetic regressions cover both changes. Prepared inputs from a fresh archive match all 2492 source inputs after text line-ending normalization; repeated preparation/formatting is unchanged.
+- Python: **208 tests, 196 passed, 12 skipped**. Native unit suites: **3121 engine** (16 ignored), **5387 UI** (22 ignored), **216 application** (3 ignored), **6 CLI**. The new upstream stock-Preferences oracle initially omitted the extension's GenGate Settings row; both strict expected lists now include that row, preserving every native row and both separators. The entire UI suite was then repeated. All-target Clippy with warnings denied, HEIF, layer checks, WASM and adversarial command checks passed. Command identifiers are unchanged.
+- Isolated packaged installation passed clean install, update, official-editor refresh/reapply, original restore and reinstall. A fresh 0.9.8 installation on official 0.20.2 migrated to 0.9.9 after replacing the editor with official 0.21.0: nondefault engine/workflow/LoRA settings, unrelated preferences and shared-model sentinel were preserved; uninstall restored the new official originals. Setup passed Explorer open/cancel, exit-code handling and completion-state rendering.
+- Official MCP verified the final editor/CLI and packaged runtime with synthetic generation: native floating palette geometry/restart, Custom, no Seed UI, prompt input/Delete isolation, Neg, batch/references/recipes, Undo/Redo, native save/reopen (including the new shared native-format library), large reference and cancellation; active ComfyUI workflow transport and settings also passed. Screenshots were inspected. No checkpoints were opened or CUDA inference submitted; user editor/settings/models were not replaced.
+- ZIP: **226,685,627 bytes**, SHA-256 `1af2d5bc12cf4ab8e8c0ea79933e7c8852e1ee425559187659c19aaceca0b54f`. Previous release assets remain unchanged.
+
+Evidence: `.runtime/release099-final.json`, `release099-validation.json`, `release099-python.json`, `release099-fresh.json`, `release099-idempotency.json`, `release099-deliver.json` and the dedicated MCP/migration reports. Package: `dist/0.9.9/`.
+
 ## GenGate 0.9.8 / PhotoCraft 0.20.2 - 2026-11-05
 
 - Pinned official source `7c12f647150f8e7b2e07718f7993b1fcaa57fefe`. Verified the portable archive SHA-256 and both original executables; generated new binary deltas with exact forward reconstruction. Retained the official 13-font input.
