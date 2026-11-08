@@ -16,6 +16,10 @@
 
 ## Validation scope
 
+Completed real-model coverage and user acceptance are recorded in
+[model validation](docs/MODEL_VALIDATION.md). Consult that matrix before claiming
+models are untested or planning a repeat inference run.
+
 Automated checks use isolated profiles, synthetic backends and tiny CPU fixtures.
 Real model inference requires the user's explicit authorization. Do not load
 checkpoints, initialize CUDA for generation or modify the user's GPU Python

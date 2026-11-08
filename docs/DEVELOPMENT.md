@@ -4,6 +4,9 @@ The public beta is Windows x64. The source repository contains the Python host a
 
 Current readiness findings and release acceptance criteria: [0.10.0 audit](AUDIT_0.10.0.md).
 
+Completed real inference runs and user acceptance: [model validation](MODEL_VALIDATION.md).
+The standard automated checks below remain synthetic and do not load checkpoints.
+
 ## Host tests
 
 Python 3.10+:
@@ -14,7 +17,7 @@ python -m venv .venv
 .venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-Tests use synthetic images and mock model components. Five tensor-level tests skip when torch is unavailable. With a CUDA Python that already has torch installed, they can also be run on CPU without loading any weights:
+Tests use synthetic images and mock model components. Tensor-level tests skip when torch is unavailable. With a CUDA Python that already has torch installed, they can also be run on CPU without loading any weights:
 
 ```powershell
 $env:CUDA_VISIBLE_DEVICES = ''

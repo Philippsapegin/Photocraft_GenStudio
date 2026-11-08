@@ -1,5 +1,20 @@
 # Release validation
 
+## Unreleased real model acceptance and Ai Fill fixes — 2026-11-08
+
+Real checkpoint/CUDA generation has now been exercised and reviewed by the user:
+Qwen Image 2.1 Turbo, FLUX3 Klein and FIBO 2 Edit Turbo through Direct and native
+ComfyUI fill workflows; FLUX3 also through Studio's active user graph. Earlier
+runs cover segmentation, native brush tools, ComfyUI Qwen GGUF/SDXL graphs, and
+Anima + Explorer Stein LoRA. See the [exact coverage, evidence and remaining
+limits](MODEL_VALIDATION.md), including the untested Constant LoRA path.
+
+Source-preserving Ai Fill and inward mask feathering passed focused host and CPU
+tensor tests, followed by three real matched-seed repeats. The final images keep
+all pixels outside the native selection unchanged. The displaced first FIBO
+graph is excluded from the recommended examples; the aligned graph is retained.
+These are unreleased changes. Published tags and release assets are unchanged.
+
 ## Unreleased external PhotoCraft updater - 2026-11-08
 
 - Confirmed the signature failure in PhotoCraft's pinned updater: GenGate's rebuilt EXE is unsigned, while the native updater requires a valid current signature matching the official payload publisher. Replaced the native update handoff with the same external helper used by Setup. It accepts only editor versions supported by the package, pins official download hashes, verifies Authenticode publishers and MSI identity, waits for the editor to close, and preserves existing engine/model/workflow settings. Unsupported newer targets require a GenGate update first.

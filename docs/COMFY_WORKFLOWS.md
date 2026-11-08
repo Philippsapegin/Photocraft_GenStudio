@@ -24,6 +24,22 @@ The snapshot's SHA-256 is stored with results. Since the graph is live, restorin
 
 These graphs receive the tool's prepared context image, inpainting mask and editing instruction through IN. They must return exactly one image at the requested context dimensions. PhotoCraft keeps the original document coordinates and restricts the imported edit with its editable mask. Studio graphs can instead return different sizes or batches.
 
+Ai Fill retains the original source pixels inside the selection; Remove Brush
+deliberately supplies a missing region. The separate IN.mask identifies the edit
+region. Result feathering ramps inward, preserving all pixels outside the selection.
+
+The managed node package includes API and canvas examples under `examples/`:
+
+- `FLUX3-Klein-Edit-api.json` uses the full-reference graph verified in Studio and
+  native Ai Fill, including prompt upsampling and the Explorer LoRA recipe.
+- `FIBO2-AiFill-api.json` keeps conditioning references and the generated target on
+  the same trained grid, then returns the decoded image at IN.width/height.
+
+The matching files without `-api` open on the ComfyUI canvas. These examples were
+verified on ComfyUI 0.44.2; models remain separate. The earlier displaced FIBO
+test graph is not supplied as a recommended example. See [model validation](MODEL_VALIDATION.md)
+for the actual generation matrix and retained results.
+
 ## Optional component overrides
 
 **Automatic** leaves that component exactly as defined in the workflow. Selecting a file in Advanced replaces the corresponding filename only in a graph copy submitted for that run, for both Studio and native tools. GenGate never saves these substitutions into the JSON file or the open browser graph. The result's workflow hash describes the effective graph after substitution.

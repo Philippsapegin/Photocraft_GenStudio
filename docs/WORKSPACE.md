@@ -1,5 +1,9 @@
 # GenGate workspace
 
+Current real-generation coverage and user acceptance are recorded in
+[model validation](MODEL_VALIDATION.md). The early workspace history below is
+retained; its original validation scope has since expanded.
+
 Open **Filter → Plug-ins → GenGate…**. Choose Qwen Image 2.1 Turbo or FLUX 3 Image Klein in Preferences. The left-aligned title is `GenGate | <model>`; the row above canvas and prompt is reserved for future tools. Every output becomes a new raster layer in the document where the request started, whether or not there is a selection or main reference. Without an open document, Studio creates a document containing the generated image; a batch adds one layer per result. Existing pixels and selections are retained. If the user switches tabs during generation, the result goes to the original document. Closing the source document preserves the result in a new document instead.
 
 The main reference sits to the left of the prompt. Opening the workspace with an active selection captures the visible composite inside that selection, retaining its soft mask as alpha. Without a selection the slot starts empty. Click it to choose a file, drop a file onto it, or use **Use selection** inside the main slot whenever the document has a selection, including over a loaded image or generated result. Removing a reference uses its × button. When the main slot was empty at submission, successful generation fills it with the generated image. A reference loaded by the user while the request is running takes priority.
@@ -41,7 +45,7 @@ Relevant files: `photocraft/genstudio_canvas.rs`, `photocraft/genstudio_generate
 
 `scripts/photocraft_studio_smoke.py --exe <editor.exe> --cli <photocraft-cli.exe>` exercises the official MCP bridge, UI state, selection capture, ten reference slots, renumbering, full-batch transport, model discovery and cancellation against an isolated synthetic HTTP backend. It writes synthetic screenshots and a report under `.runtime/photocraft-studio-smoke`. It never starts an AI worker or loads weights.
 
-Real generation and GPU quality/performance checks remain deliberately excluded at the user's request. Version 0.8.0-alpha.1 publishes the GenGate name, native Preferences integration, adaptive workspace, full generation and FLUX 3 support.
+Real generation remains opt-in. The authorized 2026-11-08 runs and their limits are recorded in [model validation](MODEL_VALIDATION.md); automated smoke scripts still use synthetic backends. Version 0.8.0-alpha.1 published the GenGate name, native Preferences integration, adaptive workspace, full generation and FLUX 3 support.
 
 Busy local-worker read timeouts are retried against the same job, without resubmitting a generation. Retries remain cancellable and stop after a bounded period without a response.
 
@@ -51,12 +55,12 @@ Preferences has a separate Model selector for Qwen Image 2.1 Turbo / FLUX 3 Imag
 
 The Studio header and reference labels follow the selected model. Both models officially accept ten references; there is no artificial Klein limit reduction. Dragging inserts `<ref_image_0>`-style chips for Klein, with zero-based reference order. Switching models converts chips and reference removal renumbers them while preserving assignments. BFL's bounding-box syntax is documented at https://docs.bfl.ai/flux_3/flux3_image_bounding_boxes.
 
-Klein works through the same generated-layer, batch, cancellation, selection and masked-tool paths. Direct uses its own pinned source library; ComfyUI needs 0.41.3+. No live model generation or memory benchmark has been performed. The four explicitly queued downloads total 17.75 GB; the background downloader resumes partial files and publishes them to discovery only after official SHA-256 verification.
+Klein works through the same generated-layer, batch, cancellation, selection and masked-tool paths. Direct uses its own pinned source library; the original core ComfyUI graph needs 0.41.3+. Real Direct generation and the active ComfyUI user-graph path have now been verified; the recommended TextGenerateV2 example was tested on ComfyUI 0.44.2. This is not a controlled memory benchmark. The original four explicitly queued downloads total 17.75 GB; the background downloader resumes partial files and publishes them to discovery only after official SHA-256 verification.
 
 ## Segmentation
 
 GenGate Settings has an independent Segmentation section: Enable AI segmentation, YOLO-World v2 S/M/L detector, SAM3 segmenter and optional CUDA Python. Enabling it prepares only the selected detector plus SAM3. Defaults are S + SAM3; weights share the chosen Models folder. This always uses a short-lived Direct process, independent of generative engine/model and startup policy.
 
-Subject and Remove Background use a YOLO foreground box followed by SAM3; Sky uses SAM3 text segmentation. Object Selection exposes Ai Select. With master segmentation and that checkbox enabled, only rectangle drags submit requests; clicks are ignored. ROI clipping, Sample All Layers and replace/add/subtract/intersect are preserved. Background removal keeps pixels and writes a native layer mask. Cancel/failure preserve the document. No real segmentation inference has been validated.
+Subject and Remove Background use a YOLO foreground box followed by SAM3; Sky uses SAM3 text segmentation. Object Selection exposes Ai Select. With master segmentation and that checkbox enabled, only rectangle drags submit requests; clicks are ignored. ROI clipping, Sample All Layers and replace/add/subtract/intersect are preserved. Background removal keeps pixels and writes a native layer mask. Cancel/failure preserve the document. Real Subject and Object Selection were verified with YOLO-World v2 L and SAM3; real Sky and Remove Background were not included in that run.
 
 Automation: existing select.subject, select.sky and layer.removeBackground IDs route automatically when enabled. select.object accepts aiSelect:true; ui.set accepts objectAiSelect:true for the real Object Selection gesture. gengate.segmentation.prepare downloads/prepares resources without loading a model. The synthetic official-MCP regression is scripts/photocraft_segmentation_smoke.py.
