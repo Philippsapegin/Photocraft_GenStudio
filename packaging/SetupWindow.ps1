@@ -14,7 +14,7 @@ if (-not (Test-Path -LiteralPath $python) -and -not ($ValidateOnly -or $Preview)
 }
 $form = New-Object GenGateSetup.ChromeForm
 $form.Preview = [bool]$ValidateOnly
-$form.Text = 'GenGate 0.9.9 - Setup'
+$form.Text = 'GenGate 0.10.0 Beta II - Setup'
 $form.Font = New-Object System.Drawing.Font('Segoe UI',9.5)
 $form.ClientSize = New-Object System.Drawing.Size(820,([Math]::Min(870,[System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea.Height-60)))
 $form.MinimumSize = New-Object System.Drawing.Size(760,640)
@@ -38,7 +38,7 @@ function Button([string]$text,[int]$x,[int]$y,[int]$width=94) {
 }
 $header=New-Object System.Windows.Forms.Panel; $header.Width=$form.ClientSize.Width; $header.Dock='Top'; $header.Height=58; $header.BackColor=[GenGateSetup.Palette]::Surface
 $title=Label 'GenGate' 24 10 180 24; $title.Font=New-Object System.Drawing.Font('Segoe UI',12,[System.Drawing.FontStyle]::Bold)
-$version=Label 'ADD-ON SETUP  /  0.9.9' 24 35 250 18; $version.Font=New-Object System.Drawing.Font('Segoe UI',8); $version.ForeColor=[GenGateSetup.Palette]::Muted
+$version=Label 'ADD-ON SETUP  /  0.10.0 BETA II' 24 35 250 18; $version.Font=New-Object System.Drawing.Font('Segoe UI',8); $version.ForeColor=[GenGateSetup.Palette]::Muted
 $minimize=New-Object GenGateSetup.CaptionButton; $minimize.SetBounds(712,10,46,38); $minimize.AccessibleName='Minimize'; $minimize.Anchor='Top,Right'; $minimize.Add_Click({$form.WindowState='Minimized'})
 $titleClose=New-Object GenGateSetup.CaptionButton; $titleClose.SetBounds(758,10,46,38); $titleClose.CloseButton=$true; $titleClose.AccessibleName='Close'; $titleClose.Anchor='Top,Right'
 $header.Controls.AddRange(@($title,$version,$minimize,$titleClose)); $header.Add_MouseDown({if($_.Button -eq 'Left'){$form.DragWindow()}}); $title.Add_MouseDown({if($_.Button -eq 'Left'){$form.DragWindow()}})

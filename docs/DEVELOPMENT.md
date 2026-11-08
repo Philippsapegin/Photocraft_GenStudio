@@ -77,11 +77,11 @@ another application during the check. Reports/screenshots stay in `.runtime`.
 ## Package the Windows ZIP
 
 ```powershell
-python scripts/build_editor_patch.py --original .runtime/official/0.21.0 --modified .runtime/photocraft-0.21.0/target/release --output .runtime/addon-patches --host-version 0.21.0 --upstream efb7ebd0c0dab1fc108ee4642aa47c22694271a8
-python scripts/package_windows.py --patches .runtime/addon-patches --output-dir dist/0.9.9
+python scripts/build_editor_patch.py --original .runtime/official/0.21.0 --modified .runtime/photocraft-0.21.0/target/release --output .runtime/patches-0.10.0 --host-version 0.21.0 --upstream efb7ebd0c0dab1fc108ee4642aa47c22694271a8
+python scripts/package_windows.py --patches .runtime/patches-0.10.0 --output-dir dist/0.10.0
 ```
 
-Obtain the official Windows portable archive recorded in `photocraft/editor-bases.json`, verify its archive hash and extract the original editor/CLI into `.runtime/official/<version>`. Select the actual Cargo output directory with `--modified`. The patch builder checks both input file hashes against that record, builds deltas and verifies exact forward reconstruction; existing entries for other supported bases are retained. New upstream versions require porting and validating the native integration, recording new official hashes and building another catalog entry; relabeling an old patch is not compatibility.
+Obtain the official Windows portable archive recorded in `photocraft/editor-bases.json`, verify its archive hash and extract the original editor/CLI into `.runtime/official/<version>`. Select the actual Cargo output directory with `--modified`. Use a fresh patch output directory for each release to avoid bundling unrelated older patches. The patch builder checks both input file hashes against that record, builds deltas and verifies exact forward reconstruction; existing entries for other supported bases are retained. New upstream versions require porting and validating the native integration, recording new official hashes and building another catalog entry; relabeling an old patch is not compatibility.
 
 The packager obtains the pinned Comfy model library and LanPaint **code**, and the SHA-256-pinned embedded CPython / host wheels from `packaging/runtime-lock.json`. It never obtains model weights. Use `--core` and `--lanpaint` to reuse existing pinned source checkouts; `--upstream` selects the licensed source build. The result is in the selected `--output-dir`, along with `SHA256SUMS.txt`. Use a fresh directory for each release to preserve historical assets.
 
