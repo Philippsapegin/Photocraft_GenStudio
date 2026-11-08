@@ -114,7 +114,8 @@ class InstallerTests(unittest.TestCase):
              patch('genstudio.models.resolve'):
             installer.install(self.request(installDirect=True, comfyDir='', comfyPython=''), self.bundle, shortcuts=False)
         value = installer.read_json(self.profile / 'preferences.json')
-        for key in ('modelsDir','comfyDir','comfyPython','directPython','fillWorkflow'):
+        self.assertEqual(Path(value['genStudio']['modelsDir']).resolve(), Path(saved['modelsDir']).resolve())
+        for key in ('comfyDir','comfyPython','directPython','fillWorkflow'):
             self.assertEqual(value['genStudio'][key], saved[key])
         self.assertEqual(value['unrelated'], 'keep')
 
