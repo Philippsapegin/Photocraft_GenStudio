@@ -147,10 +147,15 @@ class DirectPipeline:
             decoded = vae.decode(samples).detach().float().cpu().numpy()[0]
             return Image.fromarray((np.clip(decoded, 0, 1) * 255).round().astype(np.uint8)).convert("RGBA")
 
-    def generate(self, image, mask, seed, prompt, cancel, progress):
+    def generate_fill(self, image, mask, seed, prompt, cancel, progress):
+        return self.generate(image, mask, seed, prompt, cancel, progress, preserve_context=True)
+
+    def generate(self, image, mask, seed, prompt, cancel, progress, *, preserve_context=False):
         if cancel.is_set():
             raise Cancelled()
         reference, mask_reference = inpaint_references(image, mask)
+        if preserve_context:
+            reference = image.convert('RGBA')
         model, clip, vae = self.load(progress)
         from .lora import apply_constant
         model, clip = apply_constant(model, clip, self.models, self.components, progress)
@@ -180,8 +185,11 @@ class DirectPipeline:
             cancelled()
             mask_latent = vae.encode(mask_pixels)
             cancelled()
+            instruction = ("Edit image 1 using the black-and-white mask in image 2. "
+                           "White marks the region to change; black marks the region to preserve. "
+                           + prompt + " Return the edited image 1, preserving framing and all other content.") if preserve_context else inpaint_prompt(prompt)
             conditioning = clip.encode_from_tokens_scheduled(clip.tokenize(
-                inpaint_prompt(prompt), images=[rgb, mask_pixels[..., :3]],
+                instruction, images=[rgb, mask_pixels[..., :3]],
                 keep_vision=False, prevent_empty_text=True))
             positive = [[embedding, {**metadata, "reference_latents": [reference_latent, mask_latent]}]
                         for embedding, metadata in conditioning]

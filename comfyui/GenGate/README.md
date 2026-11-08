@@ -11,6 +11,15 @@ Install/update this folder using GenGate Settings, restart ComfyUI and refresh i
 
 Native tool graphs return exactly one image at the requested context size. Studio can accept batches and resized outputs. White IN mask pixels mean regenerate; white OUT mask pixels mean reveal.
 
+## Recommended edit workflows
+
+- `examples/FLUX3-Klein-Edit-api.json`: the full-reference Studio edit graph, also suitable for Ai Fill. IN.image retains the original image content; PhotoCraft applies the selection to the returned image. Requires native FLUX3 support and TextGenerateV2 in ComfyUI.
+- `examples/FIBO2-AiFill-api.json`: references and generation share FIBO's trained image grid. The decoded image is resized back to IN.width/height before OUT. PhotoCraft applies the selection on the returned layer.
+
+The matching files without `-api` open on ComfyUI's canvas. Choose the API file for native Ai Fill. These examples use the standard preset filenames; named GenGate loaders allow component overrides in Advanced. No models are included.
+
+Ai Fill preserves the source pixels inside the selection so edit models can see the original object and its surroundings. The separate IN.mask still identifies the selected region. Remove Brush deliberately sends a missing region and uses its own workflow.
+
 IN appends negative text without changing retained output indices. OUT's internal class is now `GenGateOUT2`; recreate it in old canvas workflows, reconnect and export again. Older API JSON migrates retained links and drops obsolete OUT prompt connections. If necessary, recreate IN to expose its new negative socket.
 
 `examples/Connection-test.json` and its API companion invert a source image without any model. The bridge requires a PhotoCraft request; browser Queue alone has no source payload. No checkpoints are bundled or downloaded.

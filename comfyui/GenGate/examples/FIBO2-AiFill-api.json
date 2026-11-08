@@ -1,0 +1,228 @@
+{
+  "100": {
+    "class_type": "GenGateIN2",
+    "inputs": {}
+  },
+  "1": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "fibo2_edit_turbo_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "_meta": {
+      "title": "GenGate: Model"
+    }
+  },
+  "2": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen3vl_4b_int8_convrot.safetensors",
+      "type": "fibo2",
+      "device": "default"
+    },
+    "_meta": {
+      "title": "GenGate: Text encoder"
+    }
+  },
+  "3": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "flux2-vae.safetensors"
+    },
+    "_meta": {
+      "title": "GenGate: VAE"
+    }
+  },
+  "101": {
+    "class_type": "GenGateApplyLoRAs",
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "clip": [
+        "2",
+        0
+      ],
+      "loras": [
+        "100",
+        7
+      ]
+    }
+  },
+  "110": {
+    "class_type": "EmptyImage",
+    "inputs": {
+      "width": [
+        "100",
+        3
+      ],
+      "height": [
+        "100",
+        4
+      ],
+      "batch_size": 1,
+      "color": 8355711
+    }
+  },
+  "111": {
+    "class_type": "ImageCompositeMasked",
+    "inputs": {
+      "destination": [
+        "100",
+        0
+      ],
+      "source": [
+        "110",
+        0
+      ],
+      "mask": [
+        "100",
+        1
+      ],
+      "x": 0,
+      "y": 0,
+      "resize_source": false
+    },
+    "_meta": {
+      "title": "Missing content / opaque neutral gray"
+    }
+  },
+  "112": {
+    "class_type": "MaskToImage",
+    "inputs": {
+      "mask": [
+        "100",
+        1
+      ]
+    }
+  },
+  "13": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "12",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ]
+    }
+  },
+  "14": {
+    "class_type": "GenGateOUT2",
+    "inputs": {
+      "images": [
+        "130",
+        0
+      ],
+      "seed": [
+        "100",
+        5
+      ],
+      "loras": [
+        "100",
+        7
+      ]
+    }
+  },
+  "113": {
+    "class_type": "StringConcatenate",
+    "inputs": {
+      "string_a": "Edit <image_1> using the black-and-white mask in <image_2>. White marks the clothing to replace. The gray area is missing content. Return the edited first image, preserving framing and other content. ",
+      "string_b": [
+        "100",
+        2
+      ],
+      "delimiter": " "
+    }
+  },
+  "8": {
+    "class_type": "TextEncodeFibo2",
+    "inputs": {
+      "clip": [
+        "101",
+        1
+      ],
+      "vae": [
+        "3",
+        0
+      ],
+      "prompt": [
+        "113",
+        0
+      ],
+      "negative_prompt": [
+        "100",
+        26
+      ],
+      "width": 0,
+      "height": 0,
+      "batch_size": [
+        "100",
+        6
+      ],
+      "images.image_1": [
+        "111",
+        0
+      ],
+      "images.image_2": [
+        "112",
+        0
+      ]
+    }
+  },
+  "12": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": [
+        "101",
+        0
+      ],
+      "positive": [
+        "8",
+        0
+      ],
+      "negative": [
+        "8",
+        1
+      ],
+      "latent_image": [
+        "8",
+        2
+      ],
+      "seed": [
+        "100",
+        5
+      ],
+      "steps": 4,
+      "cfg": 1.0,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1.0
+    }
+  },
+  "130": {
+    "class_type": "ImageScale",
+    "inputs": {
+      "image": [
+        "13",
+        0
+      ],
+      "upscale_method": "lanczos",
+      "width": [
+        "100",
+        3
+      ],
+      "height": [
+        "100",
+        4
+      ],
+      "crop": "disabled"
+    },
+    "_meta": {
+      "title": "Return to native canvas pixels"
+    }
+  }
+}

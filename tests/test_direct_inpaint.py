@@ -43,7 +43,7 @@ class InpaintReferenceTests(unittest.TestCase):
 
 @unittest.skipUnless(importlib.util.find_spec("torch"), "CPU tensor tests use the installed engine Python")
 class InpaintSamplingTests(unittest.TestCase):
-    def generate(self, mask, via_worker=False, steps=None):
+    def generate(self, mask, via_worker=False, steps=None, fill=False):
         import torch
         import numpy as np
         calls = {}
@@ -100,7 +100,8 @@ class InpaintSamplingTests(unittest.TestCase):
                 self.assertEqual(result["state"], "done", result["message"])
                 output = decode_png(result["result"]["image"], 32 * 32)
             else:
-                output = pipeline.generate(image, mask, 42, "A green tree", threading.Event(), lambda _: None)
+                generate = pipeline.generate_fill if fill else pipeline.generate
+                output = generate(image, mask, 42, "A green tree", threading.Event(), lambda _: None)
         self.assertEqual(len(encoded), 2)
         self.assertEqual(len(calls["vision"]["images"]), 2)
         self.assertEqual(len(calls["positive"][0][1]["reference_latents"]), 2)
@@ -109,7 +110,14 @@ class InpaintSamplingTests(unittest.TestCase):
         self.assertEqual(calls["sigmas"].numel() - 1, steps or 8)
         self.assertEqual(tuple(calls["noise_mask"].shape), (1, 1, 2, 2))
         self.assertTrue(np.isfinite(np.asarray(output)).all())
+        calls['reference_pixels'] = encoded[0]
         return output, calls
+
+    def test_fill_keeps_the_original_colored_pixels_in_its_conditioning(self):
+        mask = Image.new('L', (32, 32), 255)
+        _, calls = self.generate(mask, fill=True)
+        self.assertAlmostEqual(float(calls['reference_pixels'][0, 0, 0, 0]), 220 / 255, places=5)
+        self.assertNotIn('neutral gray', calls['prompt'])
 
     def test_white_is_regenerated_black_is_protected_and_fill_is_visible(self):
         mask = Image.new("L", (32, 32))

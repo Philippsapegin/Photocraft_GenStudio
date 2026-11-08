@@ -153,11 +153,28 @@ def restore_result(edit: PreparedEdit, generated: Image.Image) -> Image.Image:
     return generated.crop((0, 0, x1 - x0, y1 - y0))
 
 
-def result_patch(edit: PreparedEdit, generated: Image.Image, feather: int = 4) -> Image.Image:
+def inward_feather(mask: Image.Image, radius: int) -> Image.Image:
+    """Ramp from the selection edge inward, keeping every outside pixel zero."""
+    mask = mask.convert('L')
+    bounds = mask.getbbox()
+    if not radius or bounds is None:
+        return mask.copy()
+    radius = min(radius, max(1, min(bounds[2] - bounds[0], bounds[3] - bounds[1]) // 4))
+    interior, weights = mask, Image.new('L', mask.size)
+    for index in range(radius):
+        increment = round(255 * (index + 1) / radius) - round(255 * index / radius)
+        weights = ImageChops.add(weights, interior.point(lambda value: value * increment // 255))
+        interior = interior.filter(ImageFilter.MinFilter(3))
+    return ImageChops.multiply(mask, weights)
+
+
+def result_patch(edit: PreparedEdit, generated: Image.Image, feather: int = 4, *, inward=False) -> Image.Image:
     feather = bounded_int(feather, 0, 64, "Edge softness")
     generated = restore_result(edit, generated)
     alpha = edit.mask.crop(edit.box)
-    if feather:
+    if inward:
+        alpha = inward_feather(alpha, feather)
+    elif feather:
         # Feather inward only: zeros outside the user's mask remain exactly zero.
         alpha = ImageChops.multiply(alpha, alpha.filter(ImageFilter.GaussianBlur(feather)))
     alpha = ImageChops.multiply(alpha, generated.getchannel("A"))

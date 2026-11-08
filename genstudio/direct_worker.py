@@ -44,7 +44,7 @@ class Worker:
             loaded = self.pipeline.pipe is not None
             state = "error" if self.model_error else "loaded" if loaded else "loading" if self.loading else "unloaded"
             return {"service": "genstudio-direct", "ready": not problems,
-                    "owner": self.owner, "inpaint_protocol": 2, "model": self.model_id,
+                    "owner": self.owner, "inpaint_protocol": 2, "fill_protocol": 1, "model": self.model_id,
                     "studio_protocol": 3, "components": self.pipeline.components,
                     "textEncoder": self.pipeline.text_encoder, "vae": self.pipeline.vae,
                     "modelsDir": str(self.pipeline.models.resolve()), "problems": problems,
@@ -53,6 +53,9 @@ class Worker:
     def submit(self, data):
         if not isinstance(data, dict):
             raise ValueError("Expected a generation request object.")
+        mode = data.get('mode')
+        if mode not in (None, 'fill', 'remove'):
+            raise ValueError('Unknown editing tool.')
         studio = None
         if data.get("kind") == "studio":
             from .studio import request
@@ -76,13 +79,13 @@ class Worker:
             uid = uuid.uuid4().hex
             job = {"id": uid, "state": "queued", "message": "Queued", "cancel": threading.Event()}
             self.jobs[uid] = job
-            self.pool.submit(self.run, job, image, mask, seed, prompt, studio)
+            self.pool.submit(self.run, job, image, mask, seed, prompt, studio, mode)
             return self.public(job)
 
     def public(self, job):
         return {key: job[key] for key in ("id", "state", "message")}
 
-    def run(self, job, image, mask, seed, prompt, studio=None):
+    def run(self, job, image, mask, seed, prompt, studio=None, mode=None):
         def progress(message):
             with self.lock:
                 job["message"] = message
@@ -98,7 +101,12 @@ class Worker:
                     self.model_error = ""
                 failure = None
                 try:
-                    output = self.pipeline.generate_studio(studio["references"], seed, prompt, studio["width"], studio["height"], job["cancel"], progress, loras=studio['loras'], **({'negative_prompt':studio['negativePrompt']} if studio['negativePrompt'] else {})) if studio else self.pipeline.generate(image, mask, seed, prompt, job["cancel"], progress)
+                    if studio:
+                        output = self.pipeline.generate_studio(studio["references"], seed, prompt, studio["width"], studio["height"], job["cancel"], progress, loras=studio['loras'], **({'negative_prompt':studio['negativePrompt']} if studio['negativePrompt'] else {}))
+                    else:
+                        generate = (self.pipeline.generate_fill if mode == 'fill' and hasattr(self.pipeline, 'generate_fill')
+                                    else self.pipeline.generate)
+                        output = generate(image, mask, seed, prompt, job["cancel"], progress)
                 except Cancelled:
                     failure = "cancelled", "Cancelled"
                 except Exception as error:

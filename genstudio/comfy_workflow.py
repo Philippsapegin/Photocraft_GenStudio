@@ -111,7 +111,10 @@ def install_nodes(comfy_dir):
     if target.is_symlink() or target.exists() and not target.is_dir():
         raise ValueError("custom_nodes/GenGate is not an ordinary folder; install the bridge there manually.")
     source = NODE_SOURCE
-    files = ("__init__.py", "nodes.py", "bridge.py", "web/active_workflow.js", "README.md", "LICENSE", "examples/Connection-test.json", "examples/Connection-test-api.json")
+    files = ("__init__.py", "nodes.py", "bridge.py", "web/active_workflow.js", "README.md", "LICENSE",
+             "examples/Connection-test.json", "examples/Connection-test-api.json",
+             "examples/FLUX3-Klein-Edit.json", "examples/FLUX3-Klein-Edit-api.json",
+             "examples/FIBO2-AiFill.json", "examples/FIBO2-AiFill-api.json")
     if not all((source / name).is_file() for name in files):
         raise ValueError("The GenGate node package is incomplete. Update the add-on.")
     current = {name: hashlib.sha256((source / name).read_bytes()).hexdigest() for name in files}

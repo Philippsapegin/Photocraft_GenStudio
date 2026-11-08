@@ -38,9 +38,9 @@ def edit(folder, settings, emit, *, request=http_json, configure=None, interval=
     body = {"image": base64.b64encode((folder / "input.png").read_bytes()).decode("ascii"),
             "mask": base64.b64encode((folder / "mask.png").read_bytes()).decode("ascii"),
             "mode": "fill" if prompt is not None else "remove", "prompt": prompt if prompt is not None else REMOVE_PROMPT,
-            "preserve_roi": True, "return_rectangle": True, "masked_input": True,
+            "preserve_roi": True, "return_rectangle": True, "masked_input": prompt is None,
             "pixel_aligned": True, "downsample": settings.get("reduceEditResolution", False),
-            "grow": 8, "feather": 2}
+            "grow": 8, "feather": 16 if prompt is not None else 2}
     job = None
     complete = False
     try:

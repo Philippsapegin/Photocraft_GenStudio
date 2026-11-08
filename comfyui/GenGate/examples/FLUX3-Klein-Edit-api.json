@@ -1,0 +1,277 @@
+{
+  "1": {
+    "inputs": {
+      "unet_name": "flux3-image-klein-int8-convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "GenGate: Model"
+    }
+  },
+  "2": {
+    "inputs": {
+      "clip_name": "qwen3vl_4b_int8_convrot.safetensors",
+      "type": "flux3",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "GenGate: Text encoder"
+    }
+  },
+  "3": {
+    "inputs": {
+      "vae_name": "flux2-vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "GenGate: VAE"
+    }
+  },
+  "4": {
+    "inputs": {
+      "max_shift": 2.77,
+      "base_shift": 2.77,
+      "width": [
+        "100",
+        3
+      ],
+      "height": [
+        "100",
+        4
+      ],
+      "model": [
+        "101",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingFlux",
+    "_meta": {
+      "title": "ModelSamplingFlux"
+    }
+  },
+  "5": {
+    "inputs": {
+      "clip_name": "qwen3.5_9b_flux3_prompt_upsampler_w4a8.safetensors",
+      "type": "flux3",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "FLUX3 prompt upsampler"
+    }
+  },
+  "6": {
+    "inputs": {
+      "prompt": [
+        "100",
+        2
+      ],
+      "max_length": 3584,
+      "sampling_mode": "on",
+      "sampling_mode.temperature": 1,
+      "sampling_mode.top_k": 1,
+      "sampling_mode.top_p": 0.95,
+      "sampling_mode.min_p": 0,
+      "sampling_mode.repetition_penalty": 1,
+      "sampling_mode.presence_penalty": 0,
+      "sampling_mode.seed": [
+        "100",
+        5
+      ],
+      "thinking": false,
+      "use_default_template": true,
+      "mtp": "off",
+      "clip": [
+        "5",
+        0
+      ],
+      "images.image1": [
+        "100",
+        0
+      ],
+      "system_prompt": [
+        "102",
+        0
+      ]
+    },
+    "class_type": "TextGenerateV2",
+    "_meta": {
+      "title": "Generate Text"
+    }
+  },
+  "7": {
+    "inputs": {
+      "text": [
+        "6",
+        0
+      ],
+      "clip": [
+        "101",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Prompt)"
+    }
+  },
+  "9": {
+    "inputs": {
+      "width": [
+        "100",
+        3
+      ],
+      "height": [
+        "100",
+        4
+      ],
+      "batch_size": [
+        "100",
+        6
+      ]
+    },
+    "class_type": "EmptyFlux2LatentImage",
+    "_meta": {
+      "title": "Empty Flux 2 Latent"
+    }
+  },
+  "12": {
+    "inputs": {
+      "seed": [
+        "100",
+        5
+      ],
+      "steps": 16,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "4",
+        0
+      ],
+      "positive": [
+        "22",
+        0
+      ],
+      "negative": [
+        "22",
+        0
+      ],
+      "latent_image": [
+        "9",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "13": {
+    "inputs": {
+      "samples": [
+        "12",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "14": {
+    "inputs": {
+      "images": [
+        "13",
+        0
+      ],
+      "seed": [
+        "100",
+        5
+      ],
+      "loras": [
+        "100",
+        7
+      ]
+    },
+    "class_type": "GenGateOUT2",
+    "_meta": {
+      "title": "GenGate OUT"
+    }
+  },
+  "21": {
+    "inputs": {
+      "pixels": [
+        "100",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE Encode"
+    }
+  },
+  "22": {
+    "inputs": {
+      "conditioning": [
+        "7",
+        0
+      ],
+      "latent": [
+        "21",
+        0
+      ]
+    },
+    "class_type": "ReferenceLatent",
+    "_meta": {
+      "title": "Set Reference Latent"
+    }
+  },
+  "100": {
+    "inputs": {},
+    "class_type": "GenGateIN2",
+    "_meta": {
+      "title": "GenGate IN"
+    }
+  },
+  "101": {
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "loras": [
+        "100",
+        7
+      ],
+      "clip": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "GenGateApplyLoRAs",
+    "_meta": {
+      "title": "GenGate Apply LoRAs"
+    }
+  },
+  "102": {
+    "inputs": {
+      "value": "You are the annotation system an image-editing model was trained on. You see the source image(s), attached in order as ref_image_0, ref_image_1, ..., and the user's editing instruction; the edited target image does not exist yet. Determine the edit precisely, imagine the target consistently with the source, and write the record its annotator would have written, on one line: the instruction paragraph, one space, then ONE JSON array. Output nothing else.\n\nThe paragraph: English, instruction voice (\"Change the ...\", \"Remove the ...\", or \"Create a photograph of ...\" when the references are drawn into a new frame), never observer phrasing and never a comparison with the target. Cite every involved object, person or text block at its first mention with its table id in its own angle brackets (\"remove the delivery van <van_1>\"), every table id exactly once and no other id; cite a reference image by its token when content is taken from it (\"the cup <cup_1> from <ref_image_1>\"). End states (new color, new text in quotes, pose, degree) live in the paragraph, static appearance in the descs; no coordinates. An editing instruction closes with one compact clause that everything else stays identical to the source.\n\nThe table, rows {\"id\", \"from\", \"src_bbox\", \"tgt_bbox\", \"desc\"}: one row per edited, removed, added, moved or anchoring item, plus the scene or background when it is itself changed or preserved; no rows for untouched scenery. id: a lowercase class noun plus an index (person_1, cup_2) numbered left to right, then top to bottom; text blocks are En_Text_1 and so on; ids are unique. from: \"ref_image_N\" for an item visible in reference N, \"target\" for newly created content. src_bbox is the item's box in its from-image and null for target rows; tgt_bbox is its box in the imagined result and null for removed items; moved or resized items carry both; new items are sized like similar objects in the frame. Boxes are [y_min, x_min, y_max, x_max] integers from 0 to 1000, top-left origin, tight around objects, with 5 to 15 units of margin around text. A row may also carry src_bbox_1stage and tgt_bbox_1stage, a first-pass estimate of the same boxes. desc: one English paragraph of the item's static appearance in its from-image (for target rows, its decided appearance), opening with its identity; people get the richest descs (ethnicity, gender, age range, skin tone, hair, face, garments, accessories, pose, expression); text rows quote their text verbatim.\n\nState only decided facts: visible in the source, demanded by the instruction, or a concrete default needed to realize it. Settle whether the edit targets one instance, all of a class or several; land every magnitude on a concrete value; include visible knock-on effects; added objects are new objects at real-world size; a zoom-in names the neighbors it excludes; an outpainting keeps the source whole and continues it in the same medium. Everything the instruction does not involve stays identical to the source.\n\nOutput only the paragraph and the table."
+    },
+    "class_type": "PrimitiveStringMultiline",
+    "_meta": {
+      "title": "FLUX3 system prompt"
+    }
+  }
+}

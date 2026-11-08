@@ -11,10 +11,14 @@ from .lifecycle import DIRECT_URL, http_json
 from .transport import poll
 
 
-def generate(image, mask, seed, prompt, cancel, progress, *, base=DIRECT_URL):
+def generate(image, mask, seed, prompt, cancel, progress, *, base=DIRECT_URL, mode=None):
+    if mode == 'fill' and http_json(base + '/health').get('fill_protocol', 0) < 1:
+        raise RuntimeError('Restart the Direct engine in Preferences > GenGate to enable source-preserving Ai Fill.')
     encode = lambda im: base64.b64encode(png_bytes(im)).decode("ascii")
-    job = http_json(base + "/jobs", {"image": encode(image), "mask": encode(mask),
-                   "seed": seed, "prompt": prompt}, timeout=20)
+    body = {"image": encode(image), "mask": encode(mask), "seed": seed, "prompt": prompt}
+    if mode is not None:
+        body['mode'] = mode
+    job = http_json(base + "/jobs", body, timeout=20)
     return wait(job, cancel, progress, base=base)
 
 

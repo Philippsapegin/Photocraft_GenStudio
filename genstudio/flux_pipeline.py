@@ -238,6 +238,16 @@ class FluxPipeline:
             decoded = vae.decode(samples).detach().float().cpu().numpy()[0]
             return Image.fromarray((np.clip(decoded, 0, 1) * 255).round().astype(np.uint8)).convert("RGBA")
 
+    def generate_fill(self, image, mask, seed, prompt, cancel, progress):
+        if image.size != mask.size or mask.convert('L').getbbox() is None:
+            raise ValueError('The edit mask is empty or has different dimensions from the image.')
+        # Use the same full-reference edit path as Studio. Erasing the source
+        # clothing also erased its pose, material and the background at the seam.
+        # The host applies the selection to the returned image on a separate layer.
+        return self.generate_studio([image.convert('RGBA')], seed, prompt,
+                                    image.width, image.height, cancel, progress,
+                                    _minimum=16, _maximum=16384, _constant_lora=True)
+
     def generate(self, image, mask, seed, prompt, cancel, progress):
         reference, coverage = inpaint_references(image, mask)
         # FLUX3 is an editing model. Pixel-exact masking is applied by the host

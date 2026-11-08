@@ -15,7 +15,7 @@ import uuid
 
 from . import __version__
 from .comfy import Cancelled, ComfyClient
-from .image_ops import bounded_int, decode_png, prepare_edit, png_bytes, result_patch, restore_result
+from .image_ops import bounded_int, decode_png, prepare_edit, png_bytes, result_patch, restore_result, inward_feather
 from .workflow import edit_prompt
 from .progress import sampling_fraction
 
@@ -98,7 +98,7 @@ class JobManager:
                       if hasattr(self.client, 'generate_edit') else self.client.generate(reference, edit.model_mask, seed, prompt, job.cancel, progress))
             if job.cancel.is_set():
                 raise Cancelled()
-            patch = restore_result(edit, output) if rectangle else result_patch(edit, output, feather)
+            patch = restore_result(edit, output) if rectangle else result_patch(edit, output, feather, inward=mode == 'fill')
             result = {"image": base64.b64encode(png_bytes(patch)).decode("ascii"),
                       "x": edit.box[0], "y": edit.box[1], "seed": seed,
                       "width": patch.width, "height": patch.height,
@@ -108,7 +108,9 @@ class JobManager:
                 # editable layer mask. Legacy clients still receive an alpha-clipped patch.
                 from PIL import ImageChops, ImageFilter
                 coverage = edit.mask.crop(edit.box)
-                if feather:
+                if mode == 'fill':
+                    coverage = inward_feather(coverage, feather)
+                elif feather:
                     coverage = ImageChops.multiply(coverage, coverage.filter(ImageFilter.GaussianBlur(feather)))
                 result["mask"] = base64.b64encode(png_bytes(coverage)).decode("ascii")
             with self.lock:

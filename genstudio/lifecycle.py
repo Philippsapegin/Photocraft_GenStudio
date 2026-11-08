@@ -317,10 +317,11 @@ class EngineHost:
             return self._generate(image, mask, seed, prompt, cancel, progress)
 
     def generate_edit(self, image, mask, seed, prompt, cancel, progress, *, mode="fill"):
-        if self.engine != 'comfy':
-            return self.generate(image, mask, seed, prompt, cancel, progress)
         if mode not in ('fill', 'remove'):
             raise ValueError('Unknown editing tool.')
+        if self.engine != 'comfy':
+            with self.work_lock:
+                return self._generate(image, mask, seed, prompt, cancel, progress, mode=mode)
         from .comfy_workflow import read_workflow
         path = self.settings['fillWorkflow' if mode == 'fill' else 'removeWorkflow']
         if not path:
@@ -349,7 +350,7 @@ class EngineHost:
             output.putalpha(ImageChops.multiply(output.getchannel('A'), decode_png(row['mask'], 32 << 20).convert('L')))
         return output
 
-    def _generate(self, image, mask, seed, prompt, cancel, progress):
+    def _generate(self, image, mask, seed, prompt, cancel, progress, *, mode=None):
         with self.lock:
             self.busy = True
         try:
@@ -357,7 +358,8 @@ class EngineHost:
             if self.engine != "direct":
                 raise ValueError('The engine changed. Submit the editing workflow again.')
             from .direct_client import generate
-            return generate(image, mask, seed, prompt, cancel, progress, base=self.direct_url)
+            return generate(image, mask, seed, prompt, cancel, progress, base=self.direct_url,
+                            **({'mode': mode} if mode is not None else {}))
         finally:
             with self.lock:
                 self.busy = False
