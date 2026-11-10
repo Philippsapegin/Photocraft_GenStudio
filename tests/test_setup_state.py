@@ -89,3 +89,26 @@ class SetupStateTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             setup.remember(self.host, self.root / 'incomplete', location=self.location)
         self.assertFalse(self.location.exists())
+
+    def test_large_native_preferences_portable_and_global_profile(self):
+        preferences = {'presets': {'native': 'x' * 350000}, 'genStudio': self.cached}
+        self.put(self.profile / 'preferences.json', preferences)
+        self.assertEqual(self.discover(host=str(self.host))['settings'], self.cached)
+        self.assertEqual(self.discover()['host'], str(self.host))
+
+    def test_unreadable_global_candidate_does_not_hide_other_installations(self):
+        self.put(self.profile / 'preferences.json', {'presets':'x' * (8 * 1024 * 1024 + 1)})
+        self.assertFalse(self.discover().get('found'))
+        self.put(self.profile / 'preferences.json', {'genStudio':self.cached})
+        other = self.root / 'bad global'
+        self.put(other / 'preferences.json', ['not an object'])
+        self.assertEqual(setup.discover(location=self.location,profile=other,hosts=[self.host],installs=[])['host'], str(self.host))
+
+    def test_bad_locator_and_unreadable_metadata_do_not_abort_discovery(self):
+        self.location.write_text('{bad')
+        actual=setup.object_at
+        def read(path, **kwargs):
+            if path.name=='genstudio-install.json':raise PermissionError('another account')
+            return actual(path, **kwargs)
+        with patch.object(setup,'object_at',side_effect=read):
+            self.assertFalse(self.discover().get('found'))

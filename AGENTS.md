@@ -1,5 +1,15 @@
 # GenGate project rules
 
+## Windows installation ownership
+
+- Setup and Direct belong to the signed-in desktop user. Do not elevate the
+  whole installer or grant broad ACL access to another account's runtime.
+- A protected/shared PhotoCraft host gets a verified personal copy and a user
+  shortcut; the shared editor and other users' profiles/shortcuts stay unchanged.
+- Elevation is limited to explicitly removing a legacy shared patch.
+- See [Windows installation](docs/WINDOWS_INSTALLATION.md) for the account,
+  profile, update and recovery boundaries and standard-user validation.
+
 ## User-facing release notes
 
 - Write for the person installing and using GenGate: visible improvements,

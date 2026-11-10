@@ -10,8 +10,9 @@ if ($v.locations) {
 } else {
     $programs = [Environment]::GetFolderPath('Programs')
     $desktop = [Environment]::GetFolderPath('Desktop')
-    $locations = @($programs, [Environment]::GetFolderPath('CommonPrograms'))
-    if ($v.desktop) { $locations += @($desktop, [Environment]::GetFolderPath('CommonDesktopDirectory')) }
+    # The personal installation must not edit shared shortcuts owned by an administrator.
+    $locations = @($programs)
+    if ($v.desktop) { $locations += @($desktop) }
 }
 $canonical = @(Join-Path $programs 'PhotoCraft.lnk')
 if ($v.desktop) { $canonical += Join-Path $desktop 'PhotoCraft.lnk' }

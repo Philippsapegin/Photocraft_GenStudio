@@ -17,11 +17,12 @@ def location_file():
     return Path(os.environ.get("LOCALAPPDATA", Path.home() / ".local/share")) / "GenGate/setup.json"
 
 
-def object_at(path):
+def object_at(path, *, preferences=False):
     if not path.is_file():
         return {}
-    if path.stat().st_size > 128 * 1024:
-        raise ValueError("Saved setup settings exceed 128 KB.")
+    limit = 8 * 1024 * 1024 if preferences else 128 * 1024
+    if path.stat().st_size > limit:
+        raise ValueError("Saved settings exceed the allowed size: " + str(path))
     value = ep.read(path)
     if not isinstance(value, dict):
         raise ValueError("Saved setup settings must be an object.")
@@ -53,7 +54,7 @@ def for_host(host, install=""):
     host = ep.host_folder(host)
     state = ep.state_for(host)
     profile = ep.profile_folder(host)
-    prefs = object_at(profile / "preferences.json")
+    prefs = object_at(profile / "preferences.json", preferences=True)
     settings = ep.previous_settings(host, prefs)
     if not settings:
         settings = object_at(host / "runtime/config.photocraft.json")
@@ -76,44 +77,56 @@ def for_host(host, install=""):
 
 
 def discover(host="", install="", *, location=None, profile=None, hosts=None, installs=None):
+    def attempt(function, *args, **kwargs):
+        try:
+            return function(*args, **kwargs)
+        except (OSError, ValueError, TypeError, KeyError):
+            return {}
     if host:
-        return for_host(host, install) if valid_host(host) else {"found": False}
+        return attempt(for_host, host, install) if attempt(valid_host, host) else {"found": False}
     if install:
-        meta = installation(install)
-        return for_host(meta["host"], install) if meta else {"found": False}
+        meta = attempt(installation, install)
+        return attempt(for_host, meta["host"], install) if meta else {"found": False}
     try:
         last = object_at(location or location_file())
         meta = installation(last.get("installDir"))
     except (OSError, ValueError):
         last, meta = {}, {}
     if meta and Path(meta["host"]).resolve() == Path(last.get("host", "")).resolve():
-        return for_host(meta["host"], meta["installDir"])
+        found = attempt(for_host, meta["host"], meta["installDir"])
+        if found.get("found"):
+            return found
     # The native profile can locate a nonstandard/portable installation through
     # its runtime, even when this older setup never wrote a location record.
     profile = profile or ep.profile_folder(Path("__nonportable__"))
-    prefs = object_at(profile / "preferences.json")
+    prefs = attempt(object_at, profile / "preferences.json", preferences=True)
     values = prefs.get("genStudio", {})
     if isinstance(values, dict):
-        meta = installation(root_for_runtime(values.get("runtimeRoot")))
+        meta = attempt(installation, root_for_runtime(values.get("runtimeRoot")))
         if meta:
-            return for_host(meta["host"], meta["installDir"])
+            found = attempt(for_host, meta["host"], meta["installDir"])
+            if found.get("found"):
+                return found
     if installs is None:
         installs = [Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Programs/GenGate"]
     for folder in installs:
-        meta = installation(folder)
+        meta = attempt(installation, folder)
         if meta:
-            return for_host(meta["host"], meta["installDir"])
+            found = attempt(for_host, meta["host"], meta["installDir"])
+            if found.get("found"):
+                return found
     if hosts is None:
-        hosts = [Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Programs/ArtCraft/PhotoCraft",
+        hosts = [Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Programs/ArtCraft/PhotoCraft-GenGate",
+                 Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Programs/ArtCraft/PhotoCraft",
                  Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "ArtCraft/PhotoCraft",
                  Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Programs/PhotoCraft",
                  Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "PhotoCraft"]
         if os.name == "nt":
             hosts += [Path(letter + ":/Programs/PhotoCraft") for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"]
     for folder in hosts:
-        if valid_host(folder):
-            found = for_host(folder)
-            if found["found"]:
+        if attempt(valid_host, folder):
+            found = attempt(for_host, folder)
+            if found.get("found"):
                 return found
     return {"found": False}
 

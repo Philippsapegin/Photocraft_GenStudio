@@ -51,6 +51,38 @@ class EditorPatchTests(unittest.TestCase):
         self.assertEqual(document.read_bytes(), b"do not touch")
         self.assertFalse((self.host / "runtime/config.photocraft.json").exists())
 
+    def test_recovery_cleanup_requires_exact_restore_and_preserves_documents(self):
+        state=self.apply()
+        with self.assertRaisesRegex(ValueError,'still active'):
+            ep.cleanup_recovery(self.host,state['files'])
+        ep.restore(self.host)
+        document=self.host/'keep.pcraft';document.write_bytes(b'keep')
+        self.assertTrue(ep.cleanup_recovery(self.host,state['files'])['recoveryBackupsRemoved'])
+        self.assertFalse((self.host/'.gengate/backups').exists())
+        self.assertEqual(document.read_bytes(),b'keep')
+        self.assert_original()
+
+    def test_recovery_cleanup_retains_backups_for_a_newer_editor(self):
+        state=self.apply();ep.restore(self.host)
+        (self.host/'photocraft.exe').write_bytes(b'new official update')
+        with self.assertRaisesRegex(ValueError,'no longer matches'):
+            ep.cleanup_recovery(self.host,state['files'])
+        self.assertTrue((self.host/'.gengate/backups').exists())
+
+    def test_stale_inaccessible_runtime_settings_do_not_get_reused(self):
+        stale=self.root/'missing/versions/old/runtime'
+        settings={'runtimeRoot':str(stale),'directPython':str(stale/'python.exe'),'modelsDir':'keep models'}
+        value=ep.previous_settings(self.host,{'genStudio':settings})
+        self.assertEqual(value['runtimeRoot'],'')
+        self.assertEqual(value['directPython'],'')
+        self.assertEqual(value['modelsDir'],'keep models')
+
+    def test_restore_does_not_reintroduce_an_inaccessible_previous_account(self):
+        stale={'runtimeRoot':str(self.root/'Admin/versions/old/runtime'),'directPython':str(self.root/'Admin/python.exe')}
+        self.prefs.write_bytes(ep.encoded({**self.old_preferences,'genStudio':stale}))
+        self.apply();ep.restore(self.host)
+        self.assertEqual(ep.read(self.prefs),self.old_preferences)
+
     def test_repeat_install_retains_true_originals_and_is_reversible(self):
         self.apply()
         self.apply()

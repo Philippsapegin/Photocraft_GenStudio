@@ -1,4 +1,4 @@
-"""Apply the current GenGate integration to pinned PhotoCraft 0.20.2/0.21.0 sources."""
+"""Apply the current GenGate integration to pinned PhotoCraft 0.20.2/0.21.0/0.22.0 sources."""
 from pathlib import Path
 import argparse
 import json
@@ -31,7 +31,7 @@ def replace(path, old, new):
 
 def prepare(source):
     if not (source / 'crates/engine/src/cmd.rs').is_file():
-        raise RuntimeError('This development integration targets PhotoCraft 0.20.2/0.21.0. Use the matching older GenGate release source for earlier editors.')
+        raise RuntimeError('This development integration targets PhotoCraft 0.20.2/0.21.0/0.22.0. Use the matching older GenGate release source for earlier editors.')
     source = source_view(source)
     prepare_photocraft_012.before(source)
     prepare_gengate.before(source)
@@ -52,6 +52,8 @@ def prepare(source):
     # The generation workspace stays under Filter > Plug-ins; its configuration
     # lives in the editor's Preferences alongside the other settings sections.
     prefs = engine / "prefs.rs"
+    replace(prefs, 'let mut v: Value = serde_json::from_str(s).map_err(|e| format!("preferences: {e}"))?;',
+            'let mut v: Value = serde_json::from_str(s).map_err(|e| format!("preferences: {e}"))?;\n        crate::genstudio::reconcile_prefs(&mut v);')
     existing = prefs.read_text(encoding="utf-8")
     plugin_label = "Plugins" if '("plugIns", "Plugins")' in existing else "Plug-ins"
     existing = existing.replace('pub const SECTIONS: [(&str, &str); 18]', 'pub const SECTIONS: [(&str, &str); 19]')

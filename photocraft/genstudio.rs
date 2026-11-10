@@ -113,6 +113,35 @@ pub struct Settings {
     pub runtime_root: String,
 }
 
+/// Replace only installation-owned paths; retain user prompts, models and preset choices.
+fn reconcile_value(value: &mut Value, defaults: Option<&Value>, active: Option<&str>) {
+    let Some(settings) = value.get_mut("genStudio").and_then(Value::as_object_mut) else { return; };
+    let old = settings.get("runtimeRoot").and_then(Value::as_str).unwrap_or_default().to_owned();
+    let managed = std::path::Path::new(&old).parent().and_then(std::path::Path::parent).and_then(std::path::Path::file_name).is_some_and(|name| name == "versions");
+    if !managed || active == Some(old.as_str()) { return; }
+    settings.insert("runtimeRoot".into(), json!(active.unwrap_or_default()));
+    for key in ["directPython", "comfyPython"] {
+        if settings.get(key).and_then(Value::as_str).is_some_and(|path| std::path::Path::new(path).starts_with(&old)) {
+            settings.insert(key.into(), defaults.and_then(|v| v.get(key)).cloned().unwrap_or(json!("")));
+        }
+    }
+}
+
+pub(crate) fn reconcile_prefs(value: &mut Value) {
+    #[cfg(target_os = "windows")]
+    if let Ok(exe) = std::env::current_exe()
+        && matches!(exe.file_name().and_then(|v| v.to_str()), Some("photocraft.exe" | "photocraft-cli.exe"))
+        && let Some(host) = exe.parent()
+    {
+        let state = read_installed_defaults(&host.join(".gengate/state.json"));
+        let defaults = read_installed_defaults(&host.join("runtime/config.photocraft.json"));
+        let active = state.as_ref().and_then(|v| v.get("runtime")).and_then(Value::as_str);
+        reconcile_value(value, defaults.as_ref(), active);
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = value;
+}
+
 impl Default for Settings {
     fn default() -> Self {
         let compiled: Value = serde_json::from_str(include_str!("genstudio-defaults.json")).unwrap_or(Value::Null);
@@ -335,6 +364,25 @@ pub fn discover(s: &Session, settings: Settings) {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn runtime_file(path: &std::path::Path) -> std::result::Result<(), String> {
+    match std::fs::metadata(path) {
+        Ok(value) if value.is_file() => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => Err(format!("Access denied to GenGate runtime: {}. It may belong to another Windows account. Run GenGate Setup normally as the signed-in user, without administrator rights.", path.display())),
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(format!("Cannot access GenGate runtime {}: {error}", path.display())),
+        _ => Err(format!("GenGate runtime file is missing: {}. Run GenGate Setup to repair this installation.", path.display())),
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn runtime_launch_error(path: &std::path::Path, error: std::io::Error) -> String {
+    if error.kind() == std::io::ErrorKind::PermissionDenied {
+        format!("Access denied launching {}. Run GenGate Setup as the signed-in user to repair an installation created by another account.", path.display())
+    } else {
+        format!("Could not launch {}: {error}", path.display())
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn control(settings: &Settings, action: &str, event: &str) -> std::result::Result<Value, String> {
     use std::{
         io::Write,
@@ -346,10 +394,9 @@ fn control(settings: &Settings, action: &str, event: &str) -> std::result::Resul
     }
     let root = Path::new(&settings.runtime_root);
     let python = root.join(".venv").join(if cfg!(windows) { "Scripts/python.exe" } else { "bin/python" });
-    if !python.is_file() || !root.join("genstudio/control.py").is_file() {
-        return Err("GenGate runtime is missing. Check the runtime folder in Advanced settings.".into());
-    }
-    let mut cmd = Command::new(python);
+    runtime_file(&python)?;
+    runtime_file(&root.join("genstudio/control.py"))?;
+    let mut cmd = Command::new(&python);
     cmd.args(["-X", "utf8", "-m", "genstudio.control"])
         .current_dir(root)
         .env_remove("PYTHONHOME")
@@ -362,7 +409,7 @@ fn control(settings: &Settings, action: &str, event: &str) -> std::result::Resul
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x08000000);
     }
-    let mut child = cmd.spawn().map_err(|e| e.to_string())?;
+    let mut child = cmd.spawn().map_err(|e| runtime_launch_error(&python, e))?;
     let data = serde_json::to_vec(&json!({"action": action, "event": event, "settings": settings})).map_err(|e| e.to_string())?;
     if let Some(mut input) = child.stdin.take() {
         input.write_all(&data).map_err(|e| e.to_string())?;
@@ -506,6 +553,28 @@ mod tests {
         assert_eq!(read_installed_defaults(&file).unwrap()["runtimeRoot"], "D:/Apps/GenGate/runtime");
         std::fs::remove_file(file).unwrap();
         std::fs::remove_dir(dir).unwrap();
+    }
+    #[test]
+    fn stale_installed_paths_are_replaced_without_losing_model_choices() {
+        let mut value = json!({"genStudio":{"runtimeRoot":"/apps/versions/old/runtime","directPython":"/apps/versions/old/runtime/python.exe","modelsDir":"/models","model":"flux-3-image-klein"}});
+        reconcile_value(&mut value, Some(&json!({"directPython":"/new/python.exe"})), Some("/apps/versions/new/runtime"));
+        assert_eq!(value["genStudio"]["runtimeRoot"], "/apps/versions/new/runtime");
+        assert_eq!(value["genStudio"]["directPython"], "/new/python.exe");
+        assert_eq!(value["genStudio"]["modelsDir"], "/models");
+        assert_eq!(value["genStudio"]["model"], "flux-3-image-klein");
+        reconcile_value(&mut value, None, None);
+        assert_eq!(value["genStudio"]["runtimeRoot"], "");
+        // An independently configured external interpreter is retained.
+        assert_eq!(value["genStudio"]["directPython"], "/new/python.exe");
+    }
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn access_denied_has_the_exact_runtime_path_and_repair_action() {
+        let path = std::path::Path::new("C:/Users/Admin/GenGate/python.exe");
+        let message = runtime_launch_error(path, std::io::ErrorKind::PermissionDenied.into());
+        assert!(message.contains("Access denied") && message.contains("Admin/GenGate/python.exe") && message.contains("signed-in user"));
+        let missing = tempfile::tempdir().unwrap();
+        assert!(runtime_file(&missing.path().join("missing.py")).unwrap_err().contains("missing.py"));
     }
     #[test]
     fn policies_are_independent_and_persist() {

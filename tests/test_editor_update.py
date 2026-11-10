@@ -4,6 +4,7 @@ import contextlib
 import io
 import importlib.util
 import json
+import runpy
 from pathlib import Path
 import shutil
 import subprocess
@@ -22,6 +23,7 @@ installer=importlib.util.module_from_spec(spec);spec.loader.exec_module(installe
 
 class EditorUpdateTests(unittest.TestCase):
     def setUp(self):
+        account_guard=patch('genstudio.user_install.assert_account');account_guard.start();self.addCleanup(account_guard.stop)
         self.temp=tempfile.TemporaryDirectory(prefix='Editor update ');self.addCleanup(self.temp.cleanup)
         self.root=Path(self.temp.name).resolve();self.bundle=self.root/'bundle';self.host=self.root/'PhotoCraft'
         originals,self.outputs,_=fixture(self.bundle,self.host,host_version='0.21.0')
@@ -78,6 +80,18 @@ class EditorUpdateTests(unittest.TestCase):
         ep.restore(self.host)
         for name in ep.FILES:self.assertEqual((self.host/name).read_bytes(),self.official[name])
 
+    def test_standalone_script_can_prepare_the_signed_in_user_update(self):
+        entry = runpy.run_path(update.__file__)['run']
+        fake_installer = Mock()
+        fake_installer.valid_destination.return_value = self.dest
+        fake_installer.install.return_value = self.dest
+        plan = Mock(host=self.host)
+        with patch.dict(entry.__globals__, {'installer_module': lambda: fake_installer,
+                                           'Update': Mock(return_value=Mock(prepare=Mock(return_value=plan)))}), \
+                patch('genstudio.user_install.prepare', return_value=self.request):
+            self.assertEqual(entry(self.request, self.bundle, shortcuts=False), self.dest)
+        fake_installer.install.assert_called_once()
+
     def test_portable_failure_restores_editor_preferences_and_root_metadata(self):
         plan=self.plan();atomic=ep._atomic
         def fail(path,data):
@@ -131,7 +145,7 @@ class EditorUpdateTests(unittest.TestCase):
 
     def test_update_waits_for_saved_and_closed_editor_before_installing(self):
         plan=Mock(host=self.host);plan.prepare.return_value=plan
-        module=Mock();messages=[]
+        module=Mock();module.valid_destination.return_value=self.dest;messages=[]
         def installed(*args,**kwargs):
             self.assertEqual(closed.call_count,2)
             return self.dest
@@ -141,7 +155,7 @@ class EditorUpdateTests(unittest.TestCase):
         self.assertTrue(any('Save your work and close' in message for message in messages))
 
     def test_cancel_while_waiting_never_starts_installation(self):
-        plan=Mock(host=self.host);plan.prepare.return_value=plan;module=Mock()
+        plan=Mock(host=self.host);plan.prepare.return_value=plan;module=Mock();module.valid_destination.return_value=self.dest
         with patch.object(update,'installer_module',return_value=module),patch.object(update,'Update',return_value=plan),patch.object(ep,'assert_closed',side_effect=ValueError('Save your work and close this PhotoCraft')),patch.object(update.time,'sleep',side_effect=update.Cancelled('cancel')),self.assertRaises(update.Cancelled):
             update.run(self.request,self.bundle,progress=lambda _:None)
         module.install.assert_not_called();self.assert_old()

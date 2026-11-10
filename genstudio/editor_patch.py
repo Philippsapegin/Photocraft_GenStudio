@@ -15,6 +15,10 @@ FILES = ("photocraft.exe", "photocraft-cli.exe")
 MAX_BINARY = 256 * 1024 * 1024
 
 
+def is_link(path):
+    return path.is_symlink() or bool(getattr(path.lstat(), 'st_file_attributes', 0) & 0x400)
+
+
 class CompatibilityError(ValueError):
     """No patch applies to the editor currently on disk."""
 
@@ -365,10 +369,16 @@ def restore(host):
         prefs = profile / "preferences.json"
         values = read(prefs) if prefs.exists() else {}
         if values.get("genStudio", {}).get("runtimeRoot") == state["runtime"]:
-            if state["previousGenStudio"] is None:
+            previous = state["previousGenStudio"]
+            if isinstance(previous, dict) and previous.get('runtimeRoot'):
+                try:
+                    Path(previous['runtimeRoot']).stat()
+                except OSError:
+                    previous = None
+            if previous is None:
                 values.pop("genStudio", None)
             else:
-                values["genStudio"] = state["previousGenStudio"]
+                values["genStudio"] = previous
             changes.append((prefs, encoded(values)))
         config = host / "runtime/config.photocraft.json"
         if config.exists() and read(config).get("runtimeRoot") == state["runtime"]:
@@ -383,7 +393,18 @@ def previous_settings(host, preferences):
     if "genStudio" in preferences:
         if not isinstance(preferences["genStudio"], dict):
             raise ValueError("Existing GenGate preferences are invalid. Keep a copy before reinstalling.")
-        return preferences["genStudio"]
+        settings = preferences["genStudio"]
+        runtime = settings.get("runtimeRoot")
+        if runtime:
+            try:
+                Path(runtime).stat()
+            except OSError:
+                # Old per-account installs can survive in another user's prefs.
+                settings = {**settings, "runtimeRoot": ""}
+                for key in ("directPython", "comfyPython", "fillWorkflow", "removeWorkflow", "studioWorkflow"):
+                    if settings.get(key) and Path(settings[key]).is_relative_to(Path(runtime)):
+                        settings[key] = ""
+        return settings
     state = state_for(host)
     runtime = state.get("runtime")
     if not isinstance(runtime, str) or not runtime:
@@ -397,6 +418,37 @@ def previous_settings(host, preferences):
     if not isinstance(settings, dict):
         raise ValueError("The saved GenGate runtime settings are invalid.")
     return settings
+
+
+def cleanup_recovery(host, original_files):
+    """Explicit optional cleanup, only after exact restoration to the signed originals."""
+    host=host_folder(host)
+    if not original_files or set(original_files) != set(FILES):
+        raise ValueError('No verified original-file record; recovery backups were kept.')
+    root=(host/'.gengate').resolve()
+    if root.parent != host or is_link(host/'.gengate'):
+        raise ValueError('Linked recovery roots cannot be removed.')
+    with locked(host):
+        assert_closed(host)
+        if state_path(host).exists() or (root/'journal.json').exists():
+            raise ValueError('An installation or recovery is still active; backups were kept.')
+        if any(sha256(host/name)!=spec['baseSha256'] for name,spec in original_files.items()):
+            raise ValueError('PhotoCraft no longer matches the restored originals; backups were kept.')
+        targets=[root/name for name in ('backups','staging','shortcut-backups')]
+        for path in targets:
+            if not path.exists():continue
+            if path.resolve().parent!=root or is_link(path):
+                raise ValueError('Linked recovery folders cannot be removed.')
+            for parent,dirs,files in os.walk(path,followlinks=False):
+                if any(is_link(Path(parent)/name) for name in dirs+files):
+                    raise ValueError('Recovery folder contains a link; backups were kept.')
+        for path in targets:
+            if path.exists():shutil.rmtree(path)
+    # Empty folders only. Preserve any unrelated runtime content and lock files.
+    for path in (host/'runtime',):
+        try:path.rmdir()
+        except OSError:pass
+    return {'recoveryBackupsRemoved':True}
 
 
 def ensure_current(host):

@@ -36,9 +36,22 @@ def hidden_process(command, *, cwd=ROOT, stdout=None, stderr=None):
     for key in ("PYTHONHOME", "PYTHONPATH"):
         env.pop(key, None)
     env["PYTHONUTF8"] = "1"
-    return subprocess.Popen(command, cwd=str(cwd), env=env, stdin=subprocess.DEVNULL,
-                            stdout=stdout, stderr=stderr,
-                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    try:
+        return subprocess.Popen(command, cwd=str(cwd), env=env, stdin=subprocess.DEVNULL,
+                                stdout=stdout, stderr=stderr,
+                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except PermissionError as error:
+        raise ValueError('Access denied launching '+str(command[0])+'. This runtime may belong to another Windows account. Run GenGate Setup normally as the signed-in user, without administrator rights.') from error
+
+
+def runtime_python(path):
+    try:
+        path.stat()
+    except PermissionError as error:
+        raise ValueError('Access denied to Python: '+str(path)+'. This runtime may belong to another Windows account. Repair it with GenGate Setup as the signed-in user.') from error
+    except FileNotFoundError:
+        return False
+    return path.is_file()
 
 
 class EngineHost:
@@ -215,7 +228,7 @@ class EngineHost:
             if self.engine == "comfy":
                 python = Path(self.settings["comfyPython"])
                 folder = Path(self.settings["comfyDir"])
-                if not python.is_file() or not (folder / "main.py").is_file():
+                if not runtime_python(python) or not (folder / "main.py").is_file():
                     raise ValueError("Set the ComfyUI folder and Python executable in GenGate.")
                 if enabled(self.settings):
                     from .comfy_workflow import install_nodes
@@ -234,7 +247,7 @@ class EngineHost:
                 cwd = folder
             else:
                 python = Path(self.settings["directPython"])
-                if not python.is_file():
+                if not runtime_python(python):
                     raise ValueError("Direct AI runtime is not installed. Run scripts/Setup-Direct.ps1, then select its Python executable.")
                 if self.process is None or self.process.poll() is not None:
                     with socket.socket() as reservation:

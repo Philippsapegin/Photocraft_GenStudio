@@ -181,6 +181,10 @@ def installer_module():
 
 def run(request, bundle, *, target=None, cancel=lambda:None, progress=print, cache=None, shortcuts=True, warnings=None):
     installer=installer_module();installer.verify_bundle(Path(bundle))
+    from genstudio.user_install import prepare, assert_account, require_destination
+    assert_account()
+    require_destination(installer.valid_destination(request.get('installDir'),Path(bundle)))
+    request=prepare(request,Path(bundle),progress=progress)
     plan=Update(request['photocraftDir'],bundle,target=target,cache=cache,cancel=cancel,progress=progress,
                 installation=request.get('_editorInstallation')).prepare()
     progress('GENGATE_SETUP_PHASE '+json.dumps({'message':'Save your work and close PhotoCraft to continue. The update will wait here.'}))

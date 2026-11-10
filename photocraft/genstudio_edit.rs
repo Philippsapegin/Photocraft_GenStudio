@@ -60,9 +60,8 @@ fn generate_request(settings: &Settings, image: &Image, mask: &Image, ctx: &JobC
     ctx.check()?;
     let root = Path::new(&settings.runtime_root);
     let python = root.join(".venv").join(if cfg!(windows) { "Scripts/python.exe" } else { "bin/python" });
-    if !python.is_file() || !root.join("genstudio/edit.py").is_file() {
-        return Err(err("GenGate runtime is missing; check its Advanced settings"));
-    }
+    crate::genstudio::runtime_file(&python).map_err(err)?;
+    crate::genstudio::runtime_file(&root.join("genstudio/edit.py")).map_err(err)?;
     let folder = tempfile::Builder::new().prefix("photocraft-qwen-").tempdir().map_err(err)?;
     for (name, data) in [("input.png", image), ("mask.png", mask)] {
         let bytes = photocraft_codecs::encode(data, Format::Png, &EncodeOptions::default()).map_err(err)?;
@@ -86,7 +85,7 @@ pub(crate) fn transport(settings: &Settings, folder: &std::path::Path, payload: 
     let errors = fs::File::create(folder.join("errors.log")).map_err(err)?;
     let root = std::path::Path::new(&settings.runtime_root);
     let python = root.join(".venv").join(if cfg!(windows) { "Scripts/python.exe" } else { "bin/python" });
-    let mut command = Command::new(python);
+    let mut command = Command::new(&python);
     command
         .args(["-X", "utf8", "-m", "genstudio.edit", "--folder"])
         .arg(folder)
@@ -101,7 +100,7 @@ pub(crate) fn transport(settings: &Settings, folder: &std::path::Path, payload: 
         use std::os::windows::process::CommandExt;
         command.creation_flags(0x08000000);
     }
-    let mut running = Child { child: command.spawn().map_err(err)?, folder: folder.to_owned() };
+    let mut running = Child { child: command.spawn().map_err(|e| err(crate::genstudio::runtime_launch_error(&python, e)))?, folder: folder.to_owned() };
     let data = serde_json::to_vec(payload).map_err(err)?;
     running.child.stdin.take().ok_or_else(|| err("missing control input"))?.write_all(&data).map_err(err)?;
     let output = running.child.stdout.take().ok_or_else(|| err("missing control output"))?;
@@ -175,9 +174,7 @@ pub(crate) fn studio(settings: &Settings, payload: &serde_json::Value, ctx: &Job
         return Err(err("Engine process launch is disabled for validation"));
     }
     let root = std::path::Path::new(&settings.runtime_root);
-    if !root.join("genstudio/studio_edit.py").is_file() {
-        return Err(err("The Studio runtime needs updating"));
-    }
+    crate::genstudio::runtime_file(&root.join("genstudio/studio_edit.py")).map_err(err)?;
     let folder = tempfile::Builder::new().prefix("photocraft-studio-").tempdir().map_err(err)?;
     transport(settings, folder.path(), &serde_json::json!({"settings":settings,"studio":payload}), ctx)?;
     let count = payload["batch"].as_u64().unwrap_or(1).clamp(1, 8);
