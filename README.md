@@ -48,7 +48,7 @@ A work-in-progress suite for [PhotoCraft](https://github.com/storytold/photocraf
 
 ## Installation
 
-![GenGate setup](docs/images/gengate-setup.jpg)
+![GenGate setup](docs/images/gengate-setup.jpg?v=6ea2e525)
 
 **Windows x64 · NVIDIA CUDA GPU for local AI processing.**
 
