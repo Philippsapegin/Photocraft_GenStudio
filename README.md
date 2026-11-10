@@ -25,9 +25,9 @@ A work-in-progress suite for [PhotoCraft](https://github.com/storytold/photocraf
 
 <a id="tools-overview"></a>
 
-![Native tools and GenGate Studio](docs/images/gengate-tools.jpg)
-
 ## Tools
+
+![Native tools and GenGate Studio](docs/images/gengate-tools.jpg)
 
 | Tool | Where / what it does |
 | --- | --- |
@@ -46,9 +46,9 @@ A work-in-progress suite for [PhotoCraft](https://github.com/storytold/photocraf
 
 <a id="installation-guide"></a>
 
-![GenGate setup](docs/images/gengate-setup.jpg)
-
 ## Installation
+
+![GenGate setup](docs/images/gengate-setup.jpg)
 
 **Windows x64 · NVIDIA CUDA GPU for local AI processing.**
 
@@ -79,9 +79,9 @@ Run **Uninstall.cmd** in the GenGate folder to restore the original editor. Newe
 
 <a id="settings-guide"></a>
 
-![GenGate preferences](docs/images/gengate-settings.jpg)
-
 ## Settings
+
+![GenGate preferences](docs/images/gengate-settings.jpg)
 
 Open **Edit → Preferences → GenGate Settings** to select the preset, active engine, model folder and startup policy. **Advanced** contains model components, workflow files and runtime paths. Constant LoRA and its optional Steps override apply to native editing tools; Studio retains its own generation recipe. AI selection has independent controls in the Segmentation section.
 
