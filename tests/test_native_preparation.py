@@ -36,6 +36,28 @@ class RemoveDispatchTests(unittest.TestCase):
 
 
 class UpdateTransportTests(unittest.TestCase):
+    def test_022_update_notice_precedes_shared_result_without_native_offer(self):
+        native = '''        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let updater = &mut app.updates_rt.updater;
+            updater.offer(release_of(release));
+            // While an update installs or waits for the app to close, or while the launcher keeps
+            // this version, no prompt opens: a manual check reports that state in the result window.
+            if std::mem::take(&mut app.updates_rt.requested) && !updater.prompt_open() {
+                updater.check_now(ctx);
+            }
+        }
+    let status = shown_status(app);
+    let dialog = craft_update::CheckResultDialog::new(&crate::UPDATE_APP, VERSION);
+'''
+        changed = prepare_update_notice(native)
+        self.assertNotIn('updater.offer(', changed)
+        self.assertNotIn('updater.check_now(', changed)
+        self.assertLess(changed.index('gengate_updates_ui::photocraft_notice'),
+                        changed.index('let status = shown_status(app);'))
+        self.assertIn('craft_update::CheckResultDialog::new', changed)
+        self.assertEqual(prepare_update_notice(changed), changed)
+
     def test_021_preferences_oracle_keeps_native_rows_and_adds_gengate_once(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

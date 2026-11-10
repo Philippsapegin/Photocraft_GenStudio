@@ -12,6 +12,16 @@ MODEL = "qwen-image-2.1-turbo"
 POLICIES = ("off", "appStart", "firstRequest")
 
 
+def default_direct_python():
+    # Existing private installations remain usable until Setup migrates them.
+    for relative in ('.runtime/direct/python.exe', '.runtime/direct/Scripts/python.exe',
+                     '.runtime/qwen-direct/python.exe', '.runtime/qwen-direct/Scripts/python.exe'):
+        path=ROOT/relative
+        if path.is_file():
+            return str(path)
+    return str(ROOT/'.runtime/direct/python.exe')
+
+
 def defaults():
     from genfill.server import load_config
     old = load_config()
@@ -22,7 +32,7 @@ def defaults():
             "engine": "comfy", "comfyStartup": "firstRequest", "directStartup": "firstRequest",
             "comfyUrl": old["comfy_url"], "comfyDir": old.get("comfy_dir", ""),
             "comfyPython": old.get("comfy_python", ""),
-            "directPython": old.get("comfy_python", str(ROOT / ".runtime/qwen-direct/Scripts/python.exe")),
+            "directPython": old.get("comfy_python") or default_direct_python(),
             "modelsDir": str(Path(old.get("comfy_dir", str(ROOT / ".runtime/comfy"))) / "models"),
             "runtimeRoot": str(ROOT)}
 

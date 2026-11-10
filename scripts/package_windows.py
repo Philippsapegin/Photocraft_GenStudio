@@ -124,14 +124,15 @@ def build(args):
     from genstudio.segmentation_models import ensure_modules
     copy_tree(ensure_modules(), runtime / ".runtime/segmentation/deps")
     copy_tree(ROOT / "packaging", runtime / "packaging")
-    for name in ("Setup.cmd", "Setup.ps1", "SetupWindow.ps1", "SetupUi.cs", "Launch.ps1", "PhotoCraft.cmd", "Uninstall.cmd", "Uninstall.ps1"):
+    for name in ("Setup.cmd", "Setup.ps1", "SetupWindow.ps1", "SetupUi.cs", "Setup-Account.ps1", "Launch.ps1", "PhotoCraft.cmd", "Uninstall.cmd", "Uninstall.ps1"):
         shutil.copyfile(ROOT / "packaging" / name, target / name)
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    copy_tree(ROOT / 'docs/images', target / 'docs/images')
     # The package contains the user guide, while developer/source links should
     # open the matching public tag instead of pointing at absent local files.
     def source_link(match):
         link = match.group(1)
-        if "://" in link or link.startswith("#"):
+        if "://" in link or link.startswith(("#", "docs/images/")):
             return match.group(0)
         return "](" + installer.REPOSITORY + "/blob/v" + installer.VERSION + "/" + link + ")"
     (target / "README.md").write_text(re.sub(r"\]\(([^)]+)\)", source_link, readme), encoding="utf-8")
@@ -196,9 +197,9 @@ def build(args):
             destination = licenses / 'eframe' / name
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(upstream / '.gengate-build/eframe' / name, destination)
-    if any(entry["hostVersion"] in ("0.12.0", "0.15.1", "0.16.0", "0.17.0", "0.18.0", "0.19.0", "0.20.1", "0.20.2", "0.21.0") for entry in catalog["patches"]):
+    if any(entry["hostVersion"] in ("0.12.0", "0.15.1", "0.16.0", "0.17.0", "0.18.0", "0.19.0", "0.20.1", "0.20.2", "0.21.0", "0.22.0") for entry in catalog["patches"]):
         from prepare_craft_fonts import prepare as prepare_fonts
-        fonts = prepare_fonts("0.17.0" if any(entry["hostVersion"] in ("0.17.0", "0.18.0", "0.19.0", "0.20.1", "0.20.2", "0.21.0") for entry in catalog["patches"]) else "0.16.0")
+        fonts = prepare_fonts("0.17.0" if any(entry["hostVersion"] in ("0.17.0", "0.18.0", "0.19.0", "0.20.1", "0.20.2", "0.21.0", "0.22.0") for entry in catalog["patches"]) else "0.16.0")
         for path in (fonts / "fonts").rglob("OFL.txt"):
             destination = licenses / "craft-fonts" / path.relative_to(fonts)
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -233,7 +234,7 @@ def build(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    base = ROOT / ".runtime/photocraft-0.21.0"
+    base = ROOT / ".runtime/photocraft-0.22.0"
     parser.add_argument("--upstream", type=Path, default=base)
     parser.add_argument("--patches", type=Path, required=True, help="Verified editor-patches.json and binary deltas")
     parser.add_argument("--core", type=Path)

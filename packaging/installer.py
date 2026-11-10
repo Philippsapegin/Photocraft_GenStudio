@@ -11,7 +11,7 @@ import shutil
 import subprocess
 import sys
 
-VERSION = "0.10.0"
+VERSION = "0.10.1"
 REPOSITORY = "https://github.com/Philippsapegin/Photocraft_GenStudio"
 
 
@@ -148,13 +148,15 @@ def run_logged(command, cancel=None):
 
 
 def install_direct(runtime, cancel=None):
-    report("Installing a separate CUDA runtime. This downloads several GB of software, no model weights.")
-    target = runtime / ".runtime/qwen-direct"
-    if (target / 'python.exe').is_file():
+    target = runtime / ".runtime/direct"
+    for existing in (target / 'python.exe', runtime / '.runtime/qwen-direct/python.exe'):
+        if not existing.is_file():
+            continue
         try:
-            return check_python(target / 'python.exe', direct=True)
+            return check_python(existing, direct=True)
         except (ValueError, OSError, subprocess.SubprocessError):
             pass
+    report("Installing a separate CUDA runtime. This downloads several GB of software, no model weights.")
     shutil.copytree(runtime / ".venv/Scripts", target, dirs_exist_ok=True)
     python = target / "python.exe"
     site = target / "site-packages"
@@ -243,12 +245,20 @@ def install(request, bundle, *, shortcuts=True, warnings=None, editor_update=Non
     warnings = [] if warnings is None else warnings
     report("Verifying the release package...")
     manifest = verify_bundle(bundle)
-    destination = valid_destination(request.get("installDir"), bundle)
+    from genstudio import user_install
+    user_install.assert_account()
+    try:
+        destination = valid_destination(request.get("installDir"), bundle)
+    except PermissionError as error:
+        raise ValueError('Access denied to the selected GenGate folder. Use the default folder in your own LocalAppData\\Programs; do not run Setup as another administrator account.') from error
+    user_install.require_destination(destination)
+    if editor_update is None:
+        request = user_install.prepare(request, bundle, progress=report)
     from genstudio import editor_patch
     host = editor_patch.host_folder(request.get("photocraftDir") or "__missing_photocraft__")
     if destination == host or host.is_relative_to(destination) or destination.is_relative_to(host):
         raise ValueError("Choose a separate folder for GenGate, outside the PhotoCraft application files.")
-    profile = editor_patch.profile_folder(host)
+    profile = Path(request['_profile']).resolve() if request.get('_profile') else editor_patch.profile_folder(host)
     if editor_update is not None:
         editor_update.validate_host(host, bundle)
     if editor_update is None and not (host / ".gengate/journal.json").exists():
@@ -309,6 +319,22 @@ def _install_locked(request, bundle, manifest, destination, host, profile, short
         shutil.copyfile(bundle_path(bundle, relative), target)
     write_json(version_dir / 'manifest.json', manifest)
     runtime = version_dir / "runtime"
+    if not fresh and python and old_settings.get('runtimeRoot'):
+        old_runtime = Path(old_settings['runtimeRoot']).resolve()
+        legacy = old_runtime / '.runtime/qwen-direct/python.exe'
+        if old_runtime.is_relative_to(destination / 'versions') and Path(python).resolve() == legacy:
+            # Rename the owned, portable private interpreter without downloading it
+            # again or moving an interpreter an older installation still references.
+            report('Migrating the existing Direct runtime to its model-independent folder...')
+            target = runtime / '.runtime/direct'
+            shutil.copytree(legacy.parent, target, dirs_exist_ok=True)
+            old_python = python
+            python = check_python(target / 'python.exe', direct=True)
+            if request.get('comfyPython') == old_python:
+                request = {**request, 'comfyPython':python}
+            segmentation = old_settings.get('segmentation', {})
+            if segmentation.get('python') == old_python:
+                old_settings = {**old_settings, 'segmentation':{**segmentation, 'python':python}}
     if fresh:
         python = install_direct(runtime, **({'cancel':editor_update.cancel} if editor_update is not None else {}))
     settings = settings_for(request, runtime, python, old_settings if isinstance(old_settings, dict) else None)

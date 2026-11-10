@@ -8,16 +8,22 @@ $bundle = if($BundleRoot){$BundleRoot}else{$PSScriptRoot}
 $resume=$null
 if($ResumeRequest){$resume=Get-Content -LiteralPath $ResumeRequest -Raw -Encoding UTF8 | ConvertFrom-Json;if($resume._profile){$env:PHOTOCRAFT_CONFIG_DIR=$resume._profile}}
 $python = Join-Path $bundle 'runtime\.venv\Scripts\python.exe'
+if(-not ($ValidateOnly -or $Preview)){
+    try{
+        $account=(& (Join-Path $PSScriptRoot 'Setup-Account.ps1')) | ConvertFrom-Json
+        if($account.currentSid -ne $account.sessionSid){throw 'Setup is running as another Windows account. Close it and run Setup.cmd normally as the signed-in user, without Run as administrator. Program Files installations get a personal copy automatically.'}
+    }catch{[System.Windows.Forms.MessageBox]::Show($_.Exception.GetBaseException().Message,'GenGate') | Out-Null;exit 1}
+}
 if (-not (Test-Path -LiteralPath $python) -and -not ($ValidateOnly -or $Preview)) {
     [System.Windows.Forms.MessageBox]::Show('Extract the complete GenGate add-on ZIP, then run Setup.cmd. Install PhotoCraft separately first.', 'GenGate') | Out-Null
     exit 1
 }
 $form = New-Object GenGateSetup.ChromeForm
 $form.Preview = [bool]$ValidateOnly
-$form.Text = 'GenGate 0.10.0 Beta II - Setup'
+$form.Text = 'GenGate 0.10.1 Beta II - Setup'
 $form.Font = New-Object System.Drawing.Font('Segoe UI',9.5)
-$form.ClientSize = New-Object System.Drawing.Size(820,([Math]::Min(870,[System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea.Height-60)))
-$form.MinimumSize = New-Object System.Drawing.Size(760,640)
+$form.ClientSize = New-Object System.Drawing.Size(820,920)
+$form.MinimumSize = New-Object System.Drawing.Size(760,920)
 $form.StartPosition = 'CenterScreen'
 $form.KeyPreview = $true
 $script:child = $null; $script:finished = $false; $script:cancelled = $false
@@ -38,7 +44,7 @@ function Button([string]$text,[int]$x,[int]$y,[int]$width=94) {
 }
 $header=New-Object System.Windows.Forms.Panel; $header.Width=$form.ClientSize.Width; $header.Dock='Top'; $header.Height=58; $header.BackColor=[GenGateSetup.Palette]::Surface
 $title=Label 'GenGate' 24 10 180 24; $title.Font=New-Object System.Drawing.Font('Segoe UI',12,[System.Drawing.FontStyle]::Bold)
-$version=Label 'ADD-ON SETUP  /  0.10.0 BETA II' 24 35 250 18; $version.Font=New-Object System.Drawing.Font('Segoe UI',8); $version.ForeColor=[GenGateSetup.Palette]::Muted
+$version=Label 'ADD-ON SETUP  /  0.10.1 BETA II' 24 35 250 18; $version.Font=New-Object System.Drawing.Font('Segoe UI',8); $version.ForeColor=[GenGateSetup.Palette]::Muted
 $minimize=New-Object GenGateSetup.CaptionButton; $minimize.SetBounds(712,10,46,38); $minimize.AccessibleName='Minimize'; $minimize.Anchor='Top,Right'; $minimize.Add_Click({$form.WindowState='Minimized'})
 $titleClose=New-Object GenGateSetup.CaptionButton; $titleClose.SetBounds(758,10,46,38); $titleClose.CloseButton=$true; $titleClose.AccessibleName='Close'; $titleClose.Anchor='Top,Right'
 $header.Controls.AddRange(@($title,$version,$minimize,$titleClose)); $header.Add_MouseDown({if($_.Button -eq 'Left'){$form.DragWindow()}}); $title.Add_MouseDown({if($_.Button -eq 'Left'){$form.DragWindow()}})
@@ -49,9 +55,9 @@ $detail=Label 'Close PhotoCraft before installing. Existing settings and models 
 $close=Button 'Close' 570 41 96; $close.Anchor='Bottom,Right'
 $install=Button 'Install' 678 41 118; $install.Primary=$true; $install.Anchor='Bottom,Right'
 $footer.Controls.AddRange(@($status,$detail,$close,$install,$progress))
-$scroll=New-Object GenGateSetup.ScrollArea; $scroll.Dock='Fill'
-$body=New-Object GenGateSetup.Body; $scroll.Attach($body)
-$form.Controls.Add($scroll);$form.Controls.Add($footer);$form.Controls.Add($header)
+$options=New-Object System.Windows.Forms.Panel; $options.Dock='Fill';$options.AutoScroll=$false
+$body=New-Object GenGateSetup.Body; $options.Controls.Add($body)
+$form.Controls.Add($options);$form.Controls.Add($footer);$form.Controls.Add($header)
 function AddRow([string]$heading,[int]$height=66) {
     $row=New-Object System.Windows.Forms.Panel; $row.Height=$height; $row.Margin=New-Object System.Windows.Forms.Padding(0,0,0,8)
     if($heading){$row.Controls.Add((Label $heading 0 0 730 24))}; $body.Controls.Add($row); return $row
@@ -74,8 +80,8 @@ function Browse($field,[bool]$folder=$true) {
 }
 $intro=AddRow '' 51
 $lead=Label 'Local AI tools, inside PhotoCraft.' 0 0 720 25; $lead.Font=New-Object System.Drawing.Font('Segoe UI',12)
-$intro.Controls.Add($lead); $hint=Label 'PhotoCraft 0.21.0  |  Windows x64  |  No editor or model weights bundled' 0 29 730 22; $hint.ForeColor=[GenGateSetup.Palette]::Muted; $hint.Font=New-Object System.Drawing.Font('Segoe UI',8.5); $intro.Controls.Add($hint)
-$hostCandidates=@((Join-Path $env:LOCALAPPDATA 'Programs\ArtCraft\PhotoCraft'),(Join-Path $env:ProgramFiles 'ArtCraft\PhotoCraft'),(Join-Path $env:LOCALAPPDATA 'Programs\PhotoCraft'),(Join-Path $env:ProgramFiles 'PhotoCraft'))
+$intro.Controls.Add($lead); $hint=Label 'PhotoCraft 0.22.0  |  Windows x64  |  No editor or model weights bundled' 0 29 730 22; $hint.ForeColor=[GenGateSetup.Palette]::Muted; $hint.Font=New-Object System.Drawing.Font('Segoe UI',8.5); $intro.Controls.Add($hint)
+$hostCandidates=@((Join-Path $env:LOCALAPPDATA 'Programs\ArtCraft\PhotoCraft-GenGate'),(Join-Path $env:LOCALAPPDATA 'Programs\ArtCraft\PhotoCraft'),(Join-Path $env:ProgramFiles 'ArtCraft\PhotoCraft'),(Join-Path $env:LOCALAPPDATA 'Programs\PhotoCraft'),(Join-Path $env:ProgramFiles 'PhotoCraft'))
 foreach($drive in (Get-PSDrive -PSProvider FileSystem)){$hostCandidates+=Join-Path $drive.Root 'Programs\PhotoCraft'}
 $hostDefault='';foreach($candidate in $hostCandidates){if((Test-Path -LiteralPath (Join-Path $candidate 'photocraft.exe')) -and (Test-Path -LiteralPath (Join-Path $candidate 'photocraft-cli.exe'))){$hostDefault=$candidate;break}}
 if($EditorFolder){$hostDefault=$EditorFolder}
@@ -150,7 +156,7 @@ if($UpdateEditor){
     $form.Text='PhotoCraft update';$lead.Text='Update PhotoCraft with GenGate';$hint.Text='Your engine, model folders and generation settings will be kept.'
     foreach($row in @($installRow.Row,$modelsRow.Row,$directRow,$comfyNoteRow,$pythonRow.Row,$comfyRow.Row)){$row.Visible=$false}
     $hostRow.Browse.Enabled=$false;$photocraftDir.ReadOnly=$true;$logRow.Height=251;$log.Height=220
-    $form.MinimumSize=New-Object System.Drawing.Size(760,460);$form.ClientSize=New-Object System.Drawing.Size(820,540)
+    $form.MinimumSize=New-Object System.Drawing.Size(760,460);$form.ClientSize=New-Object System.Drawing.Size(820,600)
 }
 UpdateFields
 function DrainOutput {
@@ -172,6 +178,11 @@ function CompleteSetup([int]$code) {
     elseif($code -eq 3 -and $script:result.status -eq 'restartRequired'){SetStatus 'warning' 'Restart Windows to continue' $script:result.message;$progress.Value=0}
     elseif($script:cancelled -or ($script:result -and $script:result.status -eq 'cancelled')){SetStatus 'warning' 'Installation cancelled' 'Run Setup again to finish or repair the installation.';$progress.Value=0}
     elseif($code -eq 0){
+        try{
+            $actual=Get-Content -LiteralPath (Join-Path $installDir.Text 'genstudio-install.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+            $photocraftDir.Text=$actual.host
+            if($env:PHOTOCRAFT_CONFIG_DIR){$env:PHOTOCRAFT_CONFIG_DIR=$actual.profile}
+        }catch{}
         $script:finished=$true;$install.Text='Open PhotoCraft';$progress.Value=100
         if($script:result -and $script:result.status -eq 'installedWithWarnings'){SetStatus 'warning' 'Installed with notes' 'GenGate is installed. Review the installation details for optional setup items.'}
         else{SetStatus 'success' 'Installed successfully' 'GenGate is ready. Open PhotoCraft to continue.'}
@@ -208,22 +219,34 @@ $timer.Add_Tick({
     }
 })
 function EditorFingerprint {
-    return ((@('photocraft.exe','photocraft-cli.exe') | ForEach-Object {
+    $files=(@('photocraft.exe','photocraft-cli.exe') | ForEach-Object {
         $file=Get-Item -LiteralPath (Join-Path $photocraftDir.Text $_) -ErrorAction SilentlyContinue
         if($file){$file.FullName+':'+$file.Length+':'+$file.LastWriteTimeUtc.Ticks}else{'missing:'+$_}
-    }) -join '|')
+    }) -join '|'
+    $running=@(Get-Process -Name photocraft,photocraft-cli -ErrorAction SilentlyContinue | Where-Object {$_.Path -and [IO.Path]::GetDirectoryName($_.Path) -eq $photocraftDir.Text} | Sort-Object Id | ForEach-Object {$_.Id}) -join ','
+    return $files+'|'+$running+'|'+$TargetVersion
 }
 function ShowCompatibility {
     $state=$script:compatibility
     if(-not $state){return}
     $install.Text=switch($state.state){'updatePhotoCraft'{'Update PhotoCraft'} 'updateGenGate'{'Update GenGate'} 'getPhotoCraft'{'Get PhotoCraft'} default{if($UpdateEditor){'Update'}else{'Install'}}}
     $install.Width=138;$install.Left=$footer.ClientSize.Width-162;$close.Left=$install.Left-108
-    if($state.compatible){SetStatus 'ready' 'PhotoCraft is ready' $state.message;$script:waitingUpdate=$false}
+    if($state.compatible){
+        $message=$state.message
+        if($state.running){$message='Save your work and close PhotoCraft, then continue here.'}
+        elseif([GenGateSetup.Permissions]::PersonalCopyRequired($photocraftDir.Text)){$message='Setup will prepare a personal PhotoCraft copy and update your shortcut. The shared installation stays unchanged. No administrator rights needed.'}
+        SetStatus 'ready' 'PhotoCraft is ready' $message;$script:waitingUpdate=$false
+    }
     else{SetStatus 'warning' 'PhotoCraft compatibility' $state.message}
 }
 function CheckCompatibility {
     if($ValidateOnly -and $env:GENGATE_SETUP_COMPAT_FIXTURE){$script:compatibility=$env:GENGATE_SETUP_COMPAT_FIXTURE | ConvertFrom-Json;ShowCompatibility;return [bool]$script:compatibility.compatible}
-    if(-not $photocraftDir.Text.Trim()){return $false}
+    if(-not $photocraftDir.Text.Trim() -or -not(Test-Path -LiteralPath (Join-Path $photocraftDir.Text 'photocraft.exe')) -or -not(Test-Path -LiteralPath (Join-Path $photocraftDir.Text 'photocraft-cli.exe'))){
+        $script:compatibility=[pscustomobject]@{state='getPhotoCraft';compatible=$false;running=$false;message='Install PhotoCraft 0.22.0, then select its folder here.';url='https://github.com/storytold/photocraft/releases/tag/v0.22.0'}
+        ShowCompatibility;return $false
+    }
+    $fingerprint=EditorFingerprint
+    if($script:compatibility -and $script:checkedFingerprint -eq $fingerprint){ShowCompatibility;return [bool]$script:compatibility.compatible}
     $helper=Join-Path (Split-Path $setupInspector -Parent) 'setup_compatibility.py'
     $catalogBundle=$bundle
     if($Preview -and -not (Test-Path -LiteralPath (Join-Path $catalogBundle 'editor-patches.json'))){$catalogBundle=Join-Path $bundle '..\.runtime\release099-patches'}
@@ -244,7 +267,7 @@ function OpenPhotoCraftUpdater {
     $request=SetupRequest
     $request._profile=if($env:PHOTOCRAFT_CONFIG_DIR){$env:PHOTOCRAFT_CONFIG_DIR}elseif((Test-Path -LiteralPath (Join-Path $photocraftDir.Text 'portable.txt')) -or (Test-Path -LiteralPath (Join-Path $photocraftDir.Text 'PhotoCraft.portable'))){Join-Path $photocraftDir.Text 'PhotoCraftData'}else{Join-Path $env:APPDATA 'Photocraft'}
     $request._updateCache=Join-Path $env:LOCALAPPDATA 'GenGate\updates'
-    $request._shortcutLocations=@{programs=[Environment]::GetFolderPath('Programs');desktopPath=[Environment]::GetFolderPath('Desktop');locations=@([Environment]::GetFolderPath('Programs'),[Environment]::GetFolderPath('CommonPrograms'),[Environment]::GetFolderPath('Desktop'),[Environment]::GetFolderPath('CommonDesktopDirectory'))}
+    $request._shortcutLocations=@{programs=[Environment]::GetFolderPath('Programs');desktopPath=[Environment]::GetFolderPath('Desktop');locations=@([Environment]::GetFolderPath('Programs'),[Environment]::GetFolderPath('Desktop'))}
     if($resume -and $resume._shortcutLocations){$request._shortcutLocations=$resume._shortcutLocations;$request._updateCache=$resume._updateCache}
     $request | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $script:requestFile -Encoding UTF8
     if($resume -and $resume._editorInstallation){$request._editorInstallation=$resume._editorInstallation}
@@ -254,13 +277,6 @@ function OpenPhotoCraftUpdater {
         $request._editorInstallation=$registration.installation
     }
     $request | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $script:requestFile -Encoding UTF8
-    if([GenGateSetup.Permissions]::RequiresElevation($photocraftDir.Text)){
-        if($ResumeRequest){throw 'This PhotoCraft folder is still not writable. Check its permissions before retrying.'}
-        $elevatedArgs='-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File '+[GenGateSetup.Runner]::Quote((Join-Path $PSScriptRoot 'Setup.ps1'))+' -BundleRoot '+[GenGateSetup.Runner]::Quote($bundle)+' -EditorFolder '+[GenGateSetup.Runner]::Quote($photocraftDir.Text)+' -ResumeRequest '+[GenGateSetup.Runner]::Quote($script:requestFile)
-        if($TargetVersion){$elevatedArgs+=' -TargetVersion '+[GenGateSetup.Runner]::Quote($TargetVersion)};if($UpdateEditor){$elevatedArgs+=' -UpdateEditor'}
-        Start-Process -FilePath powershell.exe -ArgumentList $elevatedArgs -Verb RunAs -WindowStyle Hidden
-        $form.Close();return
-    }
     $arguments='-u -X utf8 '+[GenGateSetup.Runner]::Quote($helper)+' --request '+[GenGateSetup.Runner]::Quote($script:requestFile)+' --bundle '+[GenGateSetup.Runner]::Quote($bundle)+' --cancel-file '+[GenGateSetup.Runner]::Quote($script:cancelFile)
     if($TargetVersion){$arguments+=' --target '+[GenGateSetup.Runner]::Quote($TargetVersion)}
     $script:operation='editorUpdate';$script:result=$null;$script:cancelled=$false;$script:closeAfterUpdater=$false;$script:child=New-Object GenGateSetup.Runner($setupPython,$arguments,$path)
@@ -270,8 +286,8 @@ function OpenPhotoCraftUpdater {
 function ShowSetupFields {
     if(-not $UpdateEditor){return}
     foreach($row in @($installRow.Row,$modelsRow.Row,$directRow,$comfyNoteRow,$pythonRow.Row,$comfyRow.Row)){$row.Visible=$true}
-    $form.MinimumSize=New-Object System.Drawing.Size(760,640)
-    $form.ClientSize=New-Object System.Drawing.Size(820,([Math]::Min(870,[System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea.Height-60)))
+    $form.MinimumSize=New-Object System.Drawing.Size(760,920)
+    $form.ClientSize=New-Object System.Drawing.Size(820,920)
 }
 function ValidSetupFields {
     if(-not $photocraftDir.Text.Trim() -or -not $modelsDir.Text.Trim()){ShowSetupFields;SetStatus 'warning' 'Choose the installation folders' 'Select PhotoCraft and a shared models folder. An empty models folder is allowed.';return $false}
@@ -380,9 +396,8 @@ public static class SetupInputProbe {
         $direct.Checked=$false;CheckSetupChoice $false
         if($ValidationScreenshot){
             [System.Windows.Forms.Application]::DoEvents()
-            $scroll.ScrollTo([int]::MaxValue)
-            if($body.Height -gt $scroll.Height -and $scroll.Offset -le 0){throw 'Setup options did not scroll'}
-            $scroll.ScrollTo(0)
+            $form.PerformLayout()
+            if($body.Height -gt $options.ClientSize.Height){throw 'Setup options do not fit without scrolling'}
             $previewBitmap=New-Object System.Drawing.Bitmap($form.Width,$form.Height)
             try{$form.DrawToBitmap($previewBitmap,(New-Object System.Drawing.Rectangle(0,0,$form.Width,$form.Height)));$previewBitmap.Save([IO.Path]::ChangeExtension($ValidationScreenshot,'comfy.png'),[System.Drawing.Imaging.ImageFormat]::Png)}finally{$previewBitmap.Dispose()}
         }
@@ -453,6 +468,25 @@ public static class SetupInputProbe {
     $form.Dispose();$timer.Dispose();$settingsTimer.Dispose();$script:compatTimer.Dispose();Write-Output 'Setup form validated';exit 0
 }
 if($Preview){SetValidationState}
+if(-not ($ValidateOnly -or $Preview)){
+    $form.Add_Shown({
+        # A smaller display is fitted as a whole; options never acquire a scrollbar.
+        $area=[System.Windows.Forms.Screen]::FromControl($form).WorkingArea
+        $factor=[Math]::Min(1,[Math]::Min(($area.Height-24)/$form.Height,($area.Width-24)/$form.Width))
+        if($factor -lt 1){
+            $fonts=New-Object 'System.Collections.Generic.Dictionary[System.Windows.Forms.Control,System.Drawing.Font]'
+            function CollectFonts($parent){$fonts[$parent]=$parent.Font;foreach($control in $parent.Controls){CollectFonts $control}}
+            CollectFonts $form;$form.MinimumSize=New-Object System.Drawing.Size(0,0)
+            $form.Scale((New-Object System.Drawing.SizeF($factor,$factor)))
+            foreach($control in $fonts.Keys){$font=$fonts[$control];$control.Font=New-Object System.Drawing.Font($font.FontFamily,($font.Size*$factor),$font.Style)}
+            $form.Location=New-Object System.Drawing.Point(($area.Left+($area.Width-$form.Width)/2),($area.Top+($area.Height-$form.Height)/2))
+        }
+        if(-not $EditorFolder -and -not $ResumeRequest -and -not $photocraftDir.Text.Trim()){
+            [void](CheckCompatibility)
+            try{Start-Process -FilePath $script:compatibility.url -WindowStyle Hidden}catch{SetStatus 'warning' 'Get PhotoCraft' $script:compatibility.url}
+        }
+    })
+}
 if($ResumeRequest -and -not ($ValidateOnly -or $Preview)){$form.Add_Shown({$install.PerformClick()})}
 if(-not $ValidateOnly){$script:compatTimer.Start()}
 try{[void]$form.ShowDialog()}finally{$timer.Dispose();$settingsTimer.Dispose();$script:compatTimer.Dispose();$form.Dispose();if($script:child){$script:child.Dispose()}}

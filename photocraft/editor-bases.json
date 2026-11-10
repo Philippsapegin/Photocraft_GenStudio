@@ -181,5 +181,107 @@
       "size": 111988736,
       "upgradeCode": "{D9660F32-2D0A-4ABE-B73D-17BE25F1542C}"
     }
+  },
+  "0.22.0": {
+    "upstream": "5000240c6e5dc30a024d20f97a620c78eca10d1e",
+    "archive": "https://github.com/storytold/photocraft/releases/download/v0.22.0/photocraft-0.22.0-windows-x64-portable.zip",
+    "archiveSha256": "d6e13cd7de440d9aae5964aaf70b15762b64dc05127155c3e2f06308f153e46b",
+    "files": {
+      "photocraft.exe": "b1521a1a7cd3159bf237b25af045ea2c1df7f70ddbd3a4e203e0065d3207cfe0",
+      "photocraft-cli.exe": "977d72cd4decda09247a7a5551065cdabea89df0cc53c17f9f928328cbd47b7e"
+    },
+    "portableFiles": {
+      "ATTRIBUTION.md": {
+        "sha256": "0e8e7ad0fe2a4567b6ade48af26529e5aef63b78b19cf9e79d35d8ed3f9149d7",
+        "size": 36959
+      },
+      "LICENSE-APACHE": {
+        "sha256": "eb3d7b5485466acbd81f2b496f595ab637d2792e268206b27d99e793bdb67549",
+        "size": 10351
+      },
+      "LICENSE-MIT": {
+        "sha256": "77c414bd870a0cc1a5ec06e7aeae0d379713d1d5d2d38e8d0903002e4d572537",
+        "size": 1123
+      },
+      "NOTICE": {
+        "sha256": "44a6600ee3a9d75982e3445dbbee6252187e8064f0bef650a53f78dc7c4cb3fb",
+        "size": 9723
+      },
+      "OFL-biz-ud-mincho.txt": {
+        "sha256": "9c244a5edd2525aa4aa43dd714d7de00f3b3591a522d82d724db3644b5a95568",
+        "size": 4501
+      },
+      "OFL-biz-ud-pgothic.txt": {
+        "sha256": "062c81ae55b5ddd56c08331c8fe86598c1ef7f4453560c74706427a008b68534",
+        "size": 4501
+      },
+      "OFL-lxgw-wenkai-lite.txt": {
+        "sha256": "7752fbb4e6c855f73a57a30caac80f583115658c656e11383d741571ddfa8882",
+        "size": 5270
+      },
+      "OFL-nanum-gothic.txt": {
+        "sha256": "6bca0c1a8c713fa5e703c5427a273ea736181c558312962569c28b4cb390fee3",
+        "size": 4630
+      },
+      "OFL-noto-sans-arabic.txt": {
+        "sha256": "3b7e321615e412e5fbb9eab5bf1c0a4cb84c732d3d5a9e9e3822972d5fb70b97",
+        "size": 4475
+      },
+      "OFL-noto-sans-cjk-sc.txt": {
+        "sha256": "88f117575237307bdd86a17ef15e21790fc9a662fe4dfb103ca1ca077f0d9982",
+        "size": 4393
+      },
+      "OFL-noto-sans-devanagari.txt": {
+        "sha256": "41221cfdd268fa8e338829cccec0526e0200a0ce9e0bc3c627254c12a99d3a98",
+        "size": 4479
+      },
+      "OFL-noto-sans-georgian.txt": {
+        "sha256": "2c9d69cc13d29394783a99d12a823fd6bc4b2069e6ce795a5515ae187e858da7",
+        "size": 4477
+      },
+      "OFL-noto-sans-hebrew.txt": {
+        "sha256": "1acb8a4cf8e3d441eb573174faab52139071fee5cfa5e3e3f148becf90a54631",
+        "size": 4475
+      },
+      "OFL-noto-sans-symbols-2.txt": {
+        "sha256": "dee1e0758c6ce86a7aee4aa812387de573fbe1b9a78bfc8332515fac2762aba5",
+        "size": 4476
+      },
+      "OFL-noto-sans-symbols.txt": {
+        "sha256": "dee1e0758c6ce86a7aee4aa812387de573fbe1b9a78bfc8332515fac2762aba5",
+        "size": 4476
+      },
+      "OFL-noto-sans-thai.txt": {
+        "sha256": "0e4067898723c9acddf967edda99a5ed2088cd857a8e9949084f609358efe38a",
+        "size": 4473
+      },
+      "OFL-shippori-mincho.txt": {
+        "sha256": "0aef534f5885c2f30b360ed5fb09ea4661a40ec62845c35f8354e26d7977d87d",
+        "size": 4492
+      },
+      "photocraft-cli.exe": {
+        "sha256": "977d72cd4decda09247a7a5551065cdabea89df0cc53c17f9f928328cbd47b7e",
+        "size": 124231544
+      },
+      "photocraft.exe": {
+        "sha256": "b1521a1a7cd3159bf237b25af045ea2c1df7f70ddbd3a4e203e0065d3207cfe0",
+        "size": 162220920
+      },
+      "portable.txt": {
+        "sha256": "411be83de7d405daed2d918c6ccf87d97cd554e1306f2995821896f0e4487f19",
+        "size": 610
+      },
+      "README.md": {
+        "sha256": "d816e9b71881c4b5142804091ffd44468936e18710b8406b5951049f993a728d",
+        "size": 37195
+      }
+    },
+    "publisher": "Learning Machines Inc",
+    "msi": {
+      "url": "https://github.com/storytold/photocraft/releases/download/v0.22.0/photocraft-0.22.0-windows-x64.msi",
+      "sha256": "d74e766ee6dbd14b81bb329dfc21facd71d907e6828079f79ce7728995c477f1",
+      "size": 117329920,
+      "upgradeCode": "{D9660F32-2D0A-4ABE-B73D-17BE25F1542C}"
+    }
   }
 }

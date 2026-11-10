@@ -24,7 +24,10 @@ def installed_version(host, known):
     for version, base in known.items():
         if base.get("files") == current:
             return version
-    state = ep.state_for(host)
+    try:
+        state = ep.state_for(host)
+    except (OSError, ValueError):
+        state = {}
     files = state.get("files", {})
     if files and all(files.get(name, {}).get("targetSha256") == digest for name, digest in current.items()):
         return state.get("hostVersion", "")
@@ -42,13 +45,28 @@ def installed_version(host, known):
 
 
 def preflight(host, bundle, *, known=None, check_open=True, target=None):
-    host = ep.host_folder(host)
     catalog = ep.catalog_for(bundle)
     required = sorted({p["hostVersion"] for p in catalog["patches"]}, key=version_tuple)
+    try:
+        host = ep.host_folder(host)
+    except (OSError, ValueError):
+        return {'state':'getPhotoCraft','compatible':False,'running':False,'required':required,
+                'message':f'Install PhotoCraft {required[-1]}, then select its folder in Setup.',
+                'url':'https://github.com/storytold/photocraft/releases/tag/v'+required[-1]}
     if known is None:
         path = Path(__file__).resolve().parents[1] / "photocraft/editor-bases.json"
         known = ep.read(path) if path.is_file() else {}
     result = {"required": required, "host": str(host), "compatible": False, "running": False}
+    from genstudio.user_install import personal_required
+    if personal_required(host) and (not target or target in required):
+        current=installed_version(host,known)
+        if current and version_tuple(current)>version_tuple(required[-1]):
+            return {**result,'state':'updateGenGate','installed':current,'message':'This PhotoCraft is newer than the supported personal copy. Update GenGate first.','url':'https://github.com/Philippsapegin/Photocraft_GenStudio/releases/latest'}
+        if check_open:
+            try:ep.assert_closed(host)
+            except ValueError:result['running']=True
+        return {**result,'state':'ready','compatible':True,'personalCopy':True,'installed':current,
+                'message':'Setup will prepare a verified personal PhotoCraft copy without changing this shared installation. No administrator rights needed.'}
     if target and target not in required:
         return {**result,'state':'updateGenGate','installed':installed_version(host,known),
                 'message':f'Update GenGate before installing PhotoCraft {target}. This GenGate supports {required[-1]}.',

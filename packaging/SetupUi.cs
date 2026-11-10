@@ -11,6 +11,13 @@ using System.Windows.Forms;
 
 namespace GenGateSetup {
     public static class Permissions {
+        public static bool PersonalCopyRequired(string folder){
+            foreach(var name in new[]{"ProgramFiles","ProgramFiles(x86)","ProgramW6432","ProgramData"}){
+                var root=Environment.GetEnvironmentVariable(name);
+                if(!String.IsNullOrEmpty(root)&&Path.GetFullPath(folder).StartsWith(Path.GetFullPath(root).TrimEnd('\\')+"\\",StringComparison.OrdinalIgnoreCase))return true;
+            }
+            return RequiresElevation(folder);
+        }
         public static bool RequiresElevation(string folder){
             try{using(var file=new FileStream(Path.Combine(folder,"photocraft.exe"),FileMode.Open,FileAccess.Write,FileShare.ReadWrite|FileShare.Delete))return false;}
             catch(UnauthorizedAccessException){return true;}
@@ -99,40 +106,6 @@ namespace GenGateSetup {
         public Body(){FlowDirection=FlowDirection.TopDown;WrapContents=false;AutoSize=true;AutoSizeMode=AutoSizeMode.GrowAndShrink;Dock=DockStyle.Top;Padding=new Padding(24,14,24,14);}
         protected override void OnSizeChanged(EventArgs e){base.OnSizeChanged(e);foreach(Control c in Controls)c.Width=Math.Max(200,ClientSize.Width-Padding.Horizontal-c.Margin.Horizontal);}
         protected override void OnControlAdded(ControlEventArgs e){base.OnControlAdded(e);e.Control.Width=Math.Max(200,ClientSize.Width-Padding.Horizontal-e.Control.Margin.Horizontal);}
-    }
-    public class ScrollArea : Panel {
-        Body content;int offset,grab;bool layout,drag;
-        public ScrollArea(){DoubleBuffered=true;BackColor=Palette.Background;AccessibleName="Setup options";AccessibleRole=AccessibleRole.Pane;}
-        int Limit {get{return content==null?0:Math.Max(0,content.Height-ClientSize.Height);}}
-        public int Offset {get{return offset;}}
-        Rectangle Thumb {
-            get{int track=Math.Max(1,ClientSize.Height-12);int height=Math.Min(track,Math.Max(28,content==null?track:(int)((long)track*ClientSize.Height/Math.Max(1,content.Height))));
-                return new Rectangle(ClientSize.Width-10,6+(Limit==0?0:(int)((long)offset*(track-height)/Limit)),6,height);}
-        }
-        public void Attach(Body body){content=body;content.Dock=DockStyle.None;Controls.Add(content);Hook(content);content.SizeChanged+=delegate{Arrange();};Arrange();}
-        void Hook(Control c){
-            c.ControlAdded+=delegate(object sender,ControlEventArgs e){Hook(e.Control);};
-            c.MouseWheel+=Wheel;
-            c.Enter+=delegate{if(content==null)return;Point p=content.PointToClient(c.PointToScreen(Point.Empty));if(p.Y<offset)ScrollTo(p.Y);else if(p.Y+c.Height>offset+ClientSize.Height)ScrollTo(p.Y+c.Height-ClientSize.Height);};
-            foreach(Control child in c.Controls)Hook(child);
-        }
-        void Wheel(object sender,MouseEventArgs e){
-            var handled=e as HandledMouseEventArgs;if(handled!=null&&handled.Handled)return;
-            var text=sender as TextBox;if(text!=null&&text.Multiline)return;
-            ScrollTo(offset-Math.Sign(e.Delta)*Math.Max(40,Font.Height*3));if(handled!=null)handled.Handled=true;
-        }
-        public void ScrollTo(int position){offset=Math.Max(0,Math.Min(Limit,position));if(content!=null)content.Top=-offset;Invalidate();}
-        void Arrange(){
-            if(layout||content==null)return;layout=true;
-            try{int width=Math.Max(200,ClientSize.Width-(Limit>0?14:0));content.MinimumSize=new Size(width,0);content.MaximumSize=new Size(width,0);content.Width=width;ScrollTo(offset);}finally{layout=false;}
-        }
-        protected override void OnSizeChanged(EventArgs e){base.OnSizeChanged(e);Arrange();}
-        protected override void OnMouseWheel(MouseEventArgs e){Wheel(this,e);base.OnMouseWheel(e);}
-        protected override void OnPaint(PaintEventArgs e){base.OnPaint(e);if(Limit==0)return;e.Graphics.SmoothingMode=SmoothingMode.AntiAlias;using(var p=Palette.Round(Thumb,3))using(var b=new SolidBrush(drag?Palette.Accent:Palette.Edge))e.Graphics.FillPath(b,p);}
-        protected override void OnMouseDown(MouseEventArgs e){base.OnMouseDown(e);if(e.Button!=MouseButtons.Left||Limit==0||e.X<ClientSize.Width-14)return;var thumb=Thumb;grab=thumb.Contains(e.Location)?e.Y-thumb.Y:thumb.Height/2;drag=true;Capture=true;DragTo(e.Y);}
-        void DragTo(int y){int travel=Math.Max(1,ClientSize.Height-12-Thumb.Height);ScrollTo((int)Math.Max(0,Math.Min(Limit,(long)(y-6-grab)*Limit/travel)));}
-        protected override void OnMouseMove(MouseEventArgs e){base.OnMouseMove(e);if(drag)DragTo(e.Y);}
-        protected override void OnMouseUp(MouseEventArgs e){base.OnMouseUp(e);drag=false;Capture=false;Invalidate();}
     }
     public static class Picker {
         // A dedicated STA protects dialogs even when Setup.ps1 was opened from

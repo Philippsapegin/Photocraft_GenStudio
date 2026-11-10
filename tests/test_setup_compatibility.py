@@ -1,5 +1,6 @@
 """Early setup decisions for the external verified updater; no downloads."""
 import json
+import runpy
 from pathlib import Path
 import tempfile
 import unittest
@@ -10,6 +11,12 @@ from genstudio import setup_compatibility as setup
 
 
 class SetupCompatibilityTests(unittest.TestCase):
+    def test_missing_editor_links_to_the_supported_release(self):
+        value=setup.preflight(str(self.root/'missing'),self.bundle,check_open=False)
+        self.assertEqual(value['state'],'getPhotoCraft')
+        self.assertFalse(value['compatible'])
+        self.assertTrue(value['url'].endswith('/v0.21.0'))
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='Setup compatibility ')
         self.addCleanup(self.temp.cleanup)
@@ -27,6 +34,12 @@ class SetupCompatibilityTests(unittest.TestCase):
         self.assertTrue(value['compatible'])
         self.assertEqual(value['state'], 'ready')
         self.assertEqual(value['installed'], '0.21.0')
+
+    def test_standalone_script_can_check_an_existing_editor(self):
+        entry = runpy.run_path(setup.__file__)['preflight']
+        with patch('genstudio.user_install.personal_required', return_value=False):
+            value = entry(self.host, self.bundle, known={}, check_open=False)
+        self.assertEqual(value['state'], 'ready')
 
     def test_old_editor_requests_update_without_changing_files(self):
         known = self.mismatch('0.20.2')

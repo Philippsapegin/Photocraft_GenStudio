@@ -8,11 +8,26 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def prepare_update_notice(text):
+    if 'let status = shown_status(app);' in text:
+        # 0.22 handles launcher-managed updates before the shared result dialog.
+        # GenGate keeps that result reporting but owns the unsigned editor handoff.
+        block='''        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let updater = &mut app.updates_rt.updater;
+            updater.offer(release_of(release));
+            // While an update installs or waits for the app to close, or while the launcher keeps
+            // this version, no prompt opens: a manual check reports that state in the result window.
+            if std::mem::take(&mut app.updates_rt.requested) && !updater.prompt_open() {
+                updater.check_now(ctx);
+            }
+        }'''
+        text=text.replace(block,'        // GenGate shows its compatibility notice before starting the external update.')
     text=text.replace('        #[cfg(not(target_arch = "wasm32"))]\n        app.updates_rt.updater.offer(release_of(release));',
                       '        // GenGate: show compatibility notice before the user starts the native updater.')
     if 'gengate_updates_ui::photocraft_notice' not in text:
         if 'craft_update::CheckResultDialog::new' in text:
-            anchor='    if app.ui.updates_open {\n        let dialog = craft_update::CheckResultDialog::new'
+            anchor=('    let status = shown_status(app);' if 'let status = shown_status(app);' in text else
+                    '    if app.ui.updates_open {\n        let dialog = craft_update::CheckResultDialog::new')
             if text.count(anchor)!=1:raise RuntimeError('PhotoCraft shared update dialog changed')
             notice='''    if app.ui.updates_open && let Status::Available { release } = app.session.updates.status.clone() {
         let mut open = true;

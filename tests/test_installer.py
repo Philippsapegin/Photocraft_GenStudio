@@ -127,6 +127,23 @@ class InstallerTests(unittest.TestCase):
         inspect.assert_called_once_with(python,direct=True)
         download.assert_not_called()
 
+    def test_owned_qwen_runtime_migrates_to_direct_without_a_download(self):
+        old_runtime=self.destination/'versions/old/runtime'
+        old_python=old_runtime/'.runtime/qwen-direct/python.exe'
+        old_python.parent.mkdir(parents=True);old_python.write_bytes(b'private interpreter')
+        (old_python.parent/'keep.dll').write_bytes(b'private dependencies')
+        prefs={'runtimeRoot':str(old_runtime),'directPython':str(old_python),'engine':'direct'}
+        installer.write_json(self.profile/'preferences.json',{'genStudio':prefs,'unrelated':'keep'})
+        installer.write_json(self.destination/'genstudio-install.json',{'installMode':'overlay'})
+        with patch.object(installer,'check_python',side_effect=lambda path,direct=False:str(Path(path).resolve())),patch.object(installer,'install_direct',side_effect=AssertionError('No dependency download')),patch('genstudio.models.resolve'):
+            installer.install(self.request(installDirect=True),self.bundle,shortcuts=False)
+        settings=installer.read_json(self.profile/'preferences.json')['genStudio']
+        new=Path(settings['directPython'])
+        self.assertEqual(new.parent.name,'direct')
+        self.assertEqual(new.read_bytes(),old_python.read_bytes())
+        self.assertEqual((new.parent/'keep.dll').read_bytes(),b'private dependencies')
+        self.assertTrue(old_python.is_file())
+
     def test_checkbox_default_prepares_private_direct_without_comfy(self):
         with patch.object(installer, 'check_python', side_effect=AssertionError('No external Python selected')), \
              patch.object(installer, 'install_direct', return_value='private/direct.exe') as download, \
@@ -343,6 +360,9 @@ class InstallerTests(unittest.TestCase):
         self.assertTrue(prefs["unrelated"]["keep"])
 
     def setUp(self):
+        account_guard = patch('genstudio.user_install.assert_account')
+        account_guard.start()
+        self.addCleanup(account_guard.stop)
         self.temp = tempfile.TemporaryDirectory(prefix="Gen Studio install with spaces ")
         self.root = Path(self.temp.name)
         self.bundle = self.root / "bundle"
@@ -439,7 +459,7 @@ class InstallerTests(unittest.TestCase):
         (host / "python.exe").write_bytes(b"synthetic interpreter")
         (host / "python313._pth").write_text("python313.zip\n.\nsite-packages\n..\\..\nimport site\n")
         before = {p.name: p.read_bytes() for p in host.iterdir()}
-        private = runtime / ".runtime/qwen-direct"
+        private = runtime / ".runtime/direct"
         with patch.object(installer, "run_logged") as install, \
              patch.object(installer, "check_python", return_value=str(private / "python.exe")) as inspect:
             result = installer.install_direct(runtime)
