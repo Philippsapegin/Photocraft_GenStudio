@@ -192,14 +192,20 @@ def build(args):
         shutil.copyfile(path, destination)
     shutil.copyfile(ROOT / "LICENSE", licenses / "GenGate-GPL-3.0.txt")
     shutil.copyfile(ROOT / "THIRD_PARTY.md", licenses / "THIRD_PARTY.md")
+    translations = upstream / '.gengate-build/craft-i18n'
+    if translations.is_dir():
+        destination = licenses / 'craft-i18n'
+        destination.mkdir()
+        for name in ('LICENSE-MIT', 'LICENSE-APACHE', 'gengate-source.json'):
+            shutil.copyfile(translations / name, destination / name)
     if (upstream / '.gengate-build/eframe').is_dir():
         for name in ('LICENSE-MIT', 'LICENSE-APACHE'):
             destination = licenses / 'eframe' / name
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(upstream / '.gengate-build/eframe' / name, destination)
-    if any(entry["hostVersion"] in ("0.12.0", "0.15.1", "0.16.0", "0.17.0", "0.18.0", "0.19.0", "0.20.1", "0.20.2", "0.21.0", "0.22.0") for entry in catalog["patches"]):
+    if any(entry["hostVersion"] in ("0.12.0", "0.15.1", "0.16.0", "0.17.0", "0.18.0", "0.19.0", "0.20.1", "0.20.2", "0.21.0", "0.22.0", "0.23.1") for entry in catalog["patches"]):
         from prepare_craft_fonts import prepare as prepare_fonts
-        fonts = prepare_fonts("0.17.0" if any(entry["hostVersion"] in ("0.17.0", "0.18.0", "0.19.0", "0.20.1", "0.20.2", "0.21.0", "0.22.0") for entry in catalog["patches"]) else "0.16.0")
+        fonts = prepare_fonts("0.17.0" if any(entry["hostVersion"] in ("0.17.0", "0.18.0", "0.19.0", "0.20.1", "0.20.2", "0.21.0", "0.22.0", "0.23.1") for entry in catalog["patches"]) else "0.16.0")
         for path in (fonts / "fonts").rglob("OFL.txt"):
             destination = licenses / "craft-fonts" / path.relative_to(fonts)
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -234,7 +240,7 @@ def build(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    base = ROOT / ".runtime/photocraft-0.22.0"
+    base = ROOT / ".runtime/photocraft-0.23.1"
     parser.add_argument("--upstream", type=Path, default=base)
     parser.add_argument("--patches", type=Path, required=True, help="Verified editor-patches.json and binary deltas")
     parser.add_argument("--core", type=Path)

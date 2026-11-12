@@ -1,9 +1,18 @@
 """Native AI fill queue and canvas feedback on top of the pinned Remove integration."""
 import shutil
 import json
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def prepare_remove_tests(text, retouch):
+    header = retouch.split('pub fn finish_stroke(', 1)[-1].split('-> bool', 1)[0]
+    if 'line: bool' in header:
+        text = re.sub(r'(crate::retouch_ui::finish_stroke\([\s\S]*?egui::Modifiers::NONE)(\)\))',
+                      r'\1, false\2', text)
+    return text
 
 
 def prepare_remove_dispatch(text):
@@ -47,12 +56,21 @@ def prepare(source, replace):
 | --- | --- | --- | --- | --- |
 | `crates/ui-egui/src/i18n/*.tsv` (Gen Studio entries) | Gen Studio labels and translations | Gen Studio contributors | Original work; source catalogs in the parent project's `photocraft/` | MIT OR Apache-2.0; existing `LICENSE-translations.txt` retained |
 ''',encoding="utf-8")
+    if (source / 'craft-i18n.rev').is_file():
+        text = attribution.read_text(encoding='utf-8')
+        text = text.replace('`crates/ui-egui/src/i18n/*.tsv` (Gen Studio entries)',
+                            '`.gengate-build/craft-i18n/locales/*/photocraft.tsv` (Gen Studio entries)')
+        text = text.replace('existing `LICENSE-translations.txt` retained',
+                            'original catalog licenses retained in `licenses/craft-i18n`')
+        attribution.write_text(text, encoding='utf-8')
     retouch = engine / "retouch_cmds.rs"
     text = retouch.read_text(encoding="utf-8")
     if "pub(crate) use remove::qwen::run_ai_with;" not in text:
         retouch.write_text(text+'\n#[cfg(test)]\npub(crate) use remove::qwen::run_ai_with;\n',encoding="utf-8")
     retouch_ui=ui/"retouch_ui.rs"
     text=retouch_ui.read_text(encoding="utf-8")
+    tests_path = ui / 'genstudio_fill_ui.rs'
+    tests_path.write_text(prepare_remove_tests(tests_path.read_text(encoding='utf-8'), text), encoding='utf-8')
     helper=text.rfind("\nfn queue_ai_fill(")
     tests=text.find("\n#[cfg(test)]\nmod tests {")
     if helper>tests>=0:

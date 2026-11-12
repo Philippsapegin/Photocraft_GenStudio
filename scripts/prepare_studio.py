@@ -6,6 +6,31 @@ import re
 ROOT=Path(__file__).resolve().parents[1]
 
 
+def preferences_dialog_hooks(text):
+    """Keep GenGate validation while retaining the editor's live preference merge."""
+    modern = 'fn committed_values(' in text
+    if modern:
+        old = '&& committed_values(app, fields) != Value::Object(preference_values(app.session.prefs()))'
+        new = '&& (committed_values(app, fields) != Value::Object(preference_values(app.session.prefs())) || fields.get("__genstudioView").is_some_and(|v| *v != crate::genstudio_ui::preferences_view(app)))'
+        confirm = '''            let values = committed_values(app, f);
+            app.run("prefs.set", json!({"path": "", "value": values}))'''
+        hooked = '''            let mut fields = f.clone();
+            fields.insert("values".into(), committed_values(app, f));
+            crate::genstudio_ui::confirm_preferences(app, &fields)'''
+    else:
+        old = 'is_preferences(fields) && fields.get("values").and_then(Value::as_object).is_some_and(|values| *values != preference_values(app.session.prefs()))'
+        new = 'is_preferences(fields) && (fields.get("values").and_then(Value::as_object).is_some_and(|values| *values != preference_values(app.session.prefs())) || fields.get("__genstudioView").is_some_and(|v| *v != crate::genstudio_ui::preferences_view(app)))'
+        confirm = '''            let values = f.get("values").cloned().unwrap_or(Value::Null);
+            app.run("prefs.set", json!({"path": "", "value": values}))'''
+        hooked = '            crate::genstudio_ui::confirm_preferences(app,f)'
+    for before, after in ((old, new), (confirm, hooked)):
+        if re.sub(r'\s+', '', after) not in re.sub(r'\s+', '', text):
+            if text.count(before) != 1:
+                raise ValueError('PhotoCraft preferences hook changed: ' + before.splitlines()[0])
+            text = text.replace(before, after, 1)
+    return text
+
+
 def studio_enabled(text, commands):
     """Rebuild only our generated true arms after a partial/ repeated prepare."""
     ids=['genstudio.studio.'+name for name in commands]+['genstudio.settings.open']+['genstudio.loras.'+name for name in ('open','configure','settings','metadata.save','append')]
@@ -141,12 +166,10 @@ def prepare(source,replace):
     text=text.replace('prefs_body(ui, f, system);','prefs_body(app, ui, f, system);')
     text=text.replace('fn prefs_body(ui: &mut egui::Ui,','fn prefs_body(app: &mut PhotocraftApp, ui: &mut egui::Ui,')
     if '__genstudioView' not in text:
-        text=text.replace('is_preferences(fields) && fields.get("values").and_then(Value::as_object).is_some_and(|values| *values != preference_values(app.session.prefs()))','is_preferences(fields) && (fields.get("values").and_then(Value::as_object).is_some_and(|values| *values != preference_values(app.session.prefs())) || fields.get("__genstudioView").is_some_and(|v| *v != crate::genstudio_ui::preferences_view(app)))')
         text=text.replace('    let mut values = f.get("values").cloned().unwrap_or(Value::Null);','    let mut studio_view=f.get("__genstudioView").cloned().unwrap_or_else(||crate::genstudio_ui::preferences_view(app));\n    let mut values = f.get("values").cloned().unwrap_or(Value::Null);',1)
         text=text.replace('                    section_fields(ui, &section, obj, &order, lang, system, filter);','                    if section == "genStudio" {crate::genstudio_ui::preferences(app,ui,obj,&mut studio_view);} else {section_fields(ui, &section, obj, &order, lang, system, filter);}')
         text=text.replace('    f.insert("values".into(), values);','    f.insert("__genstudioView".into(),studio_view);\n    f.insert("values".into(), values);',1)
-        text=text.replace('''            let values = f.get("values").cloned().unwrap_or(Value::Null);
-            app.run("prefs.set", json!({"path": "", "value": values}))''','''            crate::genstudio_ui::confirm_preferences(app,f)''',1)
+    text=preferences_dialog_hooks(text)
     path.write_text(text,encoding="utf-8")
     text=path.read_text(encoding="utf-8")
     if '// genstudio: reset view defaults.' not in text:

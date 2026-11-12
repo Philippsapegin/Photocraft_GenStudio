@@ -35,6 +35,12 @@ class SourcePath(os.PathLike):
 
     def targets(self):
         relative = self.relative.as_posix()
+        prefix = 'crates/ui-egui/src/i18n/'
+        if relative.startswith(prefix) and relative.endswith('.tsv'):
+            from prepare_craft_i18n import catalog
+            target = catalog(self.root, self.relative.stem)
+            if target is not None:
+                return [target]
         if relative in GROUPS:
             return [self.root / p for p in GROUPS[relative]]
         prefix = 'crates/engine/src/'
@@ -53,6 +59,14 @@ class SourcePath(os.PathLike):
 
     def __str__(self):
         return os.fspath(self)
+
+    def glob(self, pattern):
+        if self.relative.as_posix() == 'crates/ui-egui/src/i18n' and pattern == '*.tsv':
+            from prepare_craft_i18n import catalogs
+            paths = catalogs(self.root)
+            if paths:
+                return iter(SourcePath(self.root, self.relative / (p.parent.name + '.tsv')) for p in paths)
+        return self.targets()[0].glob(pattern)
 
     def __getattr__(self, name):
         # Logical names/parents preserve the existing anchor and stamp helpers.

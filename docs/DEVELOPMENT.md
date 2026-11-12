@@ -27,24 +27,26 @@ $env:CUDA_VISIBLE_DEVICES = ''
 
 ## Build the native editor
 
-Install Git, Rust **1.95+**, MSVC Build Tools with the Windows SDK, and PhotoCraft's native build prerequisites from its [pinned development guide](https://github.com/storytold/photocraft/blob/5000240c6e5dc30a024d20f97a620c78eca10d1e/docs/development.md). Then:
+Install Git, Rust **1.95+**, MSVC Build Tools with the Windows SDK, and PhotoCraft's native build prerequisites from its [pinned development guide](https://github.com/storytold/photocraft/blob/45066c48292e92229ada3459a83453439514c83d/docs/development.md). Then:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Build-PhotoCraft.ps1
 ```
 
-This builds pinned PhotoCraft v0.22.0 at `5000240c6e5dc30a024d20f97a620c78eca10d1e` in `.runtime/photocraft-0.22.0`, applies the templates and hooks, formats Rust and builds both executables with HEIF support. Pass `-HostVersion 0.21.0` for the preceding source base; `-TargetDir` can reuse an existing Cargo cache. The preparer rejects changed integration points rather than silently patching another upstream version. The build script completes two prepare/format passes on fresh sources; subsequent passes retain the same generated source. Upstream remains under MIT OR Apache-2.0. Read its `AGENTS.md` and contribution instructions before editing upstream code.
+This builds pinned PhotoCraft v0.23.1 at `45066c48292e92229ada3459a83453439514c83d` in `.runtime/photocraft-0.23.1`, applies the templates and hooks, formats Rust and builds both executables with HEIF support. Pass `-HostVersion 0.22.0` for the preceding source base; `-TargetDir` can reuse an existing Cargo cache. The preparer rejects changed integration points rather than silently patching another upstream version. The build script completes two prepare/format passes on fresh sources; subsequent passes retain the same generated source. Upstream remains under MIT OR Apache-2.0. Read its `AGENTS.md` and contribution instructions before editing upstream code.
 
-For 0.17.0, 0.18.0, 0.19.0, 0.20.1, 0.20.2, 0.21.0 and 0.22.0 the script also obtains the official release's `craft-fonts` revision `b076417b5880bd4154bd22f00695b1d28c6bea83`, verifies all 13 font hashes and sets `CRAFT_FONTS_DIR` with `CRAFT_FONTS_REQUIRED=1`. Font files stay in the ignored build cache; the add-on retains their OFL copyright/license notices.
+For 0.17.0, 0.18.0, 0.19.0, 0.20.1, 0.20.2, 0.21.0, 0.22.0 and 0.23.1 the script also obtains the official release's `craft-fonts` revision `b076417b5880bd4154bd22f00695b1d28c6bea83`, verifies all 13 font hashes and sets `CRAFT_FONTS_DIR` with `CRAFT_FONTS_REQUIRED=1`. Font files stay in the ignored build cache; the add-on retains their OFL copyright/license notices.
 
 The locally reconstructed patched binaries contain neutral compiled defaults. On startup they read `runtime/config.photocraft.json` next to the existing PhotoCraft executable; saved PhotoCraft preferences then take precedence. Setup points these settings at the separately installed GenGate runtime. No developer paths or personal settings belong in a release.
+
+PhotoCraft 0.23.1 embeds its interface catalogs from the separate `craft-i18n` repository. Preparation reads `craft-i18n.rev`, verifies a clean checkout of that exact revision and copies its catalogs into `.gengate-build/craft-i18n`. GenGate additions are written only into that private overlay. The generated Cargo environment requires these catalogs for builds, tests and checks; the source cache stays unchanged. The package retains the catalog licenses and source revision.
 
 Targeted native checks after changing the templates:
 
 ```powershell
 $env:GENSTUDIO_NO_PROCESS = '1'
-cargo test --manifest-path .runtime/photocraft-0.22.0/Cargo.toml -p photocraft-engine --lib genstudio::
-cargo clippy --manifest-path .runtime/photocraft-0.22.0/Cargo.toml -p photocraft-engine --all-targets -- -D warnings
+cargo test --manifest-path .runtime/photocraft-0.23.1/Cargo.toml -p photocraft-engine --lib genstudio::
+cargo clippy --manifest-path .runtime/photocraft-0.23.1/Cargo.toml -p photocraft-engine --all-targets -- -D warnings
 ```
 
 Follow upstream's broader checks when changing commands, document structures or UI. Native validation uses engine/UI tests and synthetic official-MCP checks. The older 0.12.0 suite had two unrelated localization assertion failures; current results and any limitations are recorded in [VALIDATION.md](VALIDATION.md).
@@ -77,8 +79,8 @@ another application during the check. Reports/screenshots stay in `.runtime`.
 ## Package the Windows ZIP
 
 ```powershell
-python scripts/build_editor_patch.py --original .runtime/official/0.22.0 --modified .runtime/photocraft-0.22.0/target/release --output .runtime/patches-0.10.1 --host-version 0.22.0 --upstream 5000240c6e5dc30a024d20f97a620c78eca10d1e
-python scripts/package_windows.py --patches .runtime/patches-0.10.1 --output-dir dist/0.10.1
+python scripts/build_editor_patch.py --original .runtime/official/0.23.1 --modified .runtime/photocraft-0.23.1/target/release --output .runtime/patches-0.10.2 --host-version 0.23.1 --upstream 45066c48292e92229ada3459a83453439514c83d
+python scripts/package_windows.py --patches .runtime/patches-0.10.2 --output-dir dist/0.10.2
 ```
 
 Obtain the official Windows portable archive recorded in `photocraft/editor-bases.json`, verify its archive hash and extract the original editor/CLI into `.runtime/official/<version>`. Select the actual Cargo output directory with `--modified`. Use a fresh patch output directory for each release to avoid bundling unrelated older patches. The patch builder checks both input file hashes against that record, builds deltas and verifies exact forward reconstruction; existing entries for other supported bases are retained. New upstream versions require porting and validating the native integration, recording new official hashes and building another catalog entry; relabeling an old patch is not compatibility.

@@ -1,5 +1,5 @@
 param([switch]$SkipClone, [switch]$SkipBuild, [string]$Python = '',
-      [ValidateSet('0.17.0','0.18.0','0.19.0','0.20.1','0.20.2','0.21.0','0.22.0')][string]$HostVersion = '0.22.0', [string]$TargetDir = '')
+      [ValidateSet('0.17.0','0.18.0','0.19.0','0.20.1','0.20.2','0.21.0','0.22.0','0.23.1')][string]$HostVersion = '0.23.1', [string]$TargetDir = '')
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
 $sourceName = if ($HostVersion -eq '0.8.2') { 'photocraft-source' } else { 'photocraft-' + $HostVersion }
@@ -19,6 +19,10 @@ $revision = git -C $source rev-parse HEAD
 if ($revision -ne $expected) { throw ('Expected PhotoCraft ' + $HostVersion + ' at the pinned commit.') }
 & $Python (Join-Path $PSScriptRoot 'prepare_photocraft.py') $source
 if ($LASTEXITCODE) { throw 'Could not apply Gen Studio integration.' }
+if(Test-Path -LiteralPath (Join-Path $source 'craft-i18n.rev')){
+    $env:CRAFT_I18N_DIR=Join-Path $source '.gengate-build\craft-i18n'
+    $env:CRAFT_I18N_REQUIRED='1'
+}
 if (-not $SkipBuild) {
     if ($HostVersion -ne '0.8.2') {
         $fontRootJson = & $Python -X utf8 (Join-Path $PSScriptRoot 'prepare_craft_fonts.py') --host-version $HostVersion --json

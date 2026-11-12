@@ -10,7 +10,7 @@ sys.path.insert(0, str(ROOT / 'scripts'))
 from prepare_updates import prepare_desktop_transport, prepare_update_notice
 from prepare_photocraft_012 import anchors, prepare_preferences_tests
 from prepare_photocraft import replace
-from prepare_studio import studio_enabled
+from prepare_studio import studio_enabled, preferences_dialog_hooks
 spec = importlib.util.spec_from_file_location("prepare_selection_fill", ROOT / "scripts/prepare_selection_fill.py")
 preparer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(preparer)
@@ -20,6 +20,15 @@ queue_spec.loader.exec_module(queue_preparer)
 
 
 class RemoveDispatchTests(unittest.TestCase):
+    def test_remove_stroke_fixture_adapts_only_the_new_line_flag(self):
+        fixture = 'assert!(crate::retouch_ui::finish_stroke(app, tool, points, egui::Modifiers::NONE));'
+        legacy = 'pub fn finish_stroke(app: App, tool: Tool, points: Points, mods: egui::Modifiers) -> bool {'
+        modern = legacy.replace('Modifiers)', 'Modifiers, line: bool)')
+        self.assertEqual(queue_preparer.prepare_remove_tests(fixture, legacy), fixture)
+        changed = queue_preparer.prepare_remove_tests(fixture, modern)
+        self.assertIn('egui::Modifiers::NONE, false));', changed)
+        self.assertEqual(queue_preparer.prepare_remove_tests(changed, modern), changed)
+
     def test_current_and_legacy_dispatch_queue_before_starting_a_native_job(self):
         for dispatch in ('    let result = app.run(cmd, p);\n    match result {',
                          '    match app.run(cmd, p) {'):
@@ -33,6 +42,29 @@ class RemoveDispatchTests(unittest.TestCase):
     def test_unknown_dispatch_is_refused(self):
         with self.assertRaises((RuntimeError, ValueError)):
             queue_preparer.prepare_remove_dispatch('pub fn finish_stroke(\n    new_dispatch(p);\n}')
+
+
+class PreferencesHookTests(unittest.TestCase):
+    def test_modern_confirm_keeps_live_merge_and_gengate_validation(self):
+        original = '''fn committed_values(app: App, f: Fields) {}
+        && committed_values(app, fields) != Value::Object(preference_values(app.session.prefs()))
+            let values = committed_values(app, f);
+            app.run("prefs.set", json!({"path": "", "value": values}))'''
+        changed = preferences_dialog_hooks(original)
+        self.assertIn('fields.insert("values".into(), committed_values(app, f));', changed)
+        self.assertIn('crate::genstudio_ui::confirm_preferences(app, &fields)', changed)
+        self.assertIn('fields.get("__genstudioView")', changed)
+        self.assertEqual(preferences_dialog_hooks(changed), changed)
+
+    def test_legacy_hook_is_idempotent_and_unknown_contract_is_refused(self):
+        original = '''is_preferences(fields) && fields.get("values").and_then(Value::as_object).is_some_and(|values| *values != preference_values(app.session.prefs()))
+            let values = f.get("values").cloned().unwrap_or(Value::Null);
+            app.run("prefs.set", json!({"path": "", "value": values}))'''
+        changed = preferences_dialog_hooks(original)
+        self.assertIn('crate::genstudio_ui::confirm_preferences(app,f)', changed)
+        self.assertEqual(preferences_dialog_hooks(changed), changed)
+        with self.assertRaisesRegex(ValueError, 'preferences hook changed'):
+            preferences_dialog_hooks('new_preferences_api()')
 
 
 class UpdateTransportTests(unittest.TestCase):
