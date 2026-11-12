@@ -164,6 +164,9 @@ def main():
             # Collapse using the header's left triangle, then restore the same expanded size.
             configure(palette={"size": [1000, 700]})
             until(lambda: abs(studio()["palette"]["size"][1] - 700) < 3)
+            # Native geometry can arrive before the recreated viewport has painted
+            # its new layout. Capture waits for settled frames before hit testing.
+            shot("palette-resized.png")
             header = studio()["window"]["headerRect"]
             inputs({"kind": "click", "x": header[0] + 17, "y": header[1] + header[3] / 2})
             until(lambda: studio()["window"]["collapsed"])

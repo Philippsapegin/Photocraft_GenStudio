@@ -156,7 +156,7 @@ fn reusable_inner(app:&PhotocraftApp)->Option<LayerId> {
 }
 pub fn show_bar(app:&mut PhotocraftApp,ui:&mut egui::Ui,xf:&ViewXform,index:usize) {
     app.ai_layers.bar_info=Value::Null;
-    if app.ui.gen_studio.open || app.ui.gen_studio.hide_ai_bar || app.ui.transform.is_some() || app.session.active_index()!=Some(index) {return;}
+    if app.ui.gen_studio.open || app.ui.gen_studio.hide_ai_bar || app.ui.transform.is_some() || app.drag.is_some() || app.session.active_index()!=Some(index) {return;}
     let existing=reusable(app);
     let Some(st)=app.session.active() else {return;};
     let doc=st.doc.id;
@@ -189,7 +189,9 @@ pub fn show_bar(app:&mut PhotocraftApp,ui:&mut egui::Ui,xf:&ViewXform,index:usiz
     let enabled=existing.is_some() || app.session.job_on(doc).is_none();
     let mut info=Value::Null;
     let mut generate=false;
-    egui::Area::new(egui::Id::new("genstudio-ai-prompt-bar")).order(egui::Order::Foreground).default_pos(pos2(x,y)).constrain_to(xf.rect).movable(true).show(ui.ctx(),|ui| {
+    // The default egui area estimate is much taller than this toolbar and can
+    // constrain its first position over the selection before its size is known.
+    egui::Area::new(egui::Id::new("genstudio-ai-prompt-bar")).order(egui::Order::Foreground).default_pos(pos2(x,y)).default_size(vec2(width,48.0)).constrain_to(xf.rect).movable(true).show(ui.ctx(),|ui| {
         let t=Tokens::get(ui.ctx());
         let frame=egui::Frame::new().fill(t.card).stroke(egui::Stroke::new(1.0,t.card_border)).corner_radius(t.radius_lg).inner_margin(8.0);
         let response=frame.show(ui,|ui| {ui.horizontal(|ui| {
