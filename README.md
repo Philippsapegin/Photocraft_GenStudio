@@ -1,4 +1,4 @@
-![GenGate](docs/images/gengate-title.jpg)
+![GenGate](docs/images/1gengate-title.jpg)
 
 # GenGate
 ### Photocraft ai-gen studio
@@ -27,7 +27,7 @@ A work-in-progress suite for [PhotoCraft](https://github.com/storytold/photocraf
 
 ## Tools
 
-![Native tools and GenGate Studio](docs/images/gengate-tools.jpg)
+![Native tools and GenGate Studio](docs/images/3gengate-tools.jpg)
 
 | Tool | Where / what it does |
 | --- | --- |
@@ -39,7 +39,7 @@ A work-in-progress suite for [PhotoCraft](https://github.com/storytold/photocraf
 
 ## WIP status
 
-**Beta II.** Work in progress:
+Work in progress:
 
 - UI/UX refinements.
 - Cloud provider integrations.
@@ -52,9 +52,9 @@ A work-in-progress suite for [PhotoCraft](https://github.com/storytold/photocraf
 
 **Windows x64 · NVIDIA CUDA GPU for local AI processing.**
 
-Download **[GenGate 0.10.1 Beta II](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/tag/v0.10.1)** · [Windows add-on ZIP](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/download/v0.10.1/GenGate-0.10.1-windows-x64-addon.zip) · [SHA-256](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/download/v0.10.1/SHA256SUMS.txt).
+Download **[GenGate 0.10.2](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/tag/v0.10.2)** · [Windows add-on ZIP](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/download/v0.10.2/GenGate-0.10.2-windows-x64-addon.zip) · [SHA-256](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/download/v0.10.2/SHA256SUMS.txt).
 
-1. Install PhotoCraft separately. Extract **GenGate-0.10.1-windows-x64-addon.zip** and run **Setup.cmd**. This add-on contains binary patches and its local host, **no complete PhotoCraft editor**.
+1. Install PhotoCraft separately. Extract **GenGate-0.10.2-windows-x64-addon.zip** and run **Setup.cmd**. This add-on contains binary patches and its local host, **no complete PhotoCraft editor**.
 2. Select your existing **PhotoCraft folder**, a separate GenGate installation folder and a **Models folder**. Reuse your `ComfyUI/models` directory or create a separate one. Models are used in place, without duplicate downloads.
 3. **Install Direct engine** is enabled by default. It prepares a separate CUDA runtime (several GB) or reuses your previously configured compatible Direct runtime. Optionally select your **ComfyUI folder** and **ComfyUI Python** to configure both engines. Disable Direct only for a ComfyUI-only installation; both ComfyUI fields are then required. Choose the active engine later in PhotoCraft preferences.
 4. Save and close PhotoCraft before installing. Open **PhotoCraft** from Start or the desktop and choose a **Preset** in **Preferences → GenGate Settings**. Setup consolidates the editor shortcuts and removes old GenStudio/GenGate launcher duplicates. Engine startup can be off, on application launch, or on the first AI request.
@@ -65,11 +65,11 @@ For a fresh ArtCraft Launcher installation, selecting **portable ZIP** instead o
 
 You can run **Uninstall.cmd** from the installed folder or the complete extracted ZIP. Removal can optionally delete recovery backups after verifying the restored original executables. Only removal of a legacy system-wide patch may request administrator credentials; installing or updating the new personal copy does not.
 
-[Release notes](docs/RELEASE_NOTES_0.10.1.md).
+[Release notes](docs/RELEASE_NOTES_0.10.2.md).
 
 ComfyUI Studio runs the graph currently open in the browser. Ai Fill and Remove Brush have separate workflow files in Advanced. Explicit component choices override only titled GenGate loaders in the submitted graph copy; Automatic retains the graph's values. Update the nodes, restart ComfyUI and refresh its tab. [Setup, migration and LoRA wiring](docs/COMFY_WORKFLOWS.md).
 
-**Compatibility (0.10.1 package):** official **PhotoCraft 0.22.0 Windows x64** binaries. For official PhotoCraft 0.21.0, use [GenGate 0.10.0](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/tag/v0.10.0); for 0.20.2, use [GenGate 0.9.8](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/tag/v0.9.8); for 0.20.1, use [GenGate 0.9.7](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/tag/v0.9.7); for 0.18.0, use [GenGate 0.9.6](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/tag/v0.9.6); for 0.17.0, use [GenGate 0.9.5](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/tag/v0.9.5); for 0.16.0, use [GenGate 0.9.4](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/tag/v0.9.4). Other builds need separate patch adaptation. Setup checks file hashes and refuses unknown builds. It never downgrades an updated editor.
+**Compatibility (0.10.2 package):** official **PhotoCraft 0.23.1 Windows x64** binaries. For official PhotoCraft 0.22.0, use [GenGate 0.10.1](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/tag/v0.10.1); for 0.21.0, use [GenGate 0.10.0](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/tag/v0.10.0); for 0.20.2, use [GenGate 0.9.8](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/tag/v0.9.8); for 0.20.1, use [GenGate 0.9.7](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/tag/v0.9.7); for 0.18.0, use [GenGate 0.9.6](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/tag/v0.9.6); for 0.17.0, use [GenGate 0.9.5](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/tag/v0.9.5); for 0.16.0, use [GenGate 0.9.4](https://github.com/Philippsapegin/Photocraft_GenStudio/releases/tag/v0.9.4). Other builds need separate patch adaptation. Setup checks file hashes and refuses unknown builds. It never downgrades an updated editor.
 
 To update GenGate, close PhotoCraft and run Setup into the same **GenGate** folder. The editor's existing profile is preserved. The PhotoCraft shortcut checks for replaced editor files and reapplies a compatible patch; an unknown PhotoCraft update opens normally with a compatibility notice and requires an updated GenGate patch.
 
@@ -81,7 +81,7 @@ Run **Uninstall.cmd** in the GenGate folder to restore the original editor. Newe
 
 ## Settings
 
-![GenGate preferences](docs/images/gengate-settings.jpg)
+![GenGate preferences](docs/images/2gengate-settings.jpg)
 
 Open **Edit → Preferences → GenGate Settings** to select the preset, active engine, model folder and startup policy. **Advanced** contains model components, workflow files and runtime paths. Constant LoRA and its optional Steps override apply to native editing tools; Studio retains its own generation recipe. AI selection has independent controls in the Segmentation section.
 

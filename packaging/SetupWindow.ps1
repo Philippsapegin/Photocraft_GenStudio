@@ -20,7 +20,7 @@ if (-not (Test-Path -LiteralPath $python) -and -not ($ValidateOnly -or $Preview)
 }
 $form = New-Object GenGateSetup.ChromeForm
 $form.Preview = [bool]$ValidateOnly
-$form.Text = 'GenGate 0.10.1 Beta II - Setup'
+$form.Text = 'GenGate 0.10.2 - Setup'
 $form.Font = New-Object System.Drawing.Font('Segoe UI',9.5)
 $form.ClientSize = New-Object System.Drawing.Size(820,920)
 $form.MinimumSize = New-Object System.Drawing.Size(760,920)
@@ -44,7 +44,7 @@ function Button([string]$text,[int]$x,[int]$y,[int]$width=94) {
 }
 $header=New-Object System.Windows.Forms.Panel; $header.Width=$form.ClientSize.Width; $header.Dock='Top'; $header.Height=58; $header.BackColor=[GenGateSetup.Palette]::Surface
 $title=Label 'GenGate' 24 10 180 24; $title.Font=New-Object System.Drawing.Font('Segoe UI',12,[System.Drawing.FontStyle]::Bold)
-$version=Label 'ADD-ON SETUP  /  0.10.1 BETA II' 24 35 250 18; $version.Font=New-Object System.Drawing.Font('Segoe UI',8); $version.ForeColor=[GenGateSetup.Palette]::Muted
+$version=Label 'ADD-ON SETUP  /  0.10.2' 24 35 250 18; $version.Font=New-Object System.Drawing.Font('Segoe UI',8); $version.ForeColor=[GenGateSetup.Palette]::Muted
 $minimize=New-Object GenGateSetup.CaptionButton; $minimize.SetBounds(712,10,46,38); $minimize.AccessibleName='Minimize'; $minimize.Anchor='Top,Right'; $minimize.Add_Click({$form.WindowState='Minimized'})
 $titleClose=New-Object GenGateSetup.CaptionButton; $titleClose.SetBounds(758,10,46,38); $titleClose.CloseButton=$true; $titleClose.AccessibleName='Close'; $titleClose.Anchor='Top,Right'
 $header.Controls.AddRange(@($title,$version,$minimize,$titleClose)); $header.Add_MouseDown({if($_.Button -eq 'Left'){$form.DragWindow()}}); $title.Add_MouseDown({if($_.Button -eq 'Left'){$form.DragWindow()}})
@@ -80,7 +80,7 @@ function Browse($field,[bool]$folder=$true) {
 }
 $intro=AddRow '' 51
 $lead=Label 'Local AI tools, inside PhotoCraft.' 0 0 720 25; $lead.Font=New-Object System.Drawing.Font('Segoe UI',12)
-$intro.Controls.Add($lead); $hint=Label 'PhotoCraft 0.22.0  |  Windows x64  |  No editor or model weights bundled' 0 29 730 22; $hint.ForeColor=[GenGateSetup.Palette]::Muted; $hint.Font=New-Object System.Drawing.Font('Segoe UI',8.5); $intro.Controls.Add($hint)
+$intro.Controls.Add($lead); $hint=Label 'PhotoCraft 0.23.1  |  Windows x64  |  No editor or model weights bundled' 0 29 730 22; $hint.ForeColor=[GenGateSetup.Palette]::Muted; $hint.Font=New-Object System.Drawing.Font('Segoe UI',8.5); $intro.Controls.Add($hint)
 $hostCandidates=@((Join-Path $env:LOCALAPPDATA 'Programs\ArtCraft\PhotoCraft-GenGate'),(Join-Path $env:LOCALAPPDATA 'Programs\ArtCraft\PhotoCraft'),(Join-Path $env:ProgramFiles 'ArtCraft\PhotoCraft'),(Join-Path $env:LOCALAPPDATA 'Programs\PhotoCraft'),(Join-Path $env:ProgramFiles 'PhotoCraft'))
 foreach($drive in (Get-PSDrive -PSProvider FileSystem)){$hostCandidates+=Join-Path $drive.Root 'Programs\PhotoCraft'}
 $hostDefault='';foreach($candidate in $hostCandidates){if((Test-Path -LiteralPath (Join-Path $candidate 'photocraft.exe')) -and (Test-Path -LiteralPath (Join-Path $candidate 'photocraft-cli.exe'))){$hostDefault=$candidate;break}}
@@ -242,7 +242,7 @@ function ShowCompatibility {
 function CheckCompatibility {
     if($ValidateOnly -and $env:GENGATE_SETUP_COMPAT_FIXTURE){$script:compatibility=$env:GENGATE_SETUP_COMPAT_FIXTURE | ConvertFrom-Json;ShowCompatibility;return [bool]$script:compatibility.compatible}
     if(-not $photocraftDir.Text.Trim() -or -not(Test-Path -LiteralPath (Join-Path $photocraftDir.Text 'photocraft.exe')) -or -not(Test-Path -LiteralPath (Join-Path $photocraftDir.Text 'photocraft-cli.exe'))){
-        $script:compatibility=[pscustomobject]@{state='getPhotoCraft';compatible=$false;running=$false;message='Install PhotoCraft 0.22.0, then select its folder here.';url='https://github.com/storytold/photocraft/releases/tag/v0.22.0'}
+        $script:compatibility=[pscustomobject]@{state='getPhotoCraft';compatible=$false;running=$false;message='Install PhotoCraft 0.23.1, then select its folder here.';url='https://github.com/storytold/photocraft/releases/tag/v0.23.1'}
         ShowCompatibility;return $false
     }
     $fingerprint=EditorFingerprint

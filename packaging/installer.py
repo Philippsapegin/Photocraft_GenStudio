@@ -11,7 +11,7 @@ import shutil
 import subprocess
 import sys
 
-VERSION = "0.10.1"
+VERSION = "0.10.2"
 REPOSITORY = "https://github.com/Philippsapegin/Photocraft_GenStudio"
 
 
